@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Compass, Sparkles, MapPin, Plane } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -16,7 +16,19 @@ const Index = () => {
   const [itinerary, setItinerary] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
 
-  const handleGenerate = async () => {
+  const convertImagesToBase64 = async (files: File[]): Promise<string[]> => {
+    const promises = files.map((file) => {
+      return new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    });
+    return Promise.all(promises);
+  };
+
+  const handleGenerate = useCallback(async () => {
     if (!description.trim() && images.length === 0) {
       toast({
         title: "Please add some details",
@@ -29,78 +41,87 @@ const Index = () => {
     setIsGenerating(true);
     setItinerary("");
 
-    // Simulate AI response for now (will be replaced with actual API call)
     try {
-      // Mock itinerary generation
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      const mockItinerary = `## Day 1: Arrival & First Impressions
+      // Convert images to base64
+      const imageData = images.length > 0 ? await convertImagesToBase64(images) : [];
 
-Morning
-- Arrive at your destination and check into your accommodation
-- Take a leisurely walk around the neighborhood to get oriented
-- Enjoy a welcome coffee at a local café
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-itinerary`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({
+          description,
+          images: imageData,
+          duration,
+          startDate: startDate?.toISOString(),
+          budget,
+        }),
+      });
 
-Afternoon
-- Visit the main cultural landmark or museum
-- Explore the historic city center
-- Stop for photos at the most scenic viewpoints
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to generate itinerary");
+      }
 
-Evening
-- Dinner at a highly-rated local restaurant
-- Evening stroll along the waterfront or main promenade
-- Tip: Book restaurants in advance for popular spots
+      if (!response.body) {
+        throw new Error("No response body");
+      }
 
-## Day 2: Deep Dive into Local Culture
+      // Stream the response
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let textBuffer = "";
+      let fullItinerary = "";
 
-Morning
-- Early breakfast at a traditional bakery
-- Guided walking tour of hidden gems
-- Visit the local market for fresh produce and souvenirs
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        textBuffer += decoder.decode(value, { stream: true });
 
-Afternoon
-- Lunch at a family-run establishment
-- Explore a nearby neighborhood known for art galleries
-- Coffee break with panoramic views
+        // Process line-by-line as data arrives
+        let newlineIndex: number;
+        while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
+          let line = textBuffer.slice(0, newlineIndex);
+          textBuffer = textBuffer.slice(newlineIndex + 1);
 
-Evening
-- Sunset viewing from the highest point in the city
-- Dinner featuring regional specialties
-- Optional: Live music or cultural performance
+          if (line.endsWith("\r")) line = line.slice(0, -1);
+          if (line.startsWith(":") || line.trim() === "") continue;
+          if (!line.startsWith("data: ")) continue;
 
-## Day 3: Day Trip Adventure
+          const jsonStr = line.slice(6).trim();
+          if (jsonStr === "[DONE]") break;
 
-Morning
-- Early departure for a scenic day trip
-- Stop at charming villages along the route
-- Hiking or nature walk at a nearby natural attraction
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const content = parsed.choices?.[0]?.delta?.content;
+            if (content) {
+              fullItinerary += content;
+              setItinerary(fullItinerary);
+            }
+          } catch {
+            // Incomplete JSON, continue
+          }
+        }
+      }
 
-Afternoon
-- Picnic lunch with local delicacies
-- Visit a historic site or monument
-- Photo opportunities at unique landscapes
-
-Evening
-- Return to the city as the sun sets
-- Relaxed dinner at your favorite spot discovered earlier
-- Pack and prepare for departure`;
-
-      setItinerary(mockItinerary);
-      
       toast({
         title: "Itinerary generated!",
         description: "Your personalized travel plan is ready",
       });
     } catch (error) {
+      console.error("Error generating itinerary:", error);
       toast({
         title: "Something went wrong",
-        description: "Please try again later",
+        description: error instanceof Error ? error.message : "Please try again later",
         variant: "destructive",
       });
     } finally {
       setIsGenerating(false);
     }
-  };
+  }, [description, images, duration, startDate, budget]);
 
   return (
     <div className="min-h-screen gradient-hero">
@@ -216,7 +237,7 @@ Evening
                 </div>
               </div>
               
-              <ItineraryDisplay itinerary={itinerary} isLoading={isGenerating} />
+              <ItineraryDisplay itinerary={itinerary} isLoading={isGenerating && !itinerary} />
             </div>
           )}
         </div>
