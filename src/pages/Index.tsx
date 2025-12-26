@@ -2,37 +2,55 @@ import { useState, useCallback } from "react";
 import { Compass, Sparkles, MapPin, Plane } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { ImageDropZone } from "@/components/ImageDropZone";
+import { MediaDropZone, MediaItem } from "@/components/MediaDropZone";
 import { TripOptionsForm } from "@/components/TripOptionsForm";
 import { ItineraryDisplay } from "@/components/ItineraryDisplay";
+import { ItineraryMap } from "@/components/ItineraryMap";
 import { toast } from "@/hooks/use-toast";
+import { differenceInDays } from "date-fns";
 
 const Index = () => {
-  const [images, setImages] = useState<File[]>([]);
+  const [media, setMedia] = useState<MediaItem[]>([]);
   const [description, setDescription] = useState("");
-  const [duration, setDuration] = useState(7);
+  const [durationRange, setDurationRange] = useState<[number, number]>([5, 10]);
   const [startDate, setStartDate] = useState<Date | undefined>();
+  const [endDate, setEndDate] = useState<Date | undefined>();
   const [budget, setBudget] = useState(50);
   const [itinerary, setItinerary] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
 
-  const convertImagesToBase64 = async (files: File[]): Promise<string[]> => {
-    const promises = files.map((file) => {
-      return new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-    });
-    return Promise.all(promises);
+  const convertMediaToBase64 = async (items: MediaItem[]): Promise<{ images: string[]; videos: string[]; links: string[] }> => {
+    const images: string[] = [];
+    const videos: string[] = [];
+    const links: string[] = [];
+
+    for (const item of items) {
+      if (item.type === 'link' && item.url) {
+        links.push(item.url);
+      } else if (item.file) {
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(item.file!);
+        });
+        
+        if (item.type === 'image') {
+          images.push(base64);
+        } else if (item.type === 'video') {
+          videos.push(base64);
+        }
+      }
+    }
+
+    return { images, videos, links };
   };
 
   const handleGenerate = useCallback(async () => {
-    if (!description.trim() && images.length === 0) {
+    if (!description.trim() && media.length === 0) {
       toast({
         title: "Please add some details",
-        description: "Drop some travel photos or describe your dream destination",
+        description: "Drop some travel photos/videos or describe your dream destination",
         variant: "destructive",
       });
       return;
@@ -42,8 +60,14 @@ const Index = () => {
     setItinerary("");
 
     try {
-      // Convert images to base64
-      const imageData = images.length > 0 ? await convertImagesToBase64(images) : [];
+      const { images, videos, links } = await convertMediaToBase64(media);
+
+      // Calculate duration based on dates if both are set
+      let tripDuration = durationRange;
+      if (startDate && endDate) {
+        const days = differenceInDays(endDate, startDate) + 1;
+        tripDuration = [days, days];
+      }
 
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-itinerary`, {
         method: "POST",
@@ -53,9 +77,12 @@ const Index = () => {
         },
         body: JSON.stringify({
           description,
-          images: imageData,
-          duration,
+          images,
+          videos,
+          links,
+          durationRange: tripDuration,
           startDate: startDate?.toISOString(),
+          endDate: endDate?.toISOString(),
           budget,
         }),
       });
@@ -81,7 +108,6 @@ const Index = () => {
         
         textBuffer += decoder.decode(value, { stream: true });
 
-        // Process line-by-line as data arrives
         let newlineIndex: number;
         while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
           let line = textBuffer.slice(0, newlineIndex);
@@ -121,7 +147,18 @@ const Index = () => {
     } finally {
       setIsGenerating(false);
     }
-  }, [description, images, duration, startDate, budget]);
+  }, [description, media, durationRange, startDate, endDate, budget]);
+
+  const getDurationDisplay = () => {
+    if (startDate && endDate) {
+      const days = differenceInDays(endDate, startDate) + 1;
+      return `${days} days`;
+    }
+    if (durationRange[0] === durationRange[1]) {
+      return `${durationRange[0]} days`;
+    }
+    return `${durationRange[0]}-${durationRange[1]} days`;
+  };
 
   return (
     <div className="min-h-screen gradient-hero">
@@ -144,7 +181,7 @@ const Index = () => {
           </h1>
           
           <p className="mt-6 text-lg md:text-xl text-muted-foreground text-center max-w-2xl mx-auto text-balance">
-            Drop your travel photos, share your destination dreams, and let our AI create the perfect itinerary tailored just for you.
+            Drop your travel photos, videos, or social links — and let our AI create the perfect itinerary tailored just for you.
           </p>
 
           <div className="flex items-center justify-center gap-6 mt-8 text-sm text-muted-foreground">
@@ -169,12 +206,12 @@ const Index = () => {
         <div className="max-w-4xl mx-auto">
           {/* Input Card */}
           <div className="bg-card rounded-2xl shadow-medium p-6 md:p-8 space-y-6 animate-slide-up">
-            {/* Image Drop Zone */}
+            {/* Media Drop Zone */}
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground flex items-center gap-2">
-                <span>📸</span> Drop your inspiration photos
+                <span>📸</span> Drop your inspiration (photos, videos, or links)
               </label>
-              <ImageDropZone images={images} onImagesChange={setImages} />
+              <MediaDropZone media={media} onMediaChange={setMedia} />
             </div>
 
             {/* Text Input */}
@@ -193,10 +230,12 @@ const Index = () => {
 
             {/* Optional Fields */}
             <TripOptionsForm
-              duration={duration}
-              onDurationChange={setDuration}
+              durationRange={durationRange}
+              onDurationRangeChange={setDurationRange}
               startDate={startDate}
+              endDate={endDate}
               onStartDateChange={setStartDate}
+              onEndDateChange={setEndDate}
               budget={budget}
               onBudgetChange={setBudget}
             />
@@ -224,20 +263,28 @@ const Index = () => {
 
           {/* Itinerary Display */}
           {(itinerary || isGenerating) && (
-            <div className="mt-8 bg-card rounded-2xl shadow-medium p-6 md:p-8 animate-slide-up" style={{ animationDelay: '0.1s' }}>
-              <div className="flex items-center gap-3 mb-6 pb-4 border-b border-border">
+            <div className="mt-8 bg-card rounded-2xl shadow-medium p-6 md:p-8 animate-slide-up space-y-6" style={{ animationDelay: '0.1s' }}>
+              <div className="flex items-center gap-3 pb-4 border-b border-border">
                 <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
                   <MapPin className="w-5 h-5 text-primary" />
                 </div>
                 <div>
                   <h2 className="font-display text-xl font-semibold text-foreground">Your Personalized Itinerary</h2>
                   <p className="text-sm text-muted-foreground">
-                    {duration} days • {startDate ? `Starting ${startDate.toLocaleDateString()}` : 'Flexible dates'}
+                    {getDurationDisplay()} • {startDate ? `Starting ${startDate.toLocaleDateString()}` : 'Flexible dates'}
                   </p>
                 </div>
               </div>
               
               <ItineraryDisplay itinerary={itinerary} isLoading={isGenerating && !itinerary} />
+
+              {/* Map */}
+              {itinerary && !isGenerating && (
+                <div className="pt-6 border-t border-border">
+                  <h3 className="font-display text-lg font-semibold text-foreground mb-4">📍 Your Journey Map</h3>
+                  <ItineraryMap itinerary={itinerary} />
+                </div>
+              )}
             </div>
           )}
         </div>
