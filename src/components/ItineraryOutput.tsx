@@ -248,7 +248,7 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
       }
 
       // Section headers (Morning, Afternoon, Evening, Meals, Logistics, etc.)
-      if (trimmedLine.match(/^\*?\*?(Morning|Afternoon|Evening|Night|Meals|Logistics|Why this day works)\*?\*?:?$/i)) {
+      if (trimmedLine.match(/^\*?\*?(Morning|Afternoon|Evening|Night|Meals|Logistics|Getting there|How to book)\*?\*?:?$/i)) {
         const timeIcons: Record<string, string> = {
           'morning': '🌅',
           'afternoon': '☀️',
@@ -256,7 +256,8 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
           'night': '🌙',
           'meals': '🍽️',
           'logistics': '🚃',
-          'why this day works': '💡',
+          'getting there': '🚃',
+          'how to book': '📱',
         };
         const cleanedLine = trimmedLine.replace(/\*\*/g, '').replace(/:$/, '').toLowerCase();
         const timeKey = Object.keys(timeIcons).find(k => cleanedLine.includes(k)) || '';
