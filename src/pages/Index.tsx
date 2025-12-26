@@ -205,7 +205,7 @@ const Index = () => {
                     <MapPin className="w-5 h-5 text-primary" />
                     Your Journey Map
                   </h3>
-                  <ItineraryMap itinerary={itinerary} departureCity={preferences.departureCity} />
+                  <ItineraryMap itinerary={itinerary} />
                 </div>
               )}
 

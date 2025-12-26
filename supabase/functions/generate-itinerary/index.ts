@@ -93,37 +93,6 @@ Adventure level: ${adventureLevel || 'No preference'}
 Food & drink: ${foodDrink?.length > 0 ? foodDrink.join(', ') : 'No preference'}
 Interests (ranked): ${interests?.length > 0 ? interests.join(' > ') : 'No preference'}`;
 
-    // Detect if this is a Japan trip with hiking interests
-    const isJapanTrip = cities?.some((c: string) => 
-      c.toLowerCase().includes('japan') || 
-      c.toLowerCase().includes('tokyo') || 
-      c.toLowerCase().includes('kyoto') ||
-      c.toLowerCase().includes('osaka') ||
-      c.toLowerCase().includes('fuji')
-    );
-    const wantsHiking = 
-      interests?.includes('nature') ||
-      interests?.includes('activities') ||
-      atmosphere?.includes('nature') ||
-      adventureLevel === 'active' ||
-      additionalNotes?.toLowerCase().includes('hik') ||
-      additionalNotes?.toLowerCase().includes('outdoor') ||
-      cities?.some((c: string) => c.toLowerCase().includes('fuji'));
-
-    // Build destination-specific must-do section
-    let destinationMustDos = "";
-    if (isJapanTrip && wantsHiking) {
-      destinationMustDos = `
-### JAPAN HIKING MUST-DO (Include by default):
-The **Mt. Fuji overnight sunrise summit hike** via Yoshida Trail is THE definitive Japan hiking experience. 
-- Climbing season: July 1 - early September only
-- If dates fall within this window, YOU MUST INCLUDE THIS as a 2-day experience:
-  - Day 1: Start afternoon climb, stay overnight at 8th station mountain hut (book ahead!)
-  - Day 2: Pre-dawn summit push for sunrise (goraiko), descend by noon
-- If dates are outside climbing season, mention this in trade-offs and suggest alternative (Fuji Five Lakes hike, Hakone trails)
-- If the traveler mentioned Mt. Fuji or hikes in their notes, this is NON-NEGOTIABLE - build the itinerary around it
-`;
-    }
 
     const systemPrompt = `You are an OPINIONATED expert travel planner with STRONG views about what's actually worth doing. You don't hedge or give wishy-washy recommendations. You tell travelers what they SHOULD do, not just list options. If something is a must-do, you say it clearly. If something is overrated tourist trap, you skip it.
 
@@ -141,7 +110,16 @@ ${additionalNotes ? `
 
 You MUST incorporate these requests into the core itinerary, not just mention them as options. If they want hikes, include THE BEST hikes as main activities. If they mention specific experiences, SCHEDULE THEM.
 ` : ''}
-${destinationMustDos}
+
+## RESEARCH & SPECIFICITY:
+When recommending ANY activity, tour, or experience:
+- **Name specific providers** with URLs when possible (e.g., "Book with Fuji Mountain Guides at fujimountainguides.com")
+- **Provide cost estimates** (e.g., "~$400-500 per person for 2-day guided climb")
+- **State booking lead times** (e.g., "Book 1-2 months in advance - they sell out!")
+- **Explain WHY a guide/tour is recommended** when applicable (safety, logistics, local knowledge)
+- **Give practical logistics**: timing, difficulty level, what to bring, seasonal considerations
+- Be SPECIFIC, not generic - "Book the 7am Arashiyama Bamboo Grove walking tour with InsideJapan Tours" not "consider a walking tour"
+- For outdoor/adventure activities, ALWAYS mention whether guided experiences are recommended and why
 
 ## FORMAT YOUR RESPONSE:
 
