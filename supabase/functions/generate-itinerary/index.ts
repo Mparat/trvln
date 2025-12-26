@@ -35,6 +35,7 @@ serve(async (req) => {
       flightDirectness,
       atmosphere,
       adventureLevel,
+      guidedPreference,
       foodDrink,
       interests,
       additionalNotes,
@@ -118,9 +119,17 @@ serve(async (req) => {
     }
 
     // Build vibe context
+    const guidedLabels: Record<string, string> = {
+      'prefer-guided': 'Prefer guided tours and organized activities',
+      'some-guided': 'Mix of guided activities and self-exploration',
+      'self-serve': 'Self-serve only - no guided tours, DIY everything'
+    };
+    const guidedLabel = guidedLabels[guidedPreference as string] || 'No preference';
+    
     const vibeContext = `
 Atmosphere preferences: ${atmosphere?.length > 0 ? atmosphere.join(", ") : "No preference"}
 Adventure level: ${adventureLevel || "No preference"}
+Guided vs self-serve: ${guidedLabel}
 Food & drink: ${foodDrink?.length > 0 ? foodDrink.join(", ") : "No preference"}
 Interests (ranked): ${interests?.length > 0 ? interests.join(" > ") : "No preference"}`;
 

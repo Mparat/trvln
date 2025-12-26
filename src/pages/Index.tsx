@@ -21,6 +21,7 @@ const defaultPreferences: TripPreferences = {
   flightDirectness: 'short-layover',
   atmosphere: [],
   adventureLevel: 'active',
+  guidedPreference: 'some-guided',
   foodDrink: [],
   interests: [],
   additionalNotes: '',

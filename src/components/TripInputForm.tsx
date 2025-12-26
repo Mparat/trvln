@@ -43,6 +43,7 @@ export interface TripPreferences {
   // Vibe
   atmosphere: string[];
   adventureLevel: string;
+  guidedPreference: 'prefer-guided' | 'some-guided' | 'self-serve';
   foodDrink: string[];
   interests: string[];
   
@@ -69,6 +70,12 @@ const adventureOptions = [
   { id: 'family', label: 'Family-friendly' },
   { id: 'active', label: 'Active' },
   { id: 'adrenaline', label: 'Adrenaline junky' },
+];
+
+const guidedOptions = [
+  { id: 'prefer-guided', label: 'Prefer guided trips' },
+  { id: 'some-guided', label: 'Some guided activities' },
+  { id: 'self-serve', label: 'Just self-serve' },
 ];
 
 const foodDrinkOptions = [
@@ -552,6 +559,31 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
                     <RadioGroupItem value={opt.id} id={`adv-${opt.id}`} className="peer sr-only" />
                     <Label
                       htmlFor={`adv-${opt.id}`}
+                      className="flex items-center px-4 py-2 text-sm border rounded-lg cursor-pointer peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/5 hover:bg-muted/50 transition-colors"
+                    >
+                      {opt.label}
+                    </Label>
+                  </div>
+                ))}
+              </RadioGroup>
+            </div>
+
+            {/* Guided vs Self-serve */}
+            <div className="space-y-3">
+              <label className="text-sm font-medium text-foreground flex items-center gap-2">
+                <Users className="w-4 h-4 text-primary" />
+                Guided vs. self-serve activities
+              </label>
+              <RadioGroup
+                value={preferences.guidedPreference}
+                onValueChange={(value) => updatePreferences({ guidedPreference: value as TripPreferences['guidedPreference'] })}
+                className="flex flex-wrap gap-2"
+              >
+                {guidedOptions.map(opt => (
+                  <div key={opt.id}>
+                    <RadioGroupItem value={opt.id} id={`guided-${opt.id}`} className="peer sr-only" />
+                    <Label
+                      htmlFor={`guided-${opt.id}`}
                       className="flex items-center px-4 py-2 text-sm border rounded-lg cursor-pointer peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/5 hover:bg-muted/50 transition-colors"
                     >
                       {opt.label}
