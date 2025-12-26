@@ -21,7 +21,7 @@ serve(async (req) => {
     }
 
     const { 
-      media, links, cities, 
+      media, cities, 
       budgetAccommodation, budgetFlight, 
       dateFlexibility, startDate, endDate, targetMonth,
       durationFlexibility, durationDays,
@@ -136,9 +136,6 @@ Link to sources where you got recommendations when possible.`;
     let inspirationContext = "";
     if (cities?.length > 0) {
       inspirationContext += `\nDesired destinations: ${cities.join(', ')}`;
-    }
-    if (links?.length > 0) {
-      inspirationContext += `\nInspiration links to analyze: ${links.join(', ')}`;
     }
     if (media?.length > 0) {
       inspirationContext += `\nThe traveler has shared ${media.length} image(s)/video(s) - analyze these to identify destinations and experiences they want.`;

@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { 
   Sparkles, Camera, MapPin, Calendar, Clock, Wallet, Plane, 
-  Mountain, Building, Trees, Tent, Heart, Users, Zap, 
+  Building, Trees, Tent, Heart, Users, Zap, 
   Utensils, Wine, PartyPopper, GraduationCap, Globe,
-  ChevronDown, ChevronUp, Link2, Plus
+  ChevronDown, ChevronUp, Plus
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -23,7 +23,6 @@ import { format } from "date-fns";
 export interface TripPreferences {
   // Inspiration
   media: MediaItem[];
-  links: string[];
   cities: string[];
   
   // Logistics
@@ -107,7 +106,6 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
     vibe: false,
     notes: false,
   });
-  const [newLink, setNewLink] = useState("");
   const [newCity, setNewCity] = useState("");
 
   const toggleSection = (section: string) => {
@@ -116,17 +114,6 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
 
   const updatePreferences = (updates: Partial<TripPreferences>) => {
     onPreferencesChange({ ...preferences, ...updates });
-  };
-
-  const addLink = () => {
-    if (newLink.trim()) {
-      updatePreferences({ links: [...preferences.links, newLink.trim()] });
-      setNewLink("");
-    }
-  };
-
-  const removeLink = (index: number) => {
-    updatePreferences({ links: preferences.links.filter((_, i) => i !== index) });
   };
 
   const addCity = () => {
@@ -207,34 +194,7 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
                 media={preferences.media} 
                 onMediaChange={(media) => updatePreferences({ media })} 
               />
-              <p className="text-xs text-muted-foreground">TikTok screen recordings, saved Instagram posts, travel photos</p>
-            </div>
-
-            {/* Links */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground flex items-center gap-2">
-                <Link2 className="w-4 h-4" /> TikTok / Reel links
-              </label>
-              <div className="flex gap-2">
-                <Input 
-                  value={newLink}
-                  onChange={(e) => setNewLink(e.target.value)}
-                  placeholder="Paste a link..."
-                  onKeyDown={(e) => e.key === 'Enter' && addLink()}
-                />
-                <Button type="button" variant="outline" size="icon" onClick={addLink}>
-                  <Plus className="w-4 h-4" />
-                </Button>
-              </div>
-              {preferences.links.length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {preferences.links.map((link, i) => (
-                    <Badge key={i} variant="secondary" className="cursor-pointer" onClick={() => removeLink(i)}>
-                      {new URL(link).hostname} ✕
-                    </Badge>
-                  ))}
-                </div>
-              )}
+              <p className="text-xs text-muted-foreground">Screen recordings, saved Instagram posts, travel photos</p>
             </div>
 
             {/* Cities */}
