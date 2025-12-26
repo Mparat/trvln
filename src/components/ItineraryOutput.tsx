@@ -247,22 +247,36 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
         );
       }
 
-      // Section headers (Morning, Afternoon, Evening)
-      if (trimmedLine.match(/^(Morning|Afternoon|Evening|Night)/i)) {
+      // Section headers (Morning, Afternoon, Evening, Meals, Logistics, etc.)
+      if (trimmedLine.match(/^\*?\*?(Morning|Afternoon|Evening|Night|Meals|Logistics|Why this day works)\*?\*?:?$/i)) {
         const timeIcons: Record<string, string> = {
           'morning': '🌅',
           'afternoon': '☀️',
           'evening': '🌆',
           'night': '🌙',
+          'meals': '🍽️',
+          'logistics': '🚃',
+          'why this day works': '💡',
         };
-        const timeKey = trimmedLine.toLowerCase().split(' ')[0];
+        const cleanedLine = trimmedLine.replace(/\*\*/g, '').replace(/:$/, '').toLowerCase();
+        const timeKey = Object.keys(timeIcons).find(k => cleanedLine.includes(k)) || '';
         
         return (
-          <div key={index} className="flex items-center gap-3 ml-4 mt-6 mb-3">
-            <span className="text-xl">{timeIcons[timeKey] || '⏰'}</span>
-            <h4 className="text-base font-semibold text-foreground">{trimmedLine}</h4>
+          <div key={index} className="flex items-center gap-3 ml-4 mt-5 mb-2">
+            <span className="text-lg">{timeIcons[timeKey] || '📍'}</span>
+            <h4 className="text-sm font-semibold text-foreground uppercase tracking-wide">{trimmedLine.replace(/\*\*/g, '')}</h4>
             <div className="flex-1 h-px bg-border" />
           </div>
+        );
+      }
+
+      // Bold section headers like **Theme:** or **Book First**
+      if (trimmedLine.match(/^\*\*[^*]+\*\*:?$/)) {
+        const headerText = trimmedLine.replace(/\*\*/g, '').replace(/:$/, '');
+        return (
+          <h4 key={index} className="text-base font-semibold text-foreground mt-4 mb-2 ml-4">
+            {headerText}
+          </h4>
         );
       }
 
