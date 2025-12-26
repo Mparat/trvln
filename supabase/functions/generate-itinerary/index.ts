@@ -113,12 +113,17 @@ You MUST incorporate these requests into the core itinerary, not just mention th
 ` : ''}
 
 ## RESEARCH & SPECIFICITY:
-When recommending ANY activity, tour, or experience:
-- Name specific providers with URLs when possible (e.g., "Book with Fuji Mountain Guides at fujimountainguides.com")
-- Provide cost estimates (e.g., "~$400-500 per person for 2-day guided climb")
-- State booking lead times (e.g., "Book 1-2 months in advance - they sell out!")
-- Explain WHY a guide/tour is recommended when applicable (safety, logistics, local knowledge)
-- Give practical logistics: timing, difficulty level, what to bring, seasonal considerations
+For EVERY activity, include:
+- **What it is**: Brief description so traveler understands why it's special
+- **Key details**: Timing, duration, difficulty, what to expect
+- **Why this one**: Link to a blog post, travel article, or explain why this is the best option (e.g., "Ranked #1 on Japan-Guide.com" or "Recommended by Lonely Planet")
+- **Practical info**: Cost estimates, booking URLs, lead times needed
+
+For TRAVEL & TRANSPORT:
+- **How to book**: Specific instructions (e.g., "Use HyperDia.com or Google Maps for train times")
+- **Nuanced details**: IC card vs paper tickets, reserved vs unreserved, which platform, transfer tips
+- **Cost**: Approximate fares, whether JR Pass covers it
+- **Timing**: How long the journey takes, best departure times
 
 ## OUTPUT STRUCTURE:
 
@@ -133,8 +138,9 @@ When recommending ANY activity, tour, or experience:
 ### Book First
 Create an urgent, actionable booking priorities section:
 - **Flights**: Best airlines, routes, target price around ${flightBudget}, when to book
-- **Lodging that books out**: Mountain huts, popular ryokans, etc.
+- **Lodging that books out**: Mountain huts, popular ryokans, etc. Include booking URLs
 - **Limited-availability activities**: Specific providers, URLs, costs, booking windows
+- **Transport passes**: JR Pass, regional passes - where to buy, activation tips
 
 ${departureCity ? `Departing from: ${departureCity}
 ${flightDirectness === 'nonstop' ? 'Prioritize nonstop flights' : flightDirectness === 'short-layover' ? 'Short layovers OK' : 'All options including long layovers'}` : ''}
@@ -148,28 +154,27 @@ For each day, use this format:
 **Day X: [Location] — [Theme]**
 
 **Morning**
-- Activity with timing and details
-- Breakfast recommendation: **Restaurant Name** - what to order
+- **[Activity Name]**: What it is and why it's worth doing. Include timing (e.g., "8am-10am"). If applicable, cite source (blog, guide, article). Any booking/reservation needed.
+- Breakfast: **[Restaurant]** - what to order, price range
 
 **Afternoon**
-- Activity with timing and details  
-- Lunch recommendation: **Restaurant Name** - signature dish
+- **[Activity Name]**: Description, why this one specifically, practical details. Cost if applicable.
+- Lunch: **[Restaurant]** - signature dish, neighborhood
 
 **Evening**
-- Activity or relaxation
-- Dinner recommendation: **Restaurant Name** - reserve if popular
+- **[Activity/Rest]**: Details and recommendations
+- Dinner: **[Restaurant]** - reserve ahead if popular, what to order
 
 **Logistics**
-- Transport details and timing
-- Reservations needed
-
-**Why this day works:** Brief explanation of the flow and pacing.
+- **Getting there**: Exact transport method (e.g., "Take JR Yamanote Line from Shibuya to Shinjuku, 5 min, ¥170")
+- **How to book/check**: Specific tools (e.g., "Check times on HyperDia.com or Google Maps")
+- **Tips**: Platform numbers, which exit, IC card usage, luggage forwarding if relevant
 
 ---
 
 ### High-Risk Days
 - **Physically demanding**: Which days are tough and backup plans
-- **Weather-sensitive**: What breaks if weather is bad
+- **Weather-sensitive**: What breaks if weather is bad, alternatives
 
 ### Near Misses
 3 items max that almost made the cut:
