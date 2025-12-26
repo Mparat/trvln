@@ -100,51 +100,62 @@ export function ItineraryMap({ itinerary }: ItineraryMapProps) {
   const [locations, setLocations] = useState<Location[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Extract city names from itinerary (not attractions)
+  // Extract city names from itinerary
   const extractedCities = useMemo(() => {
     const cities: { name: string; order: number }[] = [];
+    const seenCities = new Set<string>();
     const lines = itinerary.split('\n');
     let order = 1;
 
-    // Look for city patterns in the itinerary
-    const cityPatterns = [
-      // "Day 1: Tokyo" or "Day 1 - Arriving in Tokyo"
-      /Day\s+\d+[:\-–]\s*(?:Arriving in |Arrival in |Explore |Exploring |)([A-Z][a-zA-Z\s]+?)(?:\s*[-–]|$|\.|,)/gi,
-      // "Fly to Tokyo" or "Train to Kyoto"
-      /(?:Fly|Train|Travel|Head|Go|Depart|Arrive)\s+(?:to|in)\s+([A-Z][a-zA-Z\s]+?)(?:\s*[-–]|$|\.|,)/gi,
-      // City in bold **Tokyo**
-      /\*\*([A-Z][a-zA-Z\s]+)\*\*/g,
-    ];
-
-    for (const line of lines) {
-      for (const pattern of cityPatterns) {
-        pattern.lastIndex = 0;
-        const match = pattern.exec(line);
-        if (match && match[1]) {
-          const cityName = match[1].trim().toLowerCase();
-          // Check if it's a known city
-          if (cityCoordinates[cityName] && !cities.find(c => c.name.toLowerCase() === cityName)) {
-            cities.push({ name: match[1].trim(), order: order++ });
+    // Priority 1: Look for route patterns like "Tokyo (3) → Kyoto (4)"
+    const routeMatch = itinerary.match(/([A-Z][a-zA-Z\s]+)\s*\(\d+\)\s*→/g);
+    if (routeMatch) {
+      for (const match of routeMatch) {
+        const cityMatch = match.match(/([A-Z][a-zA-Z\s]+)\s*\(\d+\)/);
+        if (cityMatch) {
+          const cityName = cityMatch[1].trim().toLowerCase();
+          if (cityCoordinates[cityName] && !seenCities.has(cityName)) {
+            seenCities.add(cityName);
+            cities.push({ name: cityMatch[1].trim(), order: order++ });
           }
+        }
+      }
+      // Also get the last city in the route
+      const lastCityMatch = itinerary.match(/→\s*\*?\*?([A-Z][a-zA-Z\s]+)\*?\*?\s*\(\d+\)(?!\s*→)/);
+      if (lastCityMatch) {
+        const cityName = lastCityMatch[1].trim().toLowerCase();
+        if (cityCoordinates[cityName] && !seenCities.has(cityName)) {
+          seenCities.add(cityName);
+          cities.push({ name: lastCityMatch[1].trim(), order: order++ });
         }
       }
     }
 
-    // Also look for simple city mentions
+    // Priority 2: Look for Day headers with cities
+    for (const line of lines) {
+      // "Day 1: Tokyo" or "Day 1 — Tokyo"
+      const dayMatch = line.match(/Day\s+\d+[:\—–-]\s*\*?\*?([A-Z][a-zA-Z\s]+)\*?\*?/i);
+      if (dayMatch) {
+        const cityName = dayMatch[1].trim().toLowerCase().replace(/\s*—.*$/, '').replace(/\s*-.*$/, '');
+        if (cityCoordinates[cityName] && !seenCities.has(cityName)) {
+          seenCities.add(cityName);
+          cities.push({ name: cityName.charAt(0).toUpperCase() + cityName.slice(1), order: order++ });
+        }
+      }
+    }
+
+    // Priority 3: Look for city mentions in Trip Summary route format
     const knownCityNames = Object.keys(cityCoordinates);
-    for (const line of lines) {
-      const lowerLine = line.toLowerCase();
-      for (const city of knownCityNames) {
-        if (lowerLine.includes(city) && !cities.find(c => c.name.toLowerCase() === city)) {
-          // Only add if the line looks like a day header or major section
-          if (/day\s+\d+|arrive|depart|flight|train|travel to/i.test(line)) {
-            cities.push({ name: city.charAt(0).toUpperCase() + city.slice(1), order: order++ });
-          }
-        }
+    for (const city of knownCityNames) {
+      // Look for patterns like "**Tokyo** (3)" or "Tokyo (3 nights)"
+      const regex = new RegExp(`\\*?\\*?${city}\\*?\\*?\\s*\\(\\d+`, 'i');
+      if (regex.test(itinerary) && !seenCities.has(city)) {
+        seenCities.add(city);
+        cities.push({ name: city.charAt(0).toUpperCase() + city.slice(1), order: order++ });
       }
     }
 
-    return cities.slice(0, 10); // Limit to 10 cities
+    return cities.slice(0, 10);
   }, [itinerary]);
 
   // Geocode cities
