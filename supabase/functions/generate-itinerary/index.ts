@@ -49,15 +49,32 @@ serve(async (req) => {
     const flightBudget = getFlightBudget(budgetFlight);
 
     // Build duration context
+    const computeInclusiveDays = (startISO?: string, endISO?: string) => {
+      if (!startISO || !endISO) return null;
+      const start = new Date(startISO);
+      const end = new Date(endISO);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+      const diffMs = end.getTime() - start.getTime();
+      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      return diffDays + 1; // inclusive
+    };
+
     let durationContext = "";
-    switch (durationFlexibility) {
-      case 'weekend': durationContext = "2-3 day weekend trip"; break;
-      case 'long-weekend': durationContext = "4-5 day long weekend"; break;
-      case '1-week': durationContext = "7 day trip"; break;
-      case '2-weeks': durationContext = "14 day trip"; break;
-      case 'strict': durationContext = `exactly ${durationDays} days`; break;
-      case 'flexible-days': durationContext = `approximately ${durationDays} days (±2 days flexible)`; break;
-      default: durationContext = "flexible duration - suggest optimal length";
+
+    // If user chose exact dates, always respect the date range as the duration
+    if (dateFlexibility === 'strict') {
+      const daysFromDates = computeInclusiveDays(startDate, endDate);
+      durationContext = daysFromDates ? `exactly ${daysFromDates} days` : "dates provided but duration unclear";
+    } else {
+      switch (durationFlexibility) {
+        case 'weekend': durationContext = "2-3 day weekend trip"; break;
+        case 'long-weekend': durationContext = "4-5 day long weekend"; break;
+        case '1-week': durationContext = "7 day trip"; break;
+        case '2-weeks': durationContext = "14 day trip"; break;
+        case 'strict': durationContext = `exactly ${durationDays} days`; break;
+        case 'flexible-days': durationContext = `approximately ${durationDays} days (±2 days flexible)`; break;
+        default: durationContext = "flexible duration - suggest optimal length";
+      }
     }
 
     // Build date context

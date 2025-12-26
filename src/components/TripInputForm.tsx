@@ -351,9 +351,24 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
                         mode="range"
                         selected={{ from: preferences.startDate, to: preferences.endDate } as DateRange}
                         onSelect={(range) => {
-                          updatePreferences({ 
-                            startDate: range?.from, 
-                            endDate: range?.to 
+                          const from = range?.from;
+                          const to = range?.to;
+
+                          // When exact dates are selected, lock duration to the date range
+                          if (from && to) {
+                            const days = differenceInDays(to, from) + 1;
+                            updatePreferences({
+                              startDate: from,
+                              endDate: to,
+                              durationFlexibility: 'strict',
+                              durationDays: days,
+                            });
+                            return;
+                          }
+
+                          updatePreferences({
+                            startDate: from,
+                            endDate: to,
                           });
                         }}
                         disabled={(date) => date < new Date()}
