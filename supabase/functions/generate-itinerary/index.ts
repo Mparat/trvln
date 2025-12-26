@@ -12,13 +12,16 @@ serve(async (req) => {
   }
 
   try {
-    const { description, images, duration, startDate, budget } = await req.json();
+    const { description, images, videos, links, durationRange, startDate, endDate, budget } = await req.json();
     
     console.log('Received request:', { 
       description, 
-      imageCount: images?.length || 0, 
-      duration, 
-      startDate, 
+      imageCount: images?.length || 0,
+      videoCount: videos?.length || 0,
+      linkCount: links?.length || 0,
+      durationRange, 
+      startDate,
+      endDate,
       budget 
     });
 
@@ -27,12 +30,17 @@ serve(async (req) => {
       throw new Error('LOVABLE_API_KEY is not configured');
     }
 
-    const getBudgetLabel = (value: number) => {
-      if (value <= 25) return "Budget-friendly";
-      if (value <= 50) return "Moderate";
-      if (value <= 75) return "Comfortable";
-      return "Luxury";
+    const getBudgetInfo = (value: number) => {
+      if (value <= 25) return { label: "Budget-friendly", range: "$0-$50/night" };
+      if (value <= 50) return { label: "Moderate", range: "$50-$100/night" };
+      if (value <= 75) return { label: "Comfortable", range: "$100-$200/night" };
+      return { label: "Luxury", range: "$200-$500+/night" };
     };
+
+    const budgetInfo = getBudgetInfo(budget);
+    const durationStr = durationRange[0] === durationRange[1] 
+      ? `${durationRange[0]}-day` 
+      : `${durationRange[0]} to ${durationRange[1]}-day`;
 
     const systemPrompt = `You are an expert travel planner with deep knowledge of destinations worldwide. Create detailed, personalized travel itineraries that are practical and inspiring.
 
@@ -42,22 +50,41 @@ Your itineraries should:
 - Consider travel time between locations
 - Include local tips and hidden gems
 - Be realistic about what can be accomplished each day
-- Reflect the traveler's budget level and preferences
+- Reflect the traveler's budget level (${budgetInfo.label}, ${budgetInfo.range} accommodation) and preferences
+- Include REAL place names that can be located on a map
 
 Format your response with:
 - Day headers (e.g., "## Day 1: Arrival & First Impressions")
 - Time sections (Morning, Afternoon, Evening)
 - Bullet points for specific activities and recommendations
-- Include practical tips where relevant`;
+- Include practical tips where relevant
+- Bold important place names like **Temple Name** or **Restaurant Name**`;
 
-    const userPrompt = `Create a detailed ${duration}-day travel itinerary based on the following:
+    let mediaContext = '';
+    if (images && images.length > 0) {
+      mediaContext += `\nThe traveler has shared ${images.length} photo(s) of places they're interested in or want to visit.`;
+    }
+    if (videos && videos.length > 0) {
+      mediaContext += `\nThe traveler has shared ${videos.length} video(s) for inspiration.`;
+    }
+    if (links && links.length > 0) {
+      mediaContext += `\nThe traveler has shared these social media links for inspiration:\n${links.map((l: string) => `- ${l}`).join('\n')}`;
+    }
 
-Destination/Description: ${description || "A wonderful travel destination based on any uploaded images"}
-${startDate ? `Start Date: ${startDate}` : 'Flexible dates'}
-Budget Level: ${getBudgetLabel(budget)}
-${images && images.length > 0 ? `\nNote: The traveler has shared ${images.length} photo(s) of places they're interested in or want to visit. Please consider these visual references when planning the itinerary.` : ''}
+    const dateContext = startDate && endDate
+      ? `Trip dates: ${startDate} to ${endDate}`
+      : startDate 
+        ? `Starting: ${startDate}` 
+        : 'Flexible dates';
 
-Please create a day-by-day itinerary with specific recommendations for activities, dining, and sightseeing. Include practical tips and local insights.`;
+    const userPrompt = `Create a detailed ${durationStr} travel itinerary based on the following:
+
+Destination/Description: ${description || "A wonderful travel destination based on any uploaded media"}
+${dateContext}
+Budget Level: ${budgetInfo.label} (${budgetInfo.range} for accommodation)
+${mediaContext}
+
+Please create a day-by-day itinerary with specific recommendations for activities, dining, and sightseeing. Include practical tips and local insights. Make sure to mention real, mappable locations with their proper names.`;
 
     // Build messages array
     const messages: any[] = [
