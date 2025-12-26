@@ -95,10 +95,10 @@ Format your response with:
 
     let mediaContext = '';
     if (images && images.length > 0) {
-      mediaContext += `\nThe traveler has shared ${images.length} photo(s) showing places they're interested in or want to visit. Analyze these images to understand their travel preferences and desired destinations.`;
+      mediaContext += `\nThe traveler has shared ${images.length} photo(s) showing places they're interested in or want to visit. Analyze these images carefully to identify the specific destination, landmarks, architecture, signage, and cultural elements.`;
     }
     if (videos && videos.length > 0) {
-      mediaContext += `\nThe traveler has shared ${videos.length} video(s) for inspiration.`;
+      mediaContext += `\nThe traveler has shared ${videos.length} video(s). IMPORTANT: Analyze the video content frame-by-frame to identify the EXACT destination shown - look for landmarks, architecture, signage, landscape features, language on signs, and cultural elements. Do NOT guess or assume a destination without visual evidence from the video.`;
     }
 
     const dateContext = startDate && endDate
@@ -128,19 +128,37 @@ Make sure to mention real, mappable locations with their proper names in bold.`;
       { role: "system", content: systemPrompt },
     ];
 
-    // If there are images, include them in the user message
-    if (images && images.length > 0) {
+    // If there are images or videos, include them in the user message
+    const hasMedia = (images && images.length > 0) || (videos && videos.length > 0);
+    
+    if (hasMedia) {
       const content: any[] = [
         { type: "text", text: userPrompt }
       ];
       
-      for (const imageData of images) {
-        content.push({
-          type: "image_url",
-          image_url: {
-            url: imageData
-          }
-        });
+      // Add images
+      if (images && images.length > 0) {
+        for (const imageData of images) {
+          content.push({
+            type: "image_url",
+            image_url: {
+              url: imageData
+            }
+          });
+        }
+      }
+      
+      // Add videos - Gemini supports video via the same image_url format with data URLs
+      if (videos && videos.length > 0) {
+        for (const videoData of videos) {
+          console.log('Adding video to request, data length:', videoData.length);
+          content.push({
+            type: "image_url",
+            image_url: {
+              url: videoData
+            }
+          });
+        }
       }
       
       messages.push({ role: "user", content });
