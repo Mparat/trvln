@@ -5,6 +5,48 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Scrape a link using Firecrawl to get actual content
+async function scrapeLink(url: string, apiKey: string): Promise<string | null> {
+  try {
+    console.log('Scraping link:', url);
+    
+    const response = await fetch('https://api.firecrawl.dev/v1/scrape', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        url,
+        formats: ['markdown'],
+        onlyMainContent: true,
+      }),
+    });
+
+    if (!response.ok) {
+      console.error('Firecrawl error for', url, ':', response.status);
+      return null;
+    }
+
+    const data = await response.json();
+    const markdown = data.data?.markdown || data.markdown;
+    const metadata = data.data?.metadata || data.metadata;
+    
+    if (markdown || metadata) {
+      let content = '';
+      if (metadata?.title) content += `Title: ${metadata.title}\n`;
+      if (metadata?.description) content += `Description: ${metadata.description}\n`;
+      if (markdown) content += `Content: ${markdown.slice(0, 2000)}`; // Limit content length
+      return content || null;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error scraping link:', url, error);
+    return null;
+  }
+}
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -30,6 +72,8 @@ serve(async (req) => {
       throw new Error('LOVABLE_API_KEY is not configured');
     }
 
+    const FIRECRAWL_API_KEY = Deno.env.get('FIRECRAWL_API_KEY');
+
     const getBudgetInfo = (value: number) => {
       if (value <= 25) return { label: "Budget-friendly", range: "$0-$50/night" };
       if (value <= 50) return { label: "Moderate", range: "$50-$100/night" };
@@ -41,6 +85,16 @@ serve(async (req) => {
     const durationStr = durationRange[0] === durationRange[1] 
       ? `${durationRange[0]}-day` 
       : `${durationRange[0]} to ${durationRange[1]}-day`;
+
+    // Scrape links if Firecrawl is available
+    let scrapedContent: string[] = [];
+    if (links && links.length > 0 && FIRECRAWL_API_KEY) {
+      console.log('Scraping', links.length, 'links with Firecrawl...');
+      const scrapePromises = links.map((link: string) => scrapeLink(link, FIRECRAWL_API_KEY));
+      const results = await Promise.all(scrapePromises);
+      scrapedContent = results.filter((r): r is string => r !== null);
+      console.log('Successfully scraped', scrapedContent.length, 'links');
+    }
 
     const systemPrompt = `You are an expert travel planner with deep knowledge of destinations worldwide. Create detailed, personalized travel itineraries that are practical and inspiring.
 
@@ -67,7 +121,16 @@ Format your response with:
     if (videos && videos.length > 0) {
       mediaContext += `\nThe traveler has shared ${videos.length} video(s) for inspiration.`;
     }
-    if (links && links.length > 0) {
+    
+    // Include scraped content from links
+    if (scrapedContent.length > 0) {
+      mediaContext += `\n\nThe traveler has shared social media posts for inspiration. Here is the extracted content from those posts:\n`;
+      scrapedContent.forEach((content, i) => {
+        mediaContext += `\n--- Post ${i + 1} ---\n${content}\n`;
+      });
+      mediaContext += `\nUse the locations, activities, and destinations mentioned in these posts to create the itinerary.`;
+    } else if (links && links.length > 0) {
+      // Fallback if scraping failed - at least mention the links
       mediaContext += `\nThe traveler has shared these social media links for inspiration:\n${links.map((l: string) => `- ${l}`).join('\n')}`;
     }
 
@@ -79,7 +142,7 @@ Format your response with:
 
     const userPrompt = `Create a detailed ${durationStr} travel itinerary based on the following:
 
-Destination/Description: ${description || "A wonderful travel destination based on any uploaded media"}
+Destination/Description: ${description || "A wonderful travel destination based on any uploaded media or shared links"}
 ${dateContext}
 Budget Level: ${budgetInfo.label} (${budgetInfo.range} for accommodation)
 ${mediaContext}
