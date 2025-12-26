@@ -1,55 +1,44 @@
 import { useState, useCallback } from "react";
 import { Compass, Sparkles, MapPin, Plane } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { MediaDropZone, MediaItem } from "@/components/MediaDropZone";
-import { TripOptionsForm } from "@/components/TripOptionsForm";
-import { ItineraryDisplay } from "@/components/ItineraryDisplay";
+import { TripInputForm, TripPreferences } from "@/components/TripInputForm";
+import { ItineraryOutput } from "@/components/ItineraryOutput";
+import { TripSummaryCard } from "@/components/TripSummaryCard";
 import { ItineraryMap } from "@/components/ItineraryMap";
 import { toast } from "@/hooks/use-toast";
-import { differenceInDays } from "date-fns";
+
+const defaultPreferences: TripPreferences = {
+  media: [],
+  links: [],
+  cities: [],
+  budgetAccommodation: 50,
+  budgetFlight: 50,
+  dateFlexibility: 'anytime',
+  startDate: undefined,
+  endDate: undefined,
+  targetMonth: '',
+  durationFlexibility: '1-week',
+  durationDays: 7,
+  departureCity: '',
+  flightDirectness: 'short-layover',
+  atmosphere: [],
+  adventureLevel: 'active',
+  foodDrink: [],
+  interests: [],
+  additionalNotes: '',
+};
 
 const Index = () => {
-  const [media, setMedia] = useState<MediaItem[]>([]);
-  const [description, setDescription] = useState("");
-  const [durationRange, setDurationRange] = useState<[number, number]>([5, 10]);
-  const [startDate, setStartDate] = useState<Date | undefined>();
-  const [endDate, setEndDate] = useState<Date | undefined>();
-  const [budget, setBudget] = useState(50);
-  const [departureCity, setDepartureCity] = useState("");
-  const [flightPreference, setFlightPreference] = useState<'nonstop' | 'any'>('any');
+  const [preferences, setPreferences] = useState<TripPreferences>(defaultPreferences);
   const [itinerary, setItinerary] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
 
-  const convertMediaToBase64 = async (items: MediaItem[]): Promise<{ images: string[]; videos: string[] }> => {
-    const images: string[] = [];
-    const videos: string[] = [];
-
-    for (const item of items) {
-      if (item.file) {
-        const base64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(item.file!);
-        });
-        
-        if (item.type === 'image') {
-          images.push(base64);
-        } else if (item.type === 'video') {
-          videos.push(base64);
-        }
-      }
-    }
-
-    return { images, videos };
-  };
-
   const handleGenerate = useCallback(async () => {
-    if (!description.trim() && media.length === 0) {
+    const hasInspiration = preferences.media.length > 0 || preferences.links.length > 0 || preferences.cities.length > 0 || preferences.additionalNotes.trim();
+    
+    if (!hasInspiration) {
       toast({
-        title: "Please add some details",
-        description: "Drop some travel photos/videos or describe your dream destination",
+        title: "Add some inspiration",
+        description: "Drop some travel photos, add links, or list cities you want to visit",
         variant: "destructive",
       });
       return;
@@ -59,32 +48,13 @@ const Index = () => {
     setItinerary("");
 
     try {
-      const { images, videos } = await convertMediaToBase64(media);
-
-      // Calculate duration based on dates if both are set
-      let tripDuration = durationRange;
-      if (startDate && endDate) {
-        const days = differenceInDays(endDate, startDate) + 1;
-        tripDuration = [days, days];
-      }
-
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-itinerary`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
-        body: JSON.stringify({
-          description,
-          images,
-          videos,
-          durationRange: tripDuration,
-          startDate: startDate?.toISOString(),
-          endDate: endDate?.toISOString(),
-          budget,
-          departureCity,
-          flightPreference,
-        }),
+        body: JSON.stringify({ preferences }),
       });
 
       if (!response.ok) {
@@ -96,7 +66,6 @@ const Index = () => {
         throw new Error("No response body");
       }
 
-      // Stream the response
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let textBuffer = "";
@@ -134,8 +103,8 @@ const Index = () => {
       }
 
       toast({
-        title: "Itinerary generated!",
-        description: "Your personalized travel plan is ready",
+        title: "Itinerary ready!",
+        description: "Your personalized travel plan has been crafted",
       });
     } catch (error) {
       console.error("Error generating itinerary:", error);
@@ -147,18 +116,23 @@ const Index = () => {
     } finally {
       setIsGenerating(false);
     }
-  }, [description, media, durationRange, startDate, endDate, budget, departureCity, flightPreference]);
+  }, [preferences]);
 
-  const getDurationDisplay = () => {
-    if (startDate && endDate) {
-      const days = differenceInDays(endDate, startDate) + 1;
-      return `${days} days`;
-    }
-    if (durationRange[0] === durationRange[1]) {
-      return `${durationRange[0]} days`;
-    }
-    return `${durationRange[0]}-${durationRange[1]} days`;
-  };
+  const handleEdit = useCallback(async (editRequest: string) => {
+    // For now, append edit request to additional notes and regenerate
+    setPreferences(prev => ({
+      ...prev,
+      additionalNotes: prev.additionalNotes + `\n\nEdit request: ${editRequest}`
+    }));
+    
+    toast({
+      title: "Processing your changes...",
+      description: "Updating the itinerary based on your feedback",
+    });
+    
+    // Trigger regeneration after state updates
+    setTimeout(() => handleGenerate(), 100);
+  }, [handleGenerate]);
 
   return (
     <div className="min-h-screen gradient-hero">
@@ -176,18 +150,18 @@ const Index = () => {
           </div>
           
           <h1 className="text-4xl md:text-6xl lg:text-7xl font-display font-bold text-center text-foreground leading-tight text-balance max-w-4xl mx-auto">
-            Your Dream Journey,{" "}
-            <span className="text-primary">Crafted by AI</span>
+            Stop Planning,{" "}
+            <span className="text-primary">Start Wandering</span>
           </h1>
           
           <p className="mt-6 text-lg md:text-xl text-muted-foreground text-center max-w-2xl mx-auto text-balance">
-            Drop screenshots of your saved TikToks, travel photos, or describe your dream destination — and let AI create the perfect itinerary.
+            Drop your saved TikToks, tell us your vibe, and let AI craft the perfect itinerary — complete with flights, hidden gems, and local favorites.
           </p>
 
           <div className="flex items-center justify-center gap-6 mt-8 text-sm text-muted-foreground">
             <div className="flex items-center gap-2">
               <MapPin className="w-4 h-4" />
-              <span>Any destination</span>
+              <span>Hidden gems included</span>
             </div>
             <div className="flex items-center gap-2">
               <Plane className="w-4 h-4" />
@@ -195,7 +169,7 @@ const Index = () => {
             </div>
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4" />
-              <span>AI-powered</span>
+              <span>Local knowledge</span>
             </div>
           </div>
         </div>
@@ -203,72 +177,29 @@ const Index = () => {
 
       {/* Main Content */}
       <main className="container pb-20">
-        <div className="max-w-4xl mx-auto">
-          {/* Input Card */}
-          <div className="bg-card rounded-2xl shadow-medium p-6 md:p-8 space-y-6 animate-slide-up">
-            {/* Media Drop Zone */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground flex items-center gap-2">
-                <span>📸</span> Drop your inspiration
-              </label>
-              <MediaDropZone media={media} onMediaChange={setMedia} />
-            </div>
+        <div className="max-w-4xl mx-auto space-y-8">
+          {/* Input Form */}
+          <TripInputForm
+            preferences={preferences}
+            onPreferencesChange={setPreferences}
+            onGenerate={handleGenerate}
+            isGenerating={isGenerating}
+          />
 
-            {/* Text Input */}
-            <div className="space-y-2">
-              <label htmlFor="description" className="text-sm font-medium text-foreground flex items-center gap-2">
-                <span>✨</span> Describe your dream trip
-              </label>
-              <Textarea
-                id="description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="I want to explore the ancient temples of Kyoto in spring, experience the cherry blossoms, try authentic ramen, and find hidden tea houses..."
-                className="min-h-[120px] resize-none bg-background border-input focus:border-primary transition-colors"
-              />
-            </div>
-
-            {/* Optional Fields */}
-            <TripOptionsForm
-              durationRange={durationRange}
-              onDurationRangeChange={setDurationRange}
-              startDate={startDate}
-              endDate={endDate}
-              onStartDateChange={setStartDate}
-              onEndDateChange={setEndDate}
-              budget={budget}
-              onBudgetChange={setBudget}
-              departureCity={departureCity}
-              onDepartureCityChange={setDepartureCity}
-              flightPreference={flightPreference}
-              onFlightPreferenceChange={setFlightPreference}
-            />
-
-            {/* Generate Button */}
-            <Button
-              onClick={handleGenerate}
-              disabled={isGenerating}
-              variant="hero"
-              className="w-full"
-            >
-              {isGenerating ? (
-                <>
-                  <Sparkles className="w-5 h-5 animate-spin" />
-                  Crafting your journey...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-5 h-5" />
-                  Generate My Itinerary
-                </>
-              )}
-            </Button>
-          </div>
-
-          {/* Itinerary Display */}
+          {/* Results */}
           {(itinerary || isGenerating) && (
-            <div className="mt-8 space-y-6 animate-slide-up" style={{ animationDelay: '0.1s' }}>
-              {/* Map First */}
+            <div className="space-y-6 animate-slide-up" style={{ animationDelay: '0.1s' }}>
+              {/* Summary Card */}
+              {itinerary && !isGenerating && (
+                <TripSummaryCard 
+                  itinerary={itinerary}
+                  departureCity={preferences.departureCity}
+                  startDate={preferences.startDate}
+                  endDate={preferences.endDate}
+                />
+              )}
+
+              {/* Map */}
               {itinerary && !isGenerating && (
                 <div className="bg-card rounded-2xl shadow-medium p-6 md:p-8">
                   <h3 className="font-display text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
@@ -288,13 +219,16 @@ const Index = () => {
                   <div>
                     <h2 className="font-display text-xl font-semibold text-foreground">Your Personalized Itinerary</h2>
                     <p className="text-sm text-muted-foreground">
-                      {getDurationDisplay()} • {startDate ? `Starting ${startDate.toLocaleDateString()}` : 'Flexible dates'}
-                      {departureCity && ` • From ${departureCity}`}
+                      Crafted based on your preferences
                     </p>
                   </div>
                 </div>
                 
-                <ItineraryDisplay itinerary={itinerary} isLoading={isGenerating && !itinerary} />
+                <ItineraryOutput 
+                  itinerary={itinerary} 
+                  isLoading={isGenerating && !itinerary}
+                  onEdit={handleEdit}
+                />
               </div>
             </div>
           )}
