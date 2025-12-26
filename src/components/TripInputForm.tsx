@@ -329,7 +329,7 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
                           <>
                             {format(preferences.startDate, "MMM d, yyyy")} — {format(preferences.endDate, "MMM d, yyyy")}
                             <span className="ml-auto text-xs text-muted-foreground">
-                              {differenceInDays(preferences.endDate, preferences.startDate)} days
+                              {differenceInDays(preferences.endDate, preferences.startDate) + 1} days
                             </span>
                           </>
                         ) : preferences.startDate ? (
