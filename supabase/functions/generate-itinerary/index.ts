@@ -6,157 +6,180 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { description, images, videos, durationRange, startDate, endDate, budget, departureCity, flightPreference } = await req.json();
+    const { preferences } = await req.json();
     
-    console.log('Received request:', { 
-      description, 
-      imageCount: images?.length || 0,
-      videoCount: videos?.length || 0,
-      durationRange, 
-      startDate,
-      endDate,
-      budget,
-      departureCity,
-      flightPreference
-    });
+    console.log('Received preferences:', JSON.stringify(preferences, null, 2));
 
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     if (!LOVABLE_API_KEY) {
       throw new Error('LOVABLE_API_KEY is not configured');
     }
 
-    const getBudgetInfo = (value: number) => {
-      if (value <= 25) return { label: "Budget-friendly", range: "$0-$50/night", dailyBudget: "$50-80/day" };
-      if (value <= 50) return { label: "Moderate", range: "$50-$100/night", dailyBudget: "$100-150/day" };
-      if (value <= 75) return { label: "Comfortable", range: "$100-$200/night", dailyBudget: "$200-300/day" };
-      return { label: "Luxury", range: "$200-$500+/night", dailyBudget: "$400-600+/day" };
+    const { 
+      media, links, cities, 
+      budgetAccommodation, budgetFlight, 
+      dateFlexibility, startDate, endDate, targetMonth,
+      durationFlexibility, durationDays,
+      departureCity, flightDirectness,
+      atmosphere, adventureLevel, foodDrink, interests,
+      additionalNotes 
+    } = preferences;
+
+    // Build budget context
+    const getBudgetLabel = (value: number) => {
+      if (value <= 25) return { label: "Budget", accommodation: "$0-$50/night", daily: "$50-80/day" };
+      if (value <= 50) return { label: "Moderate", accommodation: "$50-$100/night", daily: "$100-150/day" };
+      if (value <= 75) return { label: "Comfortable", accommodation: "$100-$200/night", daily: "$200-300/day" };
+      return { label: "Luxury", accommodation: "$200+/night", daily: "$400+/day" };
     };
 
-    const budgetInfo = getBudgetInfo(budget);
-    const durationStr = durationRange[0] === durationRange[1] 
-      ? `${durationRange[0]}-day` 
-      : `${durationRange[0]} to ${durationRange[1]}-day`;
+    const getFlightBudget = (value: number) => {
+      if (value <= 25) return "$100-$300";
+      if (value <= 50) return "$300-$600";
+      if (value <= 75) return "$600-$1000";
+      return "$1000+";
+    };
 
-    const flightContext = departureCity 
-      ? `\n\nFlight Information:
-- Departing from: ${departureCity}
-- Flight preference: ${flightPreference === 'nonstop' ? 'Nonstop flights only' : 'Any flights including layovers'}
-- Include realistic flight options with approximate prices using Google Flights data patterns
-- Suggest specific airlines and typical flight durations`
-      : '';
+    const budgetInfo = getBudgetLabel(budgetAccommodation);
+    const flightBudget = getFlightBudget(budgetFlight);
 
-    const systemPrompt = `You are an expert travel planner with deep knowledge of destinations worldwide. Create detailed, personalized travel itineraries that are practical and inspiring.
+    // Build duration context
+    let durationContext = "";
+    switch (durationFlexibility) {
+      case 'weekend': durationContext = "2-3 day weekend trip"; break;
+      case 'long-weekend': durationContext = "4-5 day long weekend"; break;
+      case '1-week': durationContext = "7 day trip"; break;
+      case '2-weeks': durationContext = "14 day trip"; break;
+      case 'strict': durationContext = `exactly ${durationDays} days`; break;
+      case 'flexible-days': durationContext = `approximately ${durationDays} days (±2 days flexible)`; break;
+      default: durationContext = "flexible duration - suggest optimal length";
+    }
 
-Your itineraries MUST include these sections in order:
+    // Build date context
+    let dateContext = "";
+    switch (dateFlexibility) {
+      case 'strict': dateContext = startDate && endDate ? `Fixed dates: ${startDate} to ${endDate}` : "Specific dates (not provided)"; break;
+      case 'flexible-days': dateContext = startDate ? `Around ${startDate} (±few days flexible)` : "Flexible around specific dates"; break;
+      case 'month': dateContext = targetMonth ? `Target: ${targetMonth}` : "Specific month/season"; break;
+      default: dateContext = "Anytime - recommend best time to visit";
+    }
+
+    // Build vibe context
+    const vibeContext = `
+Atmosphere preferences: ${atmosphere?.length > 0 ? atmosphere.join(', ') : 'No preference'}
+Adventure level: ${adventureLevel || 'No preference'}
+Food & drink: ${foodDrink?.length > 0 ? foodDrink.join(', ') : 'No preference'}
+Interests (ranked): ${interests?.length > 0 ? interests.join(' > ') : 'No preference'}`;
+
+    const systemPrompt = `You are an expert travel planner who helps people plan perfect trips. You have deep knowledge of destinations worldwide, including hidden gems, local favorites, and practical logistics.
+
+Your job is to create a comprehensive, personalized itinerary that:
+1. Covers as many requested destinations as efficiently possible
+2. Includes places and activities the traveler might have missed
+3. Provides practical booking information and links
+4. Explains any trade-offs or constraints clearly
+5. Suggests alternatives they might want to swap in
+
+FORMAT YOUR RESPONSE WITH THESE SECTIONS:
 
 ## Trip Summary
-Start with a brief summary including:
-- Estimated daily budget (${budgetInfo.dailyBudget} based on ${budgetInfo.label} level)
-- Cities/locations with number of days in each
-- Top 3-4 key activities or highlights
+- Total estimated cost breakdown (accommodation, food, activities, transport)
+- Cities/regions covered with days in each
+- Top 3-4 highlights
 
 ## Best Time to Visit
-Analyze and recommend:
-1. **Overall best season/months** - considering weather, crowds, and experiences
-2. **Cheapest time to fly** - based on typical flight pricing patterns
-3. **Special events or festivals** - worth timing your trip around
-4. **Weather considerations** - what to expect and pack
+- Optimal season considering weather, crowds, prices
+- Cheapest time to fly from their departure city
+- Any festivals or events worth timing around
+- What to pack
 
 ${departureCity ? `## Flight Details
-Based on departing from ${departureCity}:
-- Recommended airlines and approximate prices
-- Flight duration and ${flightPreference === 'nonstop' ? 'nonstop options' : 'best connections'}
+- Recommended flights from ${departureCity}
+- Approximate prices (budget: ${flightBudget})
 - Best airports to fly into
-- Tips for booking (best days/times to book, how far in advance)` : ''}
+- ${flightDirectness === 'nonstop' ? 'Focus on nonstop options' : flightDirectness === 'short-layover' ? 'Include options with short layovers' : 'Include all options including long layovers'}
+- Booking tips` : ''}
 
-## Detailed Day-by-Day Itinerary
-Then provide the day-by-day plan:
-- Be organized by day and time of day (Morning, Afternoon, Evening)
-- Include specific places to visit, restaurants to try, and activities to do
-- Consider travel time between locations
-- Include local tips and hidden gems
-- Be realistic about what can be accomplished each day
-- Reflect the traveler's budget level (${budgetInfo.label}, ${budgetInfo.range} accommodation)
-- Include REAL place names that can be located on a map
+## Accommodation Recommendations
+- Specific hotel/hostel/Airbnb recommendations for each location
+- Match the ${budgetInfo.label} budget level (${budgetInfo.accommodation})
+- Include booking links where possible
 
-Format your response with:
-- Clear section headers (## for main sections)
-- Day headers (e.g., "## Day 1: Arrival & First Impressions")
-- Time sections (Morning, Afternoon, Evening)
-- Bullet points for specific activities and recommendations
-- Bold important place names like **Temple Name** or **Restaurant Name**
-- Include practical tips where relevant`;
+## Day-by-Day Itinerary
+For each day include:
+- Morning, Afternoon, Evening activities
+- Specific restaurant recommendations (multiple options)
+- Realistic timing and travel between locations
+- Bold **place names** that can be found on a map
+- Pro tips and insider knowledge
 
-    let mediaContext = '';
-    if (images && images.length > 0) {
-      mediaContext += `\nThe traveler has shared ${images.length} photo(s) showing places they're interested in or want to visit. Analyze these images carefully to identify the specific destination, landmarks, architecture, signage, and cultural elements.`;
+## Near Misses (Almost Included)
+- List 3-5 activities/places that were close to making the cut
+- Explain why they weren't included and how to swap them in
+
+## Assumptions & Trade-offs
+- Clearly state any assumptions you made
+- If budget conflicts with destination, explain options
+- If time is insufficient, suggest alternatives
+- If you had to skip requested places, explain why
+
+Use **bold** for all place names, restaurant names, and attractions.
+Include activity type tags like [Nature], [Culture], [Food], [Adventure], [Photo Op] after activities.
+Link to sources where you got recommendations when possible.`;
+
+    // Build user prompt
+    let inspirationContext = "";
+    if (cities?.length > 0) {
+      inspirationContext += `\nDesired destinations: ${cities.join(', ')}`;
     }
-    if (videos && videos.length > 0) {
-      mediaContext += `\nThe traveler has shared ${videos.length} video(s). IMPORTANT: Analyze the video content frame-by-frame to identify the EXACT destination shown - look for landmarks, architecture, signage, landscape features, language on signs, and cultural elements. Do NOT guess or assume a destination without visual evidence from the video.`;
+    if (links?.length > 0) {
+      inspirationContext += `\nInspiration links to analyze: ${links.join(', ')}`;
+    }
+    if (media?.length > 0) {
+      inspirationContext += `\nThe traveler has shared ${media.length} image(s)/video(s) - analyze these to identify destinations and experiences they want.`;
     }
 
-    const dateContext = startDate && endDate
-      ? `Trip dates: ${startDate} to ${endDate}`
-      : startDate 
-        ? `Starting: ${startDate}` 
-        : 'Flexible dates';
+    const userPrompt = `Create a detailed travel itinerary based on:
 
-    const userPrompt = `Create a detailed ${durationStr} travel itinerary based on the following:
+INSPIRATION:${inspirationContext || '\nNo specific destinations - suggest based on preferences'}
+${additionalNotes ? `\nAdditional notes: ${additionalNotes}` : ''}
 
-Destination/Description: ${description || "Analyze the uploaded images to determine the destination and create an itinerary"}
-${dateContext}
-Budget Level: ${budgetInfo.label} (${budgetInfo.range} for accommodation, approximately ${budgetInfo.dailyBudget} total)
-${mediaContext}
-${flightContext}
+LOGISTICS:
+- Duration: ${durationContext}
+- Dates: ${dateContext}
+- Accommodation budget: ${budgetInfo.label} (${budgetInfo.accommodation}, ~${budgetInfo.daily} total)
+- Flight budget: ${flightBudget} round trip
+${departureCity ? `- Departing from: ${departureCity}` : ''}
 
-Please create a comprehensive travel plan with:
-1. A trip summary with budget breakdown, cities, and highlights
-2. Best time to visit analysis (seasons, pricing, events)
-${departureCity ? '3. Flight recommendations from ' + departureCity : ''}
-${departureCity ? '4' : '3'}. Day-by-day itinerary with specific recommendations
+VIBE:${vibeContext}
 
-Make sure to mention real, mappable locations with their proper names in bold.`;
+Please create a comprehensive travel plan following all the format requirements. Make sure to:
+1. Include real, specific place names that can be located on a map
+2. Provide multiple restaurant options for each meal
+3. Be realistic about timing and what can be accomplished
+4. Explain any trade-offs you had to make`;
 
-    // Build messages array
+    // Build messages
     const messages: any[] = [
       { role: "system", content: systemPrompt },
     ];
 
-    // If there are images or videos, include them in the user message
-    const hasMedia = (images && images.length > 0) || (videos && videos.length > 0);
+    // Handle media (images/videos)
+    const hasMedia = media && media.length > 0;
     
     if (hasMedia) {
-      const content: any[] = [
-        { type: "text", text: userPrompt }
-      ];
+      const content: any[] = [{ type: "text", text: userPrompt }];
       
-      // Add images
-      if (images && images.length > 0) {
-        for (const imageData of images) {
+      for (const item of media) {
+        if (item.preview) {
           content.push({
             type: "image_url",
-            image_url: {
-              url: imageData
-            }
-          });
-        }
-      }
-      
-      // Add videos - Gemini supports video via the same image_url format with data URLs
-      if (videos && videos.length > 0) {
-        for (const videoData of videos) {
-          console.log('Adding video to request, data length:', videoData.length);
-          content.push({
-            type: "image_url",
-            image_url: {
-              url: videoData
-            }
+            image_url: { url: item.preview }
           });
         }
       }
@@ -166,7 +189,7 @@ Make sure to mention real, mappable locations with their proper names in bold.`;
       messages.push({ role: "user", content: userPrompt });
     }
 
-    console.log('Calling Lovable AI Gateway with model: google/gemini-2.5-flash');
+    console.log('Calling Lovable AI Gateway');
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -204,8 +227,6 @@ Make sure to mention real, mappable locations with their proper names in bold.`;
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-
-    console.log('Streaming response back to client');
 
     return new Response(response.body, {
       headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
