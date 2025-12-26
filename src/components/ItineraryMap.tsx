@@ -1,7 +1,7 @@
-import { useEffect, useState, useMemo } from "react";
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
-import { Icon, LatLngBounds } from "leaflet";
+import { useEffect, useState, useMemo, useRef } from "react";
+import { MapPin } from "lucide-react";
 import "leaflet/dist/leaflet.css";
+import L from "leaflet";
 
 interface Location {
   name: string;
@@ -14,36 +14,17 @@ interface ItineraryMapProps {
   itinerary: string;
 }
 
-// Custom marker icon
-const createMarkerIcon = (day: number) => new Icon({
-  iconUrl: `data:image/svg+xml,${encodeURIComponent(`
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 42" width="32" height="42">
-      <path d="M16 0C7.16 0 0 7.16 0 16c0 12 16 26 16 26s16-14 16-26C32 7.16 24.84 0 16 0z" fill="#C45D35"/>
-      <circle cx="16" cy="14" r="8" fill="white"/>
-      <text x="16" y="18" text-anchor="middle" font-size="10" font-weight="bold" fill="#C45D35">${day}</text>
-    </svg>
-  `)}`,
-  iconSize: [32, 42],
-  iconAnchor: [16, 42],
-  popupAnchor: [0, -42],
+// Fix for default marker icons in Leaflet
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
 });
 
-function FitBounds({ locations }: { locations: Location[] }) {
-  const map = useMap();
-  
-  useEffect(() => {
-    if (locations.length > 0) {
-      const bounds = new LatLngBounds(
-        locations.map(loc => [loc.lat, loc.lng])
-      );
-      map.fitBounds(bounds, { padding: [50, 50] });
-    }
-  }, [locations, map]);
-  
-  return null;
-}
-
 export function ItineraryMap({ itinerary }: ItineraryMapProps) {
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<L.Map | null>(null);
   const [locations, setLocations] = useState<Location[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -54,14 +35,11 @@ export function ItineraryMap({ itinerary }: ItineraryMapProps) {
     let currentDay = 1;
 
     for (const line of lines) {
-      // Track current day
       const dayMatch = line.match(/Day\s+(\d+)/i);
       if (dayMatch) {
         currentDay = parseInt(dayMatch[1], 10);
       }
 
-      // Look for locations - simple pattern matching
-      // Match patterns like "Visit [Place]", "Explore [Place]", "[Place] Temple", etc.
       const patterns = [
         /(?:visit|explore|see|tour|go to|head to|stop at|check out)\s+(?:the\s+)?([A-Z][a-zA-Z\s]+?)(?:\.|,|$)/gi,
         /([A-Z][a-zA-Z\s]+(?:Temple|Palace|Park|Museum|Market|Beach|Tower|Garden|Castle|Cathedral|Square|Bridge|District|Shrine))/g,
@@ -73,7 +51,6 @@ export function ItineraryMap({ itinerary }: ItineraryMapProps) {
         for (const match of matches) {
           const placeName = match[1]?.trim();
           if (placeName && placeName.length > 2 && placeName.length < 50) {
-            // Avoid duplicates
             if (!places.find(p => p.name.toLowerCase() === placeName.toLowerCase())) {
               places.push({ name: placeName, day: currentDay });
             }
@@ -82,7 +59,7 @@ export function ItineraryMap({ itinerary }: ItineraryMapProps) {
       }
     }
 
-    return places.slice(0, 15); // Limit to 15 places for performance
+    return places.slice(0, 15);
   }, [itinerary]);
 
   // Geocode the extracted places
@@ -113,7 +90,6 @@ export function ItineraryMap({ itinerary }: ItineraryMapProps) {
             });
           }
           
-          // Rate limit to respect Nominatim ToS
           await new Promise(r => setTimeout(r, 300));
         } catch (error) {
           console.warn(`Failed to geocode: ${place.name}`);
@@ -126,6 +102,89 @@ export function ItineraryMap({ itinerary }: ItineraryMapProps) {
 
     geocodePlaces();
   }, [extractedPlaces]);
+
+  // Initialize and update map
+  useEffect(() => {
+    if (!mapContainerRef.current || locations.length === 0) return;
+
+    // Clean up existing map
+    if (mapRef.current) {
+      mapRef.current.remove();
+      mapRef.current = null;
+    }
+
+    // Create new map
+    const map = L.map(mapContainerRef.current, {
+      scrollWheelZoom: false,
+    });
+
+    mapRef.current = map;
+
+    // Add tile layer
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    }).addTo(map);
+
+    // Create custom marker icon
+    const createMarkerIcon = (day: number) => L.divIcon({
+      className: 'custom-marker',
+      html: `<div style="
+        background: #C45D35;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: bold;
+        font-size: 12px;
+        border: 2px solid white;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+      ">${day}</div>`,
+      iconSize: [28, 28],
+      iconAnchor: [14, 14],
+    });
+
+    // Add markers
+    const bounds = L.latLngBounds([]);
+    locations.forEach((location) => {
+      const marker = L.marker([location.lat, location.lng], {
+        icon: createMarkerIcon(location.day || 1),
+      }).addTo(map);
+
+      marker.bindPopup(`
+        <div style="font-weight: 600;">${location.name}</div>
+        ${location.day ? `<div style="font-size: 12px; color: #666;">Day ${location.day}</div>` : ''}
+      `);
+
+      bounds.extend([location.lat, location.lng]);
+    });
+
+    // Add route line
+    if (locations.length > 1) {
+      const latLngs: L.LatLngExpression[] = locations.map(loc => [loc.lat, loc.lng] as L.LatLngTuple);
+      L.polyline(latLngs, {
+        color: '#C45D35',
+        weight: 3,
+        opacity: 0.6,
+        dashArray: '10, 10',
+      }).addTo(map);
+    }
+
+    // Fit bounds
+    if (bounds.isValid()) {
+      map.fitBounds(bounds, { padding: [50, 50] });
+    }
+
+    // Cleanup on unmount
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  }, [locations]);
 
   if (isLoading && extractedPlaces.length > 0) {
     return (
@@ -141,55 +200,18 @@ export function ItineraryMap({ itinerary }: ItineraryMapProps) {
   if (locations.length === 0) {
     return (
       <div className="h-[300px] rounded-xl bg-muted flex items-center justify-center">
-        <p className="text-sm text-muted-foreground">No mappable locations found in itinerary</p>
+        <div className="text-center space-y-2">
+          <MapPin className="w-8 h-8 text-muted-foreground mx-auto" />
+          <p className="text-sm text-muted-foreground">No mappable locations found</p>
+        </div>
       </div>
     );
   }
 
-  const polylinePositions = locations.map(loc => [loc.lat, loc.lng] as [number, number]);
-
   return (
-    <div className="h-[400px] rounded-xl overflow-hidden shadow-medium">
-      <MapContainer
-        center={[locations[0].lat, locations[0].lng]}
-        zoom={12}
-        style={{ height: "100%", width: "100%" }}
-        scrollWheelZoom={false}
-      >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
-        
-        {/* Route line */}
-        <Polyline
-          positions={polylinePositions}
-          pathOptions={{
-            color: '#C45D35',
-            weight: 3,
-            opacity: 0.6,
-            dashArray: '10, 10',
-          }}
-        />
-
-        {/* Markers */}
-        {locations.map((location, index) => (
-          <Marker
-            key={index}
-            position={[location.lat, location.lng]}
-            icon={createMarkerIcon(location.day || index + 1)}
-          >
-            <Popup>
-              <div className="font-medium">{location.name}</div>
-              {location.day && (
-                <div className="text-sm text-muted-foreground">Day {location.day}</div>
-              )}
-            </Popup>
-          </Marker>
-        ))}
-
-        <FitBounds locations={locations} />
-      </MapContainer>
-    </div>
+    <div 
+      ref={mapContainerRef} 
+      className="h-[400px] rounded-xl overflow-hidden shadow-medium"
+    />
   );
 }
