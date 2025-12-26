@@ -14,11 +14,13 @@ import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { MediaDropZone, MediaItem } from "./MediaDropZone";
 import { AirportSelector } from "./AirportSelector";
 import { cn } from "@/lib/utils";
-import { format } from "date-fns";
+import { format, differenceInDays } from "date-fns";
+import type { DateRange } from "react-day-picker";
 
 export interface TripPreferences {
   // Inspiration
@@ -31,6 +33,7 @@ export interface TripPreferences {
   dateFlexibility: 'strict' | 'flexible-days' | 'month' | 'anytime';
   startDate?: Date;
   endDate?: Date;
+  flexibleDays?: number; // ± days for flexible-days option
   targetMonth?: string;
   durationFlexibility: 'strict' | 'flexible-days' | 'weekend' | 'long-weekend' | '1-week' | '2-weeks' | 'flexible';
   durationDays: number;
@@ -302,7 +305,6 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
               >
                 {[
                   { value: 'strict', label: 'Exact dates' },
-                  { value: 'flexible-days', label: '± few days' },
                   { value: 'month', label: 'A certain month' },
                   { value: 'anytime', label: 'Anytime' },
                 ].map(opt => (
@@ -318,36 +320,70 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
                 ))}
               </RadioGroup>
 
-              {(preferences.dateFlexibility === 'strict' || preferences.dateFlexibility === 'flexible-days') && (
-                <div className="grid grid-cols-2 gap-4 mt-3">
+              {preferences.dateFlexibility === 'strict' && (
+                <div className="space-y-4 mt-3">
                   <Popover>
                     <PopoverTrigger asChild>
-                      <Button variant="outline" className={cn("justify-start", !preferences.startDate && "text-muted-foreground")}>
-                        {preferences.startDate ? format(preferences.startDate, "PPP") : "Start date"}
+                      <Button variant="outline" className={cn("w-full justify-start", !preferences.startDate && "text-muted-foreground")}>
+                        {preferences.startDate && preferences.endDate ? (
+                          <>
+                            {format(preferences.startDate, "MMM d, yyyy")} — {format(preferences.endDate, "MMM d, yyyy")}
+                            <span className="ml-auto text-xs text-muted-foreground">
+                              {differenceInDays(preferences.endDate, preferences.startDate)} days
+                            </span>
+                          </>
+                        ) : preferences.startDate ? (
+                          <>
+                            {format(preferences.startDate, "MMM d, yyyy")} — Select end date
+                          </>
+                        ) : (
+                          "Select travel dates"
+                        )}
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0">
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <div className="p-3 border-b border-border">
+                        <p className="text-sm text-muted-foreground">
+                          {!preferences.startDate ? "Select your start date" : !preferences.endDate ? "Now select your end date" : "Click to change dates"}
+                        </p>
+                      </div>
                       <CalendarComponent
-                        mode="single"
-                        selected={preferences.startDate}
-                        onSelect={(date) => updatePreferences({ startDate: date })}
+                        mode="range"
+                        selected={{ from: preferences.startDate, to: preferences.endDate } as DateRange}
+                        onSelect={(range) => {
+                          updatePreferences({ 
+                            startDate: range?.from, 
+                            endDate: range?.to 
+                          });
+                        }}
                         disabled={(date) => date < new Date()}
+                        numberOfMonths={2}
+                        className="pointer-events-auto"
                       />
-                    </PopoverContent>
-                  </Popover>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" className={cn("justify-start", !preferences.endDate && "text-muted-foreground")}>
-                        {preferences.endDate ? format(preferences.endDate, "PPP") : "End date"}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0">
-                      <CalendarComponent
-                        mode="single"
-                        selected={preferences.endDate}
-                        onSelect={(date) => updatePreferences({ endDate: date })}
-                        disabled={(date) => date < (preferences.startDate || new Date())}
-                      />
+                      {/* Flexible days option inside date picker */}
+                      <div className="p-3 border-t border-border flex items-center gap-3">
+                        <Checkbox
+                          id="flexible-days"
+                          checked={!!preferences.flexibleDays}
+                          onCheckedChange={(checked) => updatePreferences({ flexibleDays: checked ? 2 : undefined })}
+                        />
+                        <Label htmlFor="flexible-days" className="text-sm cursor-pointer">
+                          ± a few days is okay
+                        </Label>
+                        {preferences.flexibleDays && (
+                          <select
+                            value={preferences.flexibleDays}
+                            onChange={(e) => updatePreferences({ flexibleDays: parseInt(e.target.value) })}
+                            className="ml-auto text-sm border rounded px-2 py-1 bg-background"
+                          >
+                            <option value={1}>± 1 day</option>
+                            <option value={2}>± 2 days</option>
+                            <option value={3}>± 3 days</option>
+                            <option value={5}>± 5 days</option>
+                            <option value={7}>± 1 week</option>
+                          </select>
+                        )}
+                      </div>
                     </PopoverContent>
                   </Popover>
                 </div>
@@ -363,52 +399,54 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
               )}
             </div>
 
-            {/* Duration */}
-            <div className="space-y-3">
-              <label className="text-sm font-medium text-foreground flex items-center gap-2">
-                <Clock className="w-4 h-4 text-primary" />
-                Trip duration
-              </label>
-              <RadioGroup
-                value={preferences.durationFlexibility}
-                onValueChange={(value) => updatePreferences({ durationFlexibility: value as TripPreferences['durationFlexibility'] })}
-                className="grid grid-cols-2 md:grid-cols-4 gap-2"
-              >
-                {[
-                  { value: 'weekend', label: 'Weekend' },
-                  { value: 'long-weekend', label: 'Long weekend' },
-                  { value: '1-week', label: '1 week' },
-                  { value: '2-weeks', label: '2 weeks' },
-                  { value: 'strict', label: 'Exact days' },
-                  { value: 'flexible-days', label: '± few days' },
-                  { value: 'flexible', label: 'Flexible' },
-                ].map(opt => (
-                  <div key={opt.value}>
-                    <RadioGroupItem value={opt.value} id={`dur-${opt.value}`} className="peer sr-only" />
-                    <Label
-                      htmlFor={`dur-${opt.value}`}
-                      className="flex items-center justify-center px-3 py-2 text-sm border rounded-lg cursor-pointer peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/5 hover:bg-muted/50 transition-colors"
-                    >
-                      {opt.label}
-                    </Label>
-                  </div>
-                ))}
-              </RadioGroup>
+            {/* Duration - only show when NOT using exact dates */}
+            {preferences.dateFlexibility !== 'strict' && (
+              <div className="space-y-3">
+                <label className="text-sm font-medium text-foreground flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-primary" />
+                  Trip duration
+                </label>
+                <RadioGroup
+                  value={preferences.durationFlexibility}
+                  onValueChange={(value) => updatePreferences({ durationFlexibility: value as TripPreferences['durationFlexibility'] })}
+                  className="grid grid-cols-2 md:grid-cols-4 gap-2"
+                >
+                  {[
+                    { value: 'weekend', label: 'Weekend' },
+                    { value: 'long-weekend', label: 'Long weekend' },
+                    { value: '1-week', label: '1 week' },
+                    { value: '2-weeks', label: '2 weeks' },
+                    { value: 'strict', label: 'Exact days' },
+                    { value: 'flexible-days', label: '± few days' },
+                    { value: 'flexible', label: 'Flexible' },
+                  ].map(opt => (
+                    <div key={opt.value}>
+                      <RadioGroupItem value={opt.value} id={`dur-${opt.value}`} className="peer sr-only" />
+                      <Label
+                        htmlFor={`dur-${opt.value}`}
+                        className="flex items-center justify-center px-3 py-2 text-sm border rounded-lg cursor-pointer peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/5 hover:bg-muted/50 transition-colors"
+                      >
+                        {opt.label}
+                      </Label>
+                    </div>
+                  ))}
+                </RadioGroup>
 
-              {(preferences.durationFlexibility === 'strict' || preferences.durationFlexibility === 'flexible-days') && (
-                <div className="flex items-center gap-3 mt-3">
-                  <Input 
-                    type="number"
-                    min={1}
-                    max={60}
-                    value={preferences.durationDays}
-                    onChange={(e) => updatePreferences({ durationDays: parseInt(e.target.value) || 7 })}
-                    className="w-24"
-                  />
-                  <span className="text-sm text-muted-foreground">days</span>
-                </div>
-              )}
-            </div>
+                {(preferences.durationFlexibility === 'strict' || preferences.durationFlexibility === 'flexible-days') && (
+                  <div className="flex items-center gap-3 mt-3">
+                    <Input 
+                      type="number"
+                      min={1}
+                      max={60}
+                      value={preferences.durationDays}
+                      onChange={(e) => updatePreferences({ durationDays: parseInt(e.target.value) || 7 })}
+                      className="w-24"
+                    />
+                    <span className="text-sm text-muted-foreground">days</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Flight Preferences */}
             <div className="p-4 bg-muted/50 rounded-xl space-y-4">

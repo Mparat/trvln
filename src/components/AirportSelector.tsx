@@ -21,7 +21,28 @@ interface Airport {
   name: string;
   city: string;
   country: string;
+  isAllAirports?: boolean;
 }
+
+// Major cities with multiple airports - "All Airports" options
+const allAirportsOptions: Airport[] = [
+  { code: "NYC", name: "All New York Airports", city: "New York", country: "USA", isAllAirports: true },
+  { code: "LON", name: "All London Airports", city: "London", country: "UK", isAllAirports: true },
+  { code: "PAR", name: "All Paris Airports", city: "Paris", country: "France", isAllAirports: true },
+  { code: "TYO", name: "All Tokyo Airports", city: "Tokyo", country: "Japan", isAllAirports: true },
+  { code: "CHI", name: "All Chicago Airports", city: "Chicago", country: "USA", isAllAirports: true },
+  { code: "WAS", name: "All Washington DC Airports", city: "Washington DC", country: "USA", isAllAirports: true },
+  { code: "SFB", name: "All San Francisco Bay Airports", city: "San Francisco", country: "USA", isAllAirports: true },
+  { code: "MIL", name: "All Milan Airports", city: "Milan", country: "Italy", isAllAirports: true },
+  { code: "SEL", name: "All Seoul Airports", city: "Seoul", country: "South Korea", isAllAirports: true },
+  { code: "SHA", name: "All Shanghai Airports", city: "Shanghai", country: "China", isAllAirports: true },
+  { code: "BJS", name: "All Beijing Airports", city: "Beijing", country: "China", isAllAirports: true },
+  { code: "BKK", name: "All Bangkok Airports", city: "Bangkok", country: "Thailand", isAllAirports: true },
+  { code: "IST", name: "All Istanbul Airports", city: "Istanbul", country: "Turkey", isAllAirports: true },
+  { code: "DFW", name: "All Dallas Airports", city: "Dallas", country: "USA", isAllAirports: true },
+  { code: "HOU", name: "All Houston Airports", city: "Houston", country: "USA", isAllAirports: true },
+  { code: "MIA", name: "All Miami/Ft. Lauderdale Airports", city: "Miami", country: "USA", isAllAirports: true },
+];
 
 // Comprehensive list of major world airports
 const airports: Airport[] = [
@@ -208,19 +229,35 @@ export function AirportSelector({ value, onChange }: AirportSelectorProps) {
   const [open, setOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
-  const selectedAirport = airports.find((airport) => airport.code === value);
+  const allOptions = [...allAirportsOptions, ...airports];
+  const selectedAirport = allOptions.find((airport) => airport.code === value);
 
   const filteredAirports = useMemo(() => {
-    if (!searchQuery) return airports.slice(0, 50); // Show first 50 by default
-    
     const query = searchQuery.toLowerCase();
-    return airports.filter(
+    
+    // Filter all airports options
+    const matchingAllAirports = allAirportsOptions.filter(
+      (airport) =>
+        airport.city.toLowerCase().includes(query) ||
+        airport.name.toLowerCase().includes(query) ||
+        airport.code.toLowerCase().includes(query)
+    );
+    
+    // Filter individual airports
+    const matchingAirports = airports.filter(
       (airport) =>
         airport.code.toLowerCase().includes(query) ||
         airport.name.toLowerCase().includes(query) ||
         airport.city.toLowerCase().includes(query) ||
         airport.country.toLowerCase().includes(query)
-    ).slice(0, 50); // Limit results for performance
+    );
+    
+    if (!searchQuery) {
+      // Show all airports options first, then individual airports
+      return [...allAirportsOptions.slice(0, 10), ...airports.slice(0, 40)];
+    }
+    
+    return [...matchingAllAirports, ...matchingAirports].slice(0, 50);
   }, [searchQuery]);
 
   return (
@@ -264,7 +301,10 @@ export function AirportSelector({ value, onChange }: AirportSelectorProps) {
                     setOpen(false);
                     setSearchQuery("");
                   }}
-                  className="flex items-center gap-2"
+                  className={cn(
+                    "flex items-center gap-2",
+                    airport.isAllAirports && "bg-primary/5 border-l-2 border-primary"
+                  )}
                 >
                   <Check
                     className={cn(
@@ -272,11 +312,17 @@ export function AirportSelector({ value, onChange }: AirportSelectorProps) {
                       value === airport.code ? "opacity-100" : "opacity-0"
                     )}
                   />
-                  <Plane className="h-4 w-4 text-muted-foreground" />
+                  <Plane className={cn(
+                    "h-4 w-4",
+                    airport.isAllAirports ? "text-primary" : "text-muted-foreground"
+                  )} />
                   <div className="flex flex-col flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-semibold">{airport.code}</span>
-                      <span className="text-sm text-muted-foreground truncate">
+                      <span className={cn(
+                        "text-sm truncate",
+                        airport.isAllAirports ? "text-primary font-medium" : "text-muted-foreground"
+                      )}>
                         {airport.name}
                       </span>
                     </div>
