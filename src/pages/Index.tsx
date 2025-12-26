@@ -8,7 +8,6 @@ import { toast } from "@/hooks/use-toast";
 
 const defaultPreferences: TripPreferences = {
   media: [],
-  links: [],
   cities: [],
   budgetAccommodation: 50,
   budgetFlight: 50,
@@ -33,7 +32,7 @@ const Index = () => {
   const [isGenerating, setIsGenerating] = useState(false);
 
   const handleGenerate = useCallback(async () => {
-    const hasInspiration = preferences.media.length > 0 || preferences.links.length > 0 || preferences.cities.length > 0 || preferences.additionalNotes.trim();
+    const hasInspiration = preferences.media.length > 0 || preferences.cities.length > 0 || preferences.additionalNotes.trim();
     
     if (!hasInspiration) {
       toast({
