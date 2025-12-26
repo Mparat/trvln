@@ -5,48 +5,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Scrape a link using Firecrawl to get actual content
-async function scrapeLink(url: string, apiKey: string): Promise<string | null> {
-  try {
-    console.log('Scraping link:', url);
-    
-    const response = await fetch('https://api.firecrawl.dev/v1/scrape', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        url,
-        formats: ['markdown'],
-        onlyMainContent: true,
-      }),
-    });
-
-    if (!response.ok) {
-      console.error('Firecrawl error for', url, ':', response.status);
-      return null;
-    }
-
-    const data = await response.json();
-    const markdown = data.data?.markdown || data.markdown;
-    const metadata = data.data?.metadata || data.metadata;
-    
-    if (markdown || metadata) {
-      let content = '';
-      if (metadata?.title) content += `Title: ${metadata.title}\n`;
-      if (metadata?.description) content += `Description: ${metadata.description}\n`;
-      if (markdown) content += `Content: ${markdown.slice(0, 2000)}`; // Limit content length
-      return content || null;
-    }
-    
-    return null;
-  } catch (error) {
-    console.error('Error scraping link:', url, error);
-    return null;
-  }
-}
-
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -54,17 +12,18 @@ serve(async (req) => {
   }
 
   try {
-    const { description, images, videos, links, durationRange, startDate, endDate, budget } = await req.json();
+    const { description, images, videos, durationRange, startDate, endDate, budget, departureCity, flightPreference } = await req.json();
     
     console.log('Received request:', { 
       description, 
       imageCount: images?.length || 0,
       videoCount: videos?.length || 0,
-      linkCount: links?.length || 0,
       durationRange, 
       startDate,
       endDate,
-      budget 
+      budget,
+      departureCity,
+      flightPreference
     });
 
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
@@ -72,13 +31,11 @@ serve(async (req) => {
       throw new Error('LOVABLE_API_KEY is not configured');
     }
 
-    const FIRECRAWL_API_KEY = Deno.env.get('FIRECRAWL_API_KEY');
-
     const getBudgetInfo = (value: number) => {
-      if (value <= 25) return { label: "Budget-friendly", range: "$0-$50/night" };
-      if (value <= 50) return { label: "Moderate", range: "$50-$100/night" };
-      if (value <= 75) return { label: "Comfortable", range: "$100-$200/night" };
-      return { label: "Luxury", range: "$200-$500+/night" };
+      if (value <= 25) return { label: "Budget-friendly", range: "$0-$50/night", dailyBudget: "$50-80/day" };
+      if (value <= 50) return { label: "Moderate", range: "$50-$100/night", dailyBudget: "$100-150/day" };
+      if (value <= 75) return { label: "Comfortable", range: "$100-$200/night", dailyBudget: "$200-300/day" };
+      return { label: "Luxury", range: "$200-$500+/night", dailyBudget: "$400-600+/day" };
     };
 
     const budgetInfo = getBudgetInfo(budget);
@@ -86,52 +43,62 @@ serve(async (req) => {
       ? `${durationRange[0]}-day` 
       : `${durationRange[0]} to ${durationRange[1]}-day`;
 
-    // Scrape links if Firecrawl is available
-    let scrapedContent: string[] = [];
-    if (links && links.length > 0 && FIRECRAWL_API_KEY) {
-      console.log('Scraping', links.length, 'links with Firecrawl...');
-      const scrapePromises = links.map((link: string) => scrapeLink(link, FIRECRAWL_API_KEY));
-      const results = await Promise.all(scrapePromises);
-      scrapedContent = results.filter((r): r is string => r !== null);
-      console.log('Successfully scraped', scrapedContent.length, 'links');
-    }
+    const flightContext = departureCity 
+      ? `\n\nFlight Information:
+- Departing from: ${departureCity}
+- Flight preference: ${flightPreference === 'nonstop' ? 'Nonstop flights only' : 'Any flights including layovers'}
+- Include realistic flight options with approximate prices using Google Flights data patterns
+- Suggest specific airlines and typical flight durations`
+      : '';
 
     const systemPrompt = `You are an expert travel planner with deep knowledge of destinations worldwide. Create detailed, personalized travel itineraries that are practical and inspiring.
 
-Your itineraries should:
+Your itineraries MUST include these sections in order:
+
+## Trip Summary
+Start with a brief summary including:
+- Estimated daily budget (${budgetInfo.dailyBudget} based on ${budgetInfo.label} level)
+- Cities/locations with number of days in each
+- Top 3-4 key activities or highlights
+
+## Best Time to Visit
+Analyze and recommend:
+1. **Overall best season/months** - considering weather, crowds, and experiences
+2. **Cheapest time to fly** - based on typical flight pricing patterns
+3. **Special events or festivals** - worth timing your trip around
+4. **Weather considerations** - what to expect and pack
+
+${departureCity ? `## Flight Details
+Based on departing from ${departureCity}:
+- Recommended airlines and approximate prices
+- Flight duration and ${flightPreference === 'nonstop' ? 'nonstop options' : 'best connections'}
+- Best airports to fly into
+- Tips for booking (best days/times to book, how far in advance)` : ''}
+
+## Detailed Day-by-Day Itinerary
+Then provide the day-by-day plan:
 - Be organized by day and time of day (Morning, Afternoon, Evening)
 - Include specific places to visit, restaurants to try, and activities to do
 - Consider travel time between locations
 - Include local tips and hidden gems
 - Be realistic about what can be accomplished each day
-- Reflect the traveler's budget level (${budgetInfo.label}, ${budgetInfo.range} accommodation) and preferences
+- Reflect the traveler's budget level (${budgetInfo.label}, ${budgetInfo.range} accommodation)
 - Include REAL place names that can be located on a map
 
 Format your response with:
+- Clear section headers (## for main sections)
 - Day headers (e.g., "## Day 1: Arrival & First Impressions")
 - Time sections (Morning, Afternoon, Evening)
 - Bullet points for specific activities and recommendations
-- Include practical tips where relevant
-- Bold important place names like **Temple Name** or **Restaurant Name**`;
+- Bold important place names like **Temple Name** or **Restaurant Name**
+- Include practical tips where relevant`;
 
     let mediaContext = '';
     if (images && images.length > 0) {
-      mediaContext += `\nThe traveler has shared ${images.length} photo(s) of places they're interested in or want to visit.`;
+      mediaContext += `\nThe traveler has shared ${images.length} photo(s) showing places they're interested in or want to visit. Analyze these images to understand their travel preferences and desired destinations.`;
     }
     if (videos && videos.length > 0) {
       mediaContext += `\nThe traveler has shared ${videos.length} video(s) for inspiration.`;
-    }
-    
-    // Include scraped content from links
-    if (scrapedContent.length > 0) {
-      mediaContext += `\n\nThe traveler has shared social media posts for inspiration. Here is the extracted content from those posts:\n`;
-      scrapedContent.forEach((content, i) => {
-        mediaContext += `\n--- Post ${i + 1} ---\n${content}\n`;
-      });
-      mediaContext += `\nUse the locations, activities, and destinations mentioned in these posts to create the itinerary.`;
-    } else if (links && links.length > 0) {
-      // Fallback if scraping failed - at least mention the links
-      mediaContext += `\nThe traveler has shared these social media links for inspiration:\n${links.map((l: string) => `- ${l}`).join('\n')}`;
     }
 
     const dateContext = startDate && endDate
@@ -142,12 +109,19 @@ Format your response with:
 
     const userPrompt = `Create a detailed ${durationStr} travel itinerary based on the following:
 
-Destination/Description: ${description || "A wonderful travel destination based on any uploaded media or shared links"}
+Destination/Description: ${description || "Analyze the uploaded images to determine the destination and create an itinerary"}
 ${dateContext}
-Budget Level: ${budgetInfo.label} (${budgetInfo.range} for accommodation)
+Budget Level: ${budgetInfo.label} (${budgetInfo.range} for accommodation, approximately ${budgetInfo.dailyBudget} total)
 ${mediaContext}
+${flightContext}
 
-Please create a day-by-day itinerary with specific recommendations for activities, dining, and sightseeing. Include practical tips and local insights. Make sure to mention real, mappable locations with their proper names.`;
+Please create a comprehensive travel plan with:
+1. A trip summary with budget breakdown, cities, and highlights
+2. Best time to visit analysis (seasons, pricing, events)
+${departureCity ? '3. Flight recommendations from ' + departureCity : ''}
+${departureCity ? '4' : '3'}. Day-by-day itinerary with specific recommendations
+
+Make sure to mention real, mappable locations with their proper names in bold.`;
 
     // Build messages array
     const messages: any[] = [

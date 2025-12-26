@@ -16,18 +16,17 @@ const Index = () => {
   const [startDate, setStartDate] = useState<Date | undefined>();
   const [endDate, setEndDate] = useState<Date | undefined>();
   const [budget, setBudget] = useState(50);
+  const [departureCity, setDepartureCity] = useState("");
+  const [flightPreference, setFlightPreference] = useState<'nonstop' | 'any'>('any');
   const [itinerary, setItinerary] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
 
-  const convertMediaToBase64 = async (items: MediaItem[]): Promise<{ images: string[]; videos: string[]; links: string[] }> => {
+  const convertMediaToBase64 = async (items: MediaItem[]): Promise<{ images: string[]; videos: string[] }> => {
     const images: string[] = [];
     const videos: string[] = [];
-    const links: string[] = [];
 
     for (const item of items) {
-      if (item.type === 'link' && item.url) {
-        links.push(item.url);
-      } else if (item.file) {
+      if (item.file) {
         const base64 = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = () => resolve(reader.result as string);
@@ -43,7 +42,7 @@ const Index = () => {
       }
     }
 
-    return { images, videos, links };
+    return { images, videos };
   };
 
   const handleGenerate = useCallback(async () => {
@@ -60,7 +59,7 @@ const Index = () => {
     setItinerary("");
 
     try {
-      const { images, videos, links } = await convertMediaToBase64(media);
+      const { images, videos } = await convertMediaToBase64(media);
 
       // Calculate duration based on dates if both are set
       let tripDuration = durationRange;
@@ -79,11 +78,12 @@ const Index = () => {
           description,
           images,
           videos,
-          links,
           durationRange: tripDuration,
           startDate: startDate?.toISOString(),
           endDate: endDate?.toISOString(),
           budget,
+          departureCity,
+          flightPreference,
         }),
       });
 
@@ -147,7 +147,7 @@ const Index = () => {
     } finally {
       setIsGenerating(false);
     }
-  }, [description, media, durationRange, startDate, endDate, budget]);
+  }, [description, media, durationRange, startDate, endDate, budget, departureCity, flightPreference]);
 
   const getDurationDisplay = () => {
     if (startDate && endDate) {
@@ -181,7 +181,7 @@ const Index = () => {
           </h1>
           
           <p className="mt-6 text-lg md:text-xl text-muted-foreground text-center max-w-2xl mx-auto text-balance">
-            Drop your travel photos, videos, or social links — and let our AI create the perfect itinerary tailored just for you.
+            Drop screenshots of your saved TikToks, travel photos, or describe your dream destination — and let AI create the perfect itinerary.
           </p>
 
           <div className="flex items-center justify-center gap-6 mt-8 text-sm text-muted-foreground">
@@ -191,7 +191,7 @@ const Index = () => {
             </div>
             <div className="flex items-center gap-2">
               <Plane className="w-4 h-4" />
-              <span>Personalized plans</span>
+              <span>Flight suggestions</span>
             </div>
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4" />
@@ -209,7 +209,7 @@ const Index = () => {
             {/* Media Drop Zone */}
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground flex items-center gap-2">
-                <span>📸</span> Drop your inspiration (photos, videos, or links)
+                <span>📸</span> Drop your inspiration
               </label>
               <MediaDropZone media={media} onMediaChange={setMedia} />
             </div>
@@ -238,6 +238,10 @@ const Index = () => {
               onEndDateChange={setEndDate}
               budget={budget}
               onBudgetChange={setBudget}
+              departureCity={departureCity}
+              onDepartureCityChange={setDepartureCity}
+              flightPreference={flightPreference}
+              onFlightPreferenceChange={setFlightPreference}
             />
 
             {/* Generate Button */}
@@ -263,28 +267,35 @@ const Index = () => {
 
           {/* Itinerary Display */}
           {(itinerary || isGenerating) && (
-            <div className="mt-8 bg-card rounded-2xl shadow-medium p-6 md:p-8 animate-slide-up space-y-6" style={{ animationDelay: '0.1s' }}>
-              <div className="flex items-center gap-3 pb-4 border-b border-border">
-                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                  <MapPin className="w-5 h-5 text-primary" />
-                </div>
-                <div>
-                  <h2 className="font-display text-xl font-semibold text-foreground">Your Personalized Itinerary</h2>
-                  <p className="text-sm text-muted-foreground">
-                    {getDurationDisplay()} • {startDate ? `Starting ${startDate.toLocaleDateString()}` : 'Flexible dates'}
-                  </p>
-                </div>
-              </div>
-              
-              <ItineraryDisplay itinerary={itinerary} isLoading={isGenerating && !itinerary} />
-
-              {/* Map */}
+            <div className="mt-8 space-y-6 animate-slide-up" style={{ animationDelay: '0.1s' }}>
+              {/* Map First */}
               {itinerary && !isGenerating && (
-                <div className="pt-6 border-t border-border">
-                  <h3 className="font-display text-lg font-semibold text-foreground mb-4">📍 Your Journey Map</h3>
+                <div className="bg-card rounded-2xl shadow-medium p-6 md:p-8">
+                  <h3 className="font-display text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
+                    <MapPin className="w-5 h-5 text-primary" />
+                    Your Journey Map
+                  </h3>
                   <ItineraryMap itinerary={itinerary} />
                 </div>
               )}
+
+              {/* Detailed Itinerary */}
+              <div className="bg-card rounded-2xl shadow-medium p-6 md:p-8">
+                <div className="flex items-center gap-3 pb-4 border-b border-border mb-6">
+                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                    <Sparkles className="w-5 h-5 text-primary" />
+                  </div>
+                  <div>
+                    <h2 className="font-display text-xl font-semibold text-foreground">Your Personalized Itinerary</h2>
+                    <p className="text-sm text-muted-foreground">
+                      {getDurationDisplay()} • {startDate ? `Starting ${startDate.toLocaleDateString()}` : 'Flexible dates'}
+                      {departureCity && ` • From ${departureCity}`}
+                    </p>
+                  </div>
+                </div>
+                
+                <ItineraryDisplay itinerary={itinerary} isLoading={isGenerating && !itinerary} />
+              </div>
             </div>
           )}
         </div>
