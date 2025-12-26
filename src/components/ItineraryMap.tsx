@@ -7,11 +7,13 @@ interface Location {
   name: string;
   lat: number;
   lng: number;
-  day?: number;
+  type: 'departure' | 'destination';
+  order: number;
 }
 
 interface ItineraryMapProps {
   itinerary: string;
+  departureCity?: string;
 }
 
 // Fix for default marker icons in Leaflet
@@ -22,86 +24,222 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
 });
 
-export function ItineraryMap({ itinerary }: ItineraryMapProps) {
+// Known cities with coordinates for faster lookup
+const cityCoordinates: Record<string, { lat: number; lng: number }> = {
+  'tokyo': { lat: 35.6762, lng: 139.6503 },
+  'kyoto': { lat: 35.0116, lng: 135.7681 },
+  'osaka': { lat: 34.6937, lng: 135.5023 },
+  'new york': { lat: 40.7128, lng: -74.0060 },
+  'los angeles': { lat: 34.0522, lng: -118.2437 },
+  'san francisco': { lat: 37.7749, lng: -122.4194 },
+  'london': { lat: 51.5074, lng: -0.1278 },
+  'paris': { lat: 48.8566, lng: 2.3522 },
+  'rome': { lat: 41.9028, lng: 12.4964 },
+  'barcelona': { lat: 41.3851, lng: 2.1734 },
+  'amsterdam': { lat: 52.3676, lng: 4.9041 },
+  'berlin': { lat: 52.5200, lng: 13.4050 },
+  'munich': { lat: 48.1351, lng: 11.5820 },
+  'singapore': { lat: 1.3521, lng: 103.8198 },
+  'hong kong': { lat: 22.3193, lng: 114.1694 },
+  'bangkok': { lat: 13.7563, lng: 100.5018 },
+  'seoul': { lat: 37.5665, lng: 126.9780 },
+  'sydney': { lat: -33.8688, lng: 151.2093 },
+  'melbourne': { lat: -37.8136, lng: 144.9631 },
+  'dubai': { lat: 25.2048, lng: 55.2708 },
+  'istanbul': { lat: 41.0082, lng: 28.9784 },
+  'cairo': { lat: 30.0444, lng: 31.2357 },
+  'cape town': { lat: -33.9249, lng: 18.4241 },
+  'rio de janeiro': { lat: -22.9068, lng: -43.1729 },
+  'buenos aires': { lat: -34.6037, lng: -58.3816 },
+  'mexico city': { lat: 19.4326, lng: -99.1332 },
+  'toronto': { lat: 43.6532, lng: -79.3832 },
+  'vancouver': { lat: 49.2827, lng: -123.1207 },
+  'chicago': { lat: 41.8781, lng: -87.6298 },
+  'miami': { lat: 25.7617, lng: -80.1918 },
+  'seattle': { lat: 47.6062, lng: -122.3321 },
+  'denver': { lat: 39.7392, lng: -104.9903 },
+  'boston': { lat: 42.3601, lng: -71.0589 },
+  'washington': { lat: 38.9072, lng: -77.0369 },
+  'washington dc': { lat: 38.9072, lng: -77.0369 },
+  'atlanta': { lat: 33.7490, lng: -84.3880 },
+  'dallas': { lat: 32.7767, lng: -96.7970 },
+  'houston': { lat: 29.7604, lng: -95.3698 },
+  'phoenix': { lat: 33.4484, lng: -112.0740 },
+  'las vegas': { lat: 36.1699, lng: -115.1398 },
+  'san diego': { lat: 32.7157, lng: -117.1611 },
+  'portland': { lat: 45.5152, lng: -122.6784 },
+  'philadelphia': { lat: 39.9526, lng: -75.1652 },
+  'lisbon': { lat: 38.7223, lng: -9.1393 },
+  'madrid': { lat: 40.4168, lng: -3.7038 },
+  'vienna': { lat: 48.2082, lng: 16.3738 },
+  'prague': { lat: 50.0755, lng: 14.4378 },
+  'budapest': { lat: 47.4979, lng: 19.0402 },
+  'athens': { lat: 37.9838, lng: 23.7275 },
+  'dublin': { lat: 53.3498, lng: -6.2603 },
+  'edinburgh': { lat: 55.9533, lng: -3.1883 },
+  'zurich': { lat: 47.3769, lng: 8.5417 },
+  'geneva': { lat: 46.2044, lng: 6.1432 },
+  'copenhagen': { lat: 55.6761, lng: 12.5683 },
+  'stockholm': { lat: 59.3293, lng: 18.0686 },
+  'oslo': { lat: 59.9139, lng: 10.7522 },
+  'helsinki': { lat: 60.1699, lng: 24.9384 },
+  'nara': { lat: 34.6851, lng: 135.8050 },
+  'hakone': { lat: 35.2324, lng: 139.1069 },
+  'hiroshima': { lat: 34.3853, lng: 132.4553 },
+  'nagoya': { lat: 35.1815, lng: 136.9066 },
+  'fukuoka': { lat: 33.5904, lng: 130.4017 },
+  'sapporo': { lat: 43.0618, lng: 141.3545 },
+  'nikko': { lat: 36.7199, lng: 139.6982 },
+  'kanazawa': { lat: 36.5613, lng: 136.6562 },
+  'takayama': { lat: 36.1461, lng: 137.2522 },
+  'mt fuji': { lat: 35.3606, lng: 138.7274 },
+  'mount fuji': { lat: 35.3606, lng: 138.7274 },
+};
+
+export function ItineraryMap({ itinerary, departureCity }: ItineraryMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const [locations, setLocations] = useState<Location[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Extract location names from itinerary
-  const extractedPlaces = useMemo(() => {
-    const places: { name: string; day: number }[] = [];
+  // Extract city names from itinerary (not attractions)
+  const extractedCities = useMemo(() => {
+    const cities: { name: string; order: number }[] = [];
     const lines = itinerary.split('\n');
-    let currentDay = 1;
+    let order = 1;
+
+    // Look for city patterns in the itinerary
+    const cityPatterns = [
+      // "Day 1: Tokyo" or "Day 1 - Arriving in Tokyo"
+      /Day\s+\d+[:\-–]\s*(?:Arriving in |Arrival in |Explore |Exploring |)([A-Z][a-zA-Z\s]+?)(?:\s*[-–]|$|\.|,)/gi,
+      // "Fly to Tokyo" or "Train to Kyoto"
+      /(?:Fly|Train|Travel|Head|Go|Depart|Arrive)\s+(?:to|in)\s+([A-Z][a-zA-Z\s]+?)(?:\s*[-–]|$|\.|,)/gi,
+      // City in bold **Tokyo**
+      /\*\*([A-Z][a-zA-Z\s]+)\*\*/g,
+    ];
 
     for (const line of lines) {
-      const dayMatch = line.match(/Day\s+(\d+)/i);
-      if (dayMatch) {
-        currentDay = parseInt(dayMatch[1], 10);
-      }
-
-      const patterns = [
-        /(?:visit|explore|see|tour|go to|head to|stop at|check out)\s+(?:the\s+)?([A-Z][a-zA-Z\s]+?)(?:\.|,|$)/gi,
-        /([A-Z][a-zA-Z\s]+(?:Temple|Palace|Park|Museum|Market|Beach|Tower|Garden|Castle|Cathedral|Square|Bridge|District|Shrine))/g,
-        /\*\*([A-Z][a-zA-Z\s]+)\*\*/g,
-      ];
-
-      for (const pattern of patterns) {
-        const matches = line.matchAll(pattern);
-        for (const match of matches) {
-          const placeName = match[1]?.trim();
-          if (placeName && placeName.length > 2 && placeName.length < 50) {
-            if (!places.find(p => p.name.toLowerCase() === placeName.toLowerCase())) {
-              places.push({ name: placeName, day: currentDay });
-            }
+      for (const pattern of cityPatterns) {
+        pattern.lastIndex = 0;
+        const match = pattern.exec(line);
+        if (match && match[1]) {
+          const cityName = match[1].trim().toLowerCase();
+          // Check if it's a known city
+          if (cityCoordinates[cityName] && !cities.find(c => c.name.toLowerCase() === cityName)) {
+            cities.push({ name: match[1].trim(), order: order++ });
           }
         }
       }
     }
 
-    return places.slice(0, 15);
-  }, [itinerary]);
-
-  // Geocode the extracted places
-  useEffect(() => {
-    if (extractedPlaces.length === 0) {
-      setIsLoading(false);
-      return;
+    // Also look for simple city mentions
+    const knownCityNames = Object.keys(cityCoordinates);
+    for (const line of lines) {
+      const lowerLine = line.toLowerCase();
+      for (const city of knownCityNames) {
+        if (lowerLine.includes(city) && !cities.find(c => c.name.toLowerCase() === city)) {
+          // Only add if the line looks like a day header or major section
+          if (/day\s+\d+|arrive|depart|flight|train|travel to/i.test(line)) {
+            cities.push({ name: city.charAt(0).toUpperCase() + city.slice(1), order: order++ });
+          }
+        }
+      }
     }
 
-    const geocodePlaces = async () => {
+    return cities.slice(0, 10); // Limit to 10 cities
+  }, [itinerary]);
+
+  // Geocode cities
+  useEffect(() => {
+    const geocodeCities = async () => {
       setIsLoading(true);
       const geocoded: Location[] = [];
 
-      for (const place of extractedPlaces) {
-        try {
-          const response = await fetch(
-            `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(place.name)}&limit=1`,
-            { headers: { 'User-Agent': 'WanderlustAI/1.0' } }
-          );
-          const data = await response.json();
-          
-          if (data && data[0]) {
+      // Add departure city first if provided
+      if (departureCity) {
+        // Try to find departure city in known coordinates
+        const departureLower = departureCity.toLowerCase();
+        for (const [city, coords] of Object.entries(cityCoordinates)) {
+          if (departureLower.includes(city)) {
             geocoded.push({
-              name: place.name,
-              lat: parseFloat(data[0].lat),
-              lng: parseFloat(data[0].lon),
-              day: place.day,
+              name: departureCity,
+              lat: coords.lat,
+              lng: coords.lng,
+              type: 'departure',
+              order: 0,
             });
+            break;
           }
-          
-          await new Promise(r => setTimeout(r, 300));
-        } catch (error) {
-          console.warn(`Failed to geocode: ${place.name}`);
+        }
+
+        // If not found, try geocoding
+        if (geocoded.length === 0) {
+          try {
+            const response = await fetch(
+              `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(departureCity)}&limit=1`,
+              { headers: { 'User-Agent': 'WanderlustAI/1.0' } }
+            );
+            const data = await response.json();
+            if (data && data[0]) {
+              geocoded.push({
+                name: departureCity,
+                lat: parseFloat(data[0].lat),
+                lng: parseFloat(data[0].lon),
+                type: 'departure',
+                order: 0,
+              });
+            }
+          } catch (error) {
+            console.warn(`Failed to geocode departure city: ${departureCity}`);
+          }
         }
       }
 
+      // Add destination cities
+      for (const city of extractedCities) {
+        const cityLower = city.name.toLowerCase();
+        const coords = cityCoordinates[cityLower];
+        
+        if (coords) {
+          geocoded.push({
+            name: city.name,
+            lat: coords.lat,
+            lng: coords.lng,
+            type: 'destination',
+            order: city.order,
+          });
+        } else {
+          // Geocode unknown cities
+          try {
+            const response = await fetch(
+              `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(city.name)}&limit=1`,
+              { headers: { 'User-Agent': 'WanderlustAI/1.0' } }
+            );
+            const data = await response.json();
+            if (data && data[0]) {
+              geocoded.push({
+                name: city.name,
+                lat: parseFloat(data[0].lat),
+                lng: parseFloat(data[0].lon),
+                type: 'destination',
+                order: city.order,
+              });
+            }
+            await new Promise(r => setTimeout(r, 300)); // Rate limit
+          } catch (error) {
+            console.warn(`Failed to geocode: ${city.name}`);
+          }
+        }
+      }
+
+      // Sort by order
+      geocoded.sort((a, b) => a.order - b.order);
       setLocations(geocoded);
       setIsLoading(false);
     };
 
-    geocodePlaces();
-  }, [extractedPlaces]);
+    geocodeCities();
+  }, [extractedCities, departureCity]);
 
   // Initialize and update map
   useEffect(() => {
@@ -125,55 +263,63 @@ export function ItineraryMap({ itinerary }: ItineraryMapProps) {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     }).addTo(map);
 
-    // Create custom marker icon with city label
-    const createMarkerIcon = (day: number, name: string) => L.divIcon({
-      className: 'custom-marker',
-      html: `
-        <div style="display: flex; flex-direction: column; align-items: center; transform: translateX(-50%);">
-          <div style="
-            background: #C45D35;
-            width: 28px;
-            height: 28px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-            font-size: 12px;
-            border: 2px solid white;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-          ">${day}</div>
-          <div style="
-            background: white;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 11px;
-            font-weight: 600;
-            color: #1a1a1a;
-            white-space: nowrap;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-            margin-top: 4px;
-            max-width: 120px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-          ">${name}</div>
-        </div>
-      `,
-      iconSize: [120, 50],
-      iconAnchor: [60, 14],
-    });
+    // Create custom marker icon
+    const createMarkerIcon = (order: number, name: string, type: 'departure' | 'destination') => {
+      const bgColor = type === 'departure' ? '#1e40af' : '#C45D35';
+      const label = type === 'departure' ? '✈️' : order.toString();
+      
+      return L.divIcon({
+        className: 'custom-marker',
+        html: `
+          <div style="display: flex; flex-direction: column; align-items: center; transform: translateX(-50%);">
+            <div style="
+              background: ${bgColor};
+              width: 32px;
+              height: 32px;
+              border-radius: 50%;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              color: white;
+              font-weight: bold;
+              font-size: ${type === 'departure' ? '16px' : '14px'};
+              border: 3px solid white;
+              box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+            ">${label}</div>
+            <div style="
+              background: white;
+              padding: 3px 8px;
+              border-radius: 4px;
+              font-size: 12px;
+              font-weight: 600;
+              color: #1a1a1a;
+              white-space: nowrap;
+              box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+              margin-top: 4px;
+              max-width: 140px;
+              overflow: hidden;
+              text-overflow: ellipsis;
+            ">${name}</div>
+          </div>
+        `,
+        iconSize: [140, 60],
+        iconAnchor: [70, 16],
+      });
+    };
 
     // Add markers
     const bounds = L.latLngBounds([]);
-    locations.forEach((location) => {
+    locations.forEach((location, index) => {
+      const displayOrder = location.type === 'departure' ? 0 : index;
       const marker = L.marker([location.lat, location.lng], {
-        icon: createMarkerIcon(location.day || 1, location.name),
+        icon: createMarkerIcon(displayOrder, location.name, location.type),
       }).addTo(map);
 
       marker.bindPopup(`
         <div style="font-weight: 600;">${location.name}</div>
-        ${location.day ? `<div style="font-size: 12px; color: #666;">Day ${location.day}</div>` : ''}
+        <div style="font-size: 12px; color: #666;">
+          ${location.type === 'departure' ? 'Departure City' : `Stop ${location.order}`}
+        </div>
       `);
 
       bounds.extend([location.lat, location.lng]);
@@ -185,14 +331,14 @@ export function ItineraryMap({ itinerary }: ItineraryMapProps) {
       L.polyline(latLngs, {
         color: '#C45D35',
         weight: 3,
-        opacity: 0.6,
+        opacity: 0.7,
         dashArray: '10, 10',
       }).addTo(map);
     }
 
     // Fit bounds
     if (bounds.isValid()) {
-      map.fitBounds(bounds, { padding: [50, 50] });
+      map.fitBounds(bounds, { padding: [60, 60] });
     }
 
     // Cleanup on unmount
@@ -204,7 +350,7 @@ export function ItineraryMap({ itinerary }: ItineraryMapProps) {
     };
   }, [locations]);
 
-  if (isLoading && extractedPlaces.length > 0) {
+  if (isLoading && (extractedCities.length > 0 || departureCity)) {
     return (
       <div className="h-[400px] rounded-xl bg-muted flex items-center justify-center">
         <div className="text-center space-y-2">
@@ -220,7 +366,7 @@ export function ItineraryMap({ itinerary }: ItineraryMapProps) {
       <div className="h-[300px] rounded-xl bg-muted flex items-center justify-center">
         <div className="text-center space-y-2">
           <MapPin className="w-8 h-8 text-muted-foreground mx-auto" />
-          <p className="text-sm text-muted-foreground">No mappable locations found</p>
+          <p className="text-sm text-muted-foreground">No cities found to map</p>
         </div>
       </div>
     );
