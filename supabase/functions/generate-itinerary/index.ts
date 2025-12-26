@@ -155,12 +155,35 @@ You MUST incorporate these requests into the core itinerary, not just mention th
     : ""
 }
 
+## GUIDED VS SELF-SERVE PREFERENCE:
+${guidedPreference === 'prefer-guided' ? `
+The traveler PREFERS GUIDED TOURS. For activities where guides add value (hiking, cultural experiences, adventure activities):
+- ALWAYS recommend specific tour operators with URLs, costs, and booking info
+- Search for and cite "best guided tours for [activity]" - include company names, ratings, what's included
+- For hiking (e.g., Mt. Fuji), recommend specific guided climbing tours with mountain guides
+- For cultural experiences, recommend guided walking tours, cooking classes with instructors, etc.
+- Include: company name, approximate cost, duration, what's included, booking URL, why this operator
+` : guidedPreference === 'self-serve' ? `
+The traveler wants SELF-SERVE/DIY ONLY. No guided tours:
+- Provide detailed self-guided instructions for every activity
+- For hikes: trailhead access, route descriptions, timing, what to bring, hut reservations
+- For cultural sites: self-guided audio tours, best times to visit solo, navigation tips
+- Include: detailed step-by-step instructions, offline maps recommendations, essential apps
+- Never recommend tour groups or guided experiences
+` : `
+The traveler is OPEN TO A MIX of guided and self-serve:
+- Suggest guided tours for complex activities (multi-day hikes, cooking classes, adventure sports)
+- Suggest DIY for simpler experiences (temple visits, neighborhood walks, food markets)
+- Provide both options when relevant, letting them choose
+`}
+
 ## RESEARCH & SPECIFICITY:
 For EVERY activity, include:
 - **What it is**: Brief description so traveler understands why it's special
 - **Key details**: Timing, duration, difficulty, what to expect
 - **Why this one**: Link to a blog post, travel article, or explain why this is the best option (e.g., "Ranked #1 on Japan-Guide.com" or "Recommended by Lonely Planet")
 - **Practical info**: Cost estimates, booking URLs, lead times needed
+${guidedPreference === 'prefer-guided' ? '- **Guided option**: Specific tour operator, what\'s included, cost, booking URL' : ''}
 
 For TRAVEL & TRANSPORT:
 - **How to book**: Specific instructions (e.g., "Use HyperDia.com or Google Maps for train times")
