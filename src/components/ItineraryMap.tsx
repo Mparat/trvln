@@ -125,32 +125,50 @@ export function ItineraryMap({ itinerary }: ItineraryMapProps) {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     }).addTo(map);
 
-    // Create custom marker icon
-    const createMarkerIcon = (day: number) => L.divIcon({
+    // Create custom marker icon with city label
+    const createMarkerIcon = (day: number, name: string) => L.divIcon({
       className: 'custom-marker',
-      html: `<div style="
-        background: #C45D35;
-        width: 28px;
-        height: 28px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: white;
-        font-weight: bold;
-        font-size: 12px;
-        border: 2px solid white;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-      ">${day}</div>`,
-      iconSize: [28, 28],
-      iconAnchor: [14, 14],
+      html: `
+        <div style="display: flex; flex-direction: column; align-items: center; transform: translateX(-50%);">
+          <div style="
+            background: #C45D35;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 12px;
+            border: 2px solid white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+          ">${day}</div>
+          <div style="
+            background: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #1a1a1a;
+            white-space: nowrap;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+            margin-top: 4px;
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          ">${name}</div>
+        </div>
+      `,
+      iconSize: [120, 50],
+      iconAnchor: [60, 14],
     });
 
     // Add markers
     const bounds = L.latLngBounds([]);
     locations.forEach((location) => {
       const marker = L.marker([location.lat, location.lng], {
-        icon: createMarkerIcon(location.day || 1),
+        icon: createMarkerIcon(location.day || 1, location.name),
       }).addTo(map);
 
       marker.bindPopup(`
