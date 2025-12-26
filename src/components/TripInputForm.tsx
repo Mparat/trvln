@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, forwardRef } from "react";
 import { 
   Sparkles, Camera, MapPin, Calendar, Clock, Wallet, Plane, 
   Building, Trees, Tent, Heart, Users, Zap, 
@@ -99,6 +99,41 @@ const flightBudgetLabels = [
   { min: 75, max: 100, label: "Premium", range: "$1000+" },
 ];
 
+interface SectionHeaderProps {
+  icon: React.ElementType;
+  title: string;
+  isExpanded: boolean;
+  description: string;
+}
+
+const SectionHeader = forwardRef<HTMLButtonElement, SectionHeaderProps & React.ButtonHTMLAttributes<HTMLButtonElement>>(
+  ({ icon: Icon, title, isExpanded, description, ...props }, ref) => (
+    <button
+      ref={ref}
+      type="button"
+      className="flex items-center justify-between w-full p-4 hover:bg-muted/50 rounded-xl transition-colors"
+      {...props}
+    >
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+          <Icon className="w-5 h-5 text-primary" />
+        </div>
+        <div className="text-left">
+          <h3 className="font-display font-semibold text-foreground">{title}</h3>
+          <p className="text-sm text-muted-foreground">{description}</p>
+        </div>
+      </div>
+      {isExpanded ? (
+        <ChevronUp className="w-5 h-5 text-muted-foreground" />
+      ) : (
+        <ChevronDown className="w-5 h-5 text-muted-foreground" />
+      )}
+    </button>
+  )
+);
+
+SectionHeader.displayName = 'SectionHeader';
+
 export function TripInputForm({ preferences, onPreferencesChange, onGenerate, isGenerating }: TripInputFormProps) {
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     inspiration: true,
@@ -141,48 +176,18 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
     return label;
   };
 
-  const SectionHeader = ({ 
-    icon: Icon, 
-    title, 
-    section, 
-    description 
-  }: { 
-    icon: React.ElementType; 
-    title: string; 
-    section: string; 
-    description: string;
-  }) => (
-    <CollapsibleTrigger 
-      onClick={() => toggleSection(section)}
-      className="flex items-center justify-between w-full p-4 hover:bg-muted/50 rounded-xl transition-colors"
-    >
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-          <Icon className="w-5 h-5 text-primary" />
-        </div>
-        <div className="text-left">
-          <h3 className="font-display font-semibold text-foreground">{title}</h3>
-          <p className="text-sm text-muted-foreground">{description}</p>
-        </div>
-      </div>
-      {expandedSections[section] ? (
-        <ChevronUp className="w-5 h-5 text-muted-foreground" />
-      ) : (
-        <ChevronDown className="w-5 h-5 text-muted-foreground" />
-      )}
-    </CollapsibleTrigger>
-  );
-
   return (
     <div className="bg-card rounded-2xl shadow-medium overflow-hidden animate-slide-up">
       {/* Section 1: Inspiration */}
       <Collapsible open={expandedSections.inspiration} onOpenChange={() => toggleSection('inspiration')}>
-        <SectionHeader 
-          icon={Camera} 
-          title="Inspiration" 
-          section="inspiration"
-          description="Screenshots, links, cities you want to visit"
-        />
+        <CollapsibleTrigger asChild>
+          <SectionHeader 
+            icon={Camera} 
+            title="Inspiration" 
+            isExpanded={expandedSections.inspiration}
+            description="Screenshots, links, cities you want to visit"
+          />
+        </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="px-6 pb-6 space-y-5">
             {/* Media Drop Zone */}
@@ -231,12 +236,14 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
 
       {/* Section 2: Logistics */}
       <Collapsible open={expandedSections.logistics} onOpenChange={() => toggleSection('logistics')}>
-        <SectionHeader 
-          icon={Plane} 
-          title="Logistics" 
-          section="logistics"
-          description="Budget, dates, duration, flights"
-        />
+        <CollapsibleTrigger asChild>
+          <SectionHeader 
+            icon={Plane} 
+            title="Logistics" 
+            isExpanded={expandedSections.logistics}
+            description="Budget, dates, duration, flights"
+          />
+        </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="px-6 pb-6 space-y-6">
             {/* Budgets */}
@@ -446,12 +453,14 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
 
       {/* Section 3: Vibe */}
       <Collapsible open={expandedSections.vibe} onOpenChange={() => toggleSection('vibe')}>
-        <SectionHeader 
-          icon={Heart} 
-          title="Vibe" 
-          section="vibe"
-          description="Atmosphere, adventure, food preferences"
-        />
+        <CollapsibleTrigger asChild>
+          <SectionHeader 
+            icon={Heart} 
+            title="Vibe" 
+            isExpanded={expandedSections.vibe}
+            description="Atmosphere, adventure, food preferences"
+          />
+        </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="px-6 pb-6 space-y-6">
             {/* Atmosphere */}
@@ -555,12 +564,14 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
 
       {/* Section 4: Additional Notes */}
       <Collapsible open={expandedSections.notes} onOpenChange={() => toggleSection('notes')}>
-        <SectionHeader 
-          icon={Sparkles} 
-          title="Additional Notes" 
-          section="notes"
-          description="Anything else we should know"
-        />
+        <CollapsibleTrigger asChild>
+          <SectionHeader 
+            icon={Sparkles} 
+            title="Additional Notes" 
+            isExpanded={expandedSections.notes}
+            description="Anything else we should know"
+          />
+        </CollapsibleTrigger>
         <CollapsibleContent>
           <div className="px-6 pb-6">
             <Textarea
