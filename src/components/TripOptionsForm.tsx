@@ -2,13 +2,127 @@ import { useState } from "react";
 import { Calendar, Clock, Wallet, ChevronDown, ChevronUp, Minus, Plus, Plane, MapPinned } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
-import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { format, addDays, subDays } from "date-fns";
+
+// Major US metro areas with their airports
+const airportGroups = [
+  {
+    city: "New York",
+    code: "NYC",
+    airports: [
+      { code: "JFK", name: "John F. Kennedy" },
+      { code: "LGA", name: "LaGuardia" },
+      { code: "EWR", name: "Newark" },
+    ],
+  },
+  {
+    city: "Los Angeles",
+    code: "LAX",
+    airports: [
+      { code: "LAX", name: "Los Angeles Intl" },
+      { code: "BUR", name: "Burbank" },
+      { code: "SNA", name: "Orange County" },
+      { code: "ONT", name: "Ontario" },
+    ],
+  },
+  {
+    city: "Chicago",
+    code: "CHI",
+    airports: [
+      { code: "ORD", name: "O'Hare" },
+      { code: "MDW", name: "Midway" },
+    ],
+  },
+  {
+    city: "San Francisco Bay Area",
+    code: "SFO",
+    airports: [
+      { code: "SFO", name: "San Francisco" },
+      { code: "OAK", name: "Oakland" },
+      { code: "SJC", name: "San Jose" },
+    ],
+  },
+  {
+    city: "Washington DC",
+    code: "WAS",
+    airports: [
+      { code: "DCA", name: "Reagan National" },
+      { code: "IAD", name: "Dulles" },
+      { code: "BWI", name: "Baltimore" },
+    ],
+  },
+  {
+    city: "Miami",
+    code: "MIA",
+    airports: [
+      { code: "MIA", name: "Miami Intl" },
+      { code: "FLL", name: "Fort Lauderdale" },
+      { code: "PBI", name: "Palm Beach" },
+    ],
+  },
+  {
+    city: "Dallas",
+    code: "DFW",
+    airports: [
+      { code: "DFW", name: "Dallas/Fort Worth" },
+      { code: "DAL", name: "Love Field" },
+    ],
+  },
+  {
+    city: "Houston",
+    code: "HOU",
+    airports: [
+      { code: "IAH", name: "George Bush Intercontinental" },
+      { code: "HOU", name: "Hobby" },
+    ],
+  },
+  {
+    city: "Boston",
+    code: "BOS",
+    airports: [{ code: "BOS", name: "Logan Intl" }],
+  },
+  {
+    city: "Seattle",
+    code: "SEA",
+    airports: [{ code: "SEA", name: "Seattle-Tacoma" }],
+  },
+  {
+    city: "Denver",
+    code: "DEN",
+    airports: [{ code: "DEN", name: "Denver Intl" }],
+  },
+  {
+    city: "Atlanta",
+    code: "ATL",
+    airports: [{ code: "ATL", name: "Hartsfield-Jackson" }],
+  },
+  {
+    city: "Philadelphia",
+    code: "PHL",
+    airports: [{ code: "PHL", name: "Philadelphia Intl" }],
+  },
+  {
+    city: "Phoenix",
+    code: "PHX",
+    airports: [{ code: "PHX", name: "Sky Harbor" }],
+  },
+  {
+    city: "Detroit",
+    code: "DTW",
+    airports: [{ code: "DTW", name: "Detroit Metro" }],
+  },
+  {
+    city: "Minneapolis",
+    code: "MSP",
+    airports: [{ code: "MSP", name: "Minneapolis-St. Paul" }],
+  },
+];
 
 interface TripOptionsFormProps {
   durationRange: [number, number];
@@ -103,19 +217,38 @@ export function TripOptionsForm({
                 Flight Preferences
               </h4>
               
-              {/* Departure City */}
+              {/* Departure Airport */}
               <div className="space-y-2">
-                <Label htmlFor="departure-city" className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Label className="flex items-center gap-2 text-sm text-muted-foreground">
                   <MapPinned className="w-3 h-3" />
                   Departing from
                 </Label>
-                <Input
-                  id="departure-city"
-                  value={departureCity}
-                  onChange={(e) => onDepartureCityChange(e.target.value)}
-                  placeholder="e.g., New York, Los Angeles, Chicago..."
-                  className="bg-background"
-                />
+                <Select value={departureCity} onValueChange={onDepartureCityChange}>
+                  <SelectTrigger className="bg-background">
+                    <SelectValue placeholder="Select departure airport..." />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-[300px]">
+                    {airportGroups.map((group) => (
+                      <SelectGroup key={group.code}>
+                        <SelectLabel className="text-xs text-muted-foreground font-semibold">
+                          {group.city}
+                        </SelectLabel>
+                        {group.airports.length > 1 && (
+                          <SelectItem value={`${group.code}-ALL`} className="pl-4">
+                            <span className="font-medium">{group.code}</span>
+                            <span className="text-muted-foreground ml-2">All {group.city} Airports</span>
+                          </SelectItem>
+                        )}
+                        {group.airports.map((airport) => (
+                          <SelectItem key={airport.code} value={airport.code} className="pl-4">
+                            <span className="font-medium">{airport.code}</span>
+                            <span className="text-muted-foreground ml-2">{airport.name}</span>
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* Flight Type */}
