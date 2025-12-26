@@ -7,13 +7,11 @@ interface Location {
   name: string;
   lat: number;
   lng: number;
-  type: 'departure' | 'destination';
   order: number;
 }
 
 interface ItineraryMapProps {
   itinerary: string;
-  departureCity?: string;
 }
 
 // Fix for default marker icons in Leaflet
@@ -96,7 +94,7 @@ const cityCoordinates: Record<string, { lat: number; lng: number }> = {
   'mount fuji': { lat: 35.3606, lng: 138.7274 },
 };
 
-export function ItineraryMap({ itinerary, departureCity }: ItineraryMapProps) {
+export function ItineraryMap({ itinerary }: ItineraryMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const [locations, setLocations] = useState<Location[]>([]);
@@ -155,46 +153,6 @@ export function ItineraryMap({ itinerary, departureCity }: ItineraryMapProps) {
       setIsLoading(true);
       const geocoded: Location[] = [];
 
-      // Add departure city first if provided
-      if (departureCity) {
-        // Try to find departure city in known coordinates
-        const departureLower = departureCity.toLowerCase();
-        for (const [city, coords] of Object.entries(cityCoordinates)) {
-          if (departureLower.includes(city)) {
-            geocoded.push({
-              name: departureCity,
-              lat: coords.lat,
-              lng: coords.lng,
-              type: 'departure',
-              order: 0,
-            });
-            break;
-          }
-        }
-
-        // If not found, try geocoding
-        if (geocoded.length === 0) {
-          try {
-            const response = await fetch(
-              `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(departureCity)}&limit=1`,
-              { headers: { 'User-Agent': 'WanderlustAI/1.0' } }
-            );
-            const data = await response.json();
-            if (data && data[0]) {
-              geocoded.push({
-                name: departureCity,
-                lat: parseFloat(data[0].lat),
-                lng: parseFloat(data[0].lon),
-                type: 'departure',
-                order: 0,
-              });
-            }
-          } catch (error) {
-            console.warn(`Failed to geocode departure city: ${departureCity}`);
-          }
-        }
-      }
-
       // Add destination cities
       for (const city of extractedCities) {
         const cityLower = city.name.toLowerCase();
@@ -205,7 +163,6 @@ export function ItineraryMap({ itinerary, departureCity }: ItineraryMapProps) {
             name: city.name,
             lat: coords.lat,
             lng: coords.lng,
-            type: 'destination',
             order: city.order,
           });
         } else {
@@ -221,7 +178,6 @@ export function ItineraryMap({ itinerary, departureCity }: ItineraryMapProps) {
                 name: city.name,
                 lat: parseFloat(data[0].lat),
                 lng: parseFloat(data[0].lon),
-                type: 'destination',
                 order: city.order,
               });
             }
@@ -239,7 +195,7 @@ export function ItineraryMap({ itinerary, departureCity }: ItineraryMapProps) {
     };
 
     geocodeCities();
-  }, [extractedCities, departureCity]);
+  }, [extractedCities]);
 
   // Initialize and update map
   useEffect(() => {
@@ -264,16 +220,13 @@ export function ItineraryMap({ itinerary, departureCity }: ItineraryMapProps) {
     }).addTo(map);
 
     // Create custom marker icon
-    const createMarkerIcon = (order: number, name: string, type: 'departure' | 'destination') => {
-      const bgColor = type === 'departure' ? '#1e40af' : '#C45D35';
-      const label = type === 'departure' ? '✈️' : order.toString();
-      
+    const createMarkerIcon = (order: number, name: string) => {
       return L.divIcon({
         className: 'custom-marker',
         html: `
           <div style="display: flex; flex-direction: column; align-items: center; transform: translateX(-50%);">
             <div style="
-              background: ${bgColor};
+              background: #C45D35;
               width: 32px;
               height: 32px;
               border-radius: 50%;
@@ -282,10 +235,10 @@ export function ItineraryMap({ itinerary, departureCity }: ItineraryMapProps) {
               justify-content: center;
               color: white;
               font-weight: bold;
-              font-size: ${type === 'departure' ? '16px' : '14px'};
+              font-size: 14px;
               border: 3px solid white;
               box-shadow: 0 2px 6px rgba(0,0,0,0.4);
-            ">${label}</div>
+            ">${order}</div>
             <div style="
               background: white;
               padding: 3px 8px;
@@ -309,17 +262,14 @@ export function ItineraryMap({ itinerary, departureCity }: ItineraryMapProps) {
 
     // Add markers
     const bounds = L.latLngBounds([]);
-    locations.forEach((location, index) => {
-      const displayOrder = location.type === 'departure' ? 0 : index;
+    locations.forEach((location) => {
       const marker = L.marker([location.lat, location.lng], {
-        icon: createMarkerIcon(displayOrder, location.name, location.type),
+        icon: createMarkerIcon(location.order, location.name),
       }).addTo(map);
 
       marker.bindPopup(`
         <div style="font-weight: 600;">${location.name}</div>
-        <div style="font-size: 12px; color: #666;">
-          ${location.type === 'departure' ? 'Departure City' : `Stop ${location.order}`}
-        </div>
+        <div style="font-size: 12px; color: #666;">Stop ${location.order}</div>
       `);
 
       bounds.extend([location.lat, location.lng]);
@@ -350,7 +300,7 @@ export function ItineraryMap({ itinerary, departureCity }: ItineraryMapProps) {
     };
   }, [locations]);
 
-  if (isLoading && (extractedCities.length > 0 || departureCity)) {
+  if (isLoading && extractedCities.length > 0) {
     return (
       <div className="h-[400px] rounded-xl bg-muted flex items-center justify-center">
         <div className="text-center space-y-2">
