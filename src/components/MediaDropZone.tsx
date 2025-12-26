@@ -1,13 +1,10 @@
 import { useState, useCallback } from "react";
-import { Upload, X, Image as ImageIcon, Video, Link as LinkIcon } from "lucide-react";
+import { Upload, X, Image as ImageIcon, Video } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 
 export interface MediaItem {
-  type: 'image' | 'video' | 'link';
+  type: 'image' | 'video';
   file?: File;
-  url?: string;
   preview?: string;
 }
 
@@ -18,7 +15,6 @@ interface MediaDropZoneProps {
 
 export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
-  const [linkInput, setLinkInput] = useState("");
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -63,25 +59,6 @@ export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
     }
   }, [media, onMediaChange]);
 
-  const handleAddLink = useCallback(() => {
-    const trimmed = linkInput.trim();
-    if (!trimmed) return;
-    
-    // Check if it's Instagram or TikTok
-    const isInstagram = /instagram\.com|instagr\.am/i.test(trimmed);
-    const isTikTok = /tiktok\.com/i.test(trimmed);
-    
-    if (isInstagram || isTikTok) {
-      const newItem: MediaItem = {
-        type: 'link',
-        url: trimmed,
-        preview: isInstagram ? '📸 Instagram' : '🎵 TikTok'
-      };
-      onMediaChange([...media, newItem]);
-      setLinkInput("");
-    }
-  }, [linkInput, media, onMediaChange]);
-
   const removeMedia = useCallback((index: number) => {
     onMediaChange(media.filter((_, i) => i !== index));
   }, [media, onMediaChange]);
@@ -123,35 +100,16 @@ export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
           
           <div className="text-center">
             <p className="font-medium text-foreground">
-              {isDragging ? "Drop your files here" : "Drag & drop photos or videos"}
+              {isDragging ? "Drop your files here" : "Drop your inspo here"}
             </p>
             <p className="text-sm text-muted-foreground mt-1">
+              Screenshots, photos, or screen recordings from your saved TikToks
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
               or click to browse • Images & videos up to 50MB
             </p>
           </div>
         </div>
-      </div>
-
-      {/* Link Input */}
-      <div className="flex gap-2">
-        <div className="relative flex-1">
-          <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input
-            value={linkInput}
-            onChange={(e) => setLinkInput(e.target.value)}
-            placeholder="Paste Instagram or TikTok link..."
-            className="pl-10"
-            onKeyDown={(e) => e.key === 'Enter' && handleAddLink()}
-          />
-        </div>
-        <Button 
-          type="button"
-          variant="outline" 
-          onClick={handleAddLink}
-          disabled={!linkInput.trim()}
-        >
-          Add Link
-        </Button>
       </div>
 
       {/* Media Preview Grid */}
@@ -181,14 +139,6 @@ export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
                   </div>
                 </div>
               )}
-              {item.type === 'link' && (
-                <div className="w-full h-full flex flex-col items-center justify-center p-3 bg-gradient-to-br from-primary/10 to-primary/5">
-                  <span className="text-3xl mb-2">{item.preview?.includes('Instagram') ? '📸' : '🎵'}</span>
-                  <p className="text-xs text-center text-muted-foreground truncate max-w-full">
-                    {item.preview}
-                  </p>
-                </div>
-              )}
               <div className="absolute inset-0 bg-foreground/0 group-hover:bg-foreground/20 transition-all duration-300" />
               <button
                 onClick={() => removeMedia(index)}
@@ -199,7 +149,6 @@ export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
               <div className="absolute bottom-2 left-2">
                 {item.type === 'image' && <ImageIcon className="w-4 h-4 text-background drop-shadow" />}
                 {item.type === 'video' && <Video className="w-4 h-4 text-background drop-shadow" />}
-                {item.type === 'link' && <LinkIcon className="w-4 h-4 text-foreground/70" />}
               </div>
             </div>
           ))}
