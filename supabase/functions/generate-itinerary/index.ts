@@ -199,14 +199,31 @@ For TRAVEL & TRANSPORT:
    - Sub-items start with "  - " (2 spaces before dash)
    - Sub-sub-items start with "    - " (4 spaces before dash)
 4. For bold text, use exactly two asterisks: **text** (not *text* or ***text***)
-5. EVERY activity, tour, or experience MUST include a clickable URL. Format: [Link Text](https://url.com)
-   - CRITICAL: Only use URLs from VERIFIED, REAL websites. Never invent or guess URLs.
-   - For restaurants/places: Use Google Maps search: https://www.google.com/maps/search/?api=1&query=PLACE+NAME+CITY
-   - For guided tours: Use GetYourGuide, Viator, or the actual tour operator's real website
-   - For flights: Use https://www.google.com/flights
-   - For activities: Use TripAdvisor, Lonely Planet, or the official website
-   - If you don't know a real URL, use a Google search: https://www.google.com/search?q=SEARCH+TERMS
-   - ❌ NEVER make up domains like "cultured-foodie.com" or "tokyo-tours.com" - these don't exist!
+5. EVERY activity, tour, or experience MUST include a clickable URL. ONLY use these EXACT URL patterns:
+
+   FOR PLACES/RESTAURANTS/ATTRACTIONS - Use Google Maps search:
+   - Format: https://www.google.com/maps/search/?api=1&query=PLACE+NAME+CITY+COUNTRY
+   - Example: [Mercado Roma](https://www.google.com/maps/search/?api=1&query=Mercado+Roma+Mexico+City)
+   
+   FOR GUIDED TOURS - Use GetYourGuide SEARCH (not deep links):
+   - Format: https://www.getyourguide.com/s/?q=TOUR+DESCRIPTION+CITY
+   - Example: [Teotihuacan Day Tour](https://www.getyourguide.com/s/?q=Teotihuacan+day+tour+Mexico+City)
+   
+   FOR FLIGHTS:
+   - Use: https://www.google.com/flights
+   
+   FOR HOTELS/ACCOMMODATION - Use Booking.com SEARCH:
+   - Format: https://www.booking.com/searchresults.html?ss=HOTEL+NAME+CITY
+   - Example: [Hotel Nima](https://www.booking.com/searchresults.html?ss=Hotel+Nima+Mexico+City)
+   
+   FOR GENERAL INFO - Use Google search:
+   - Format: https://www.google.com/search?q=SEARCH+TERMS
+   
+   ❌ NEVER use:
+   - Made-up domains (cultured-foodie.com, tokyo-eats.com)
+   - Deep links you're not 100% sure exist
+   - Short URLs (goo.gl, bit.ly, maps.app.goo.gl)
+   - Viator or TripAdvisor deep links (use search URLs instead)
 
 ## OUTPUT STRUCTURE:
 
