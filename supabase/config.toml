@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.validate-links]
 verify_jwt = false
+
+[functions.update-itinerary-item]
+verify_jwt = false
