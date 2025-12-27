@@ -95,16 +95,21 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
 
   // Handle feedback submission for a specific item
   const handleSubmitFeedback = useCallback(async (item: ItineraryItem) => {
-    if (!item.vote) return;
+    // Need either a vote or a comment to submit
+    if (!item.vote && !item.comment) return;
     
-    // Upvotes don't need an API call - just acknowledge
-    if (item.vote === 'up') {
+    // Upvotes without comments don't need an API call - just acknowledge
+    if (item.vote === 'up' && !item.comment) {
       toast({
         title: "Noted!",
         description: "We'll keep this recommendation.",
       });
       return;
     }
+    
+    // If only upvote with comment, still trigger update based on comment
+    const shouldUpdate = item.vote === 'down' || item.vote === 'neutral' || item.comment;
+    if (!shouldUpdate) return;
 
     setItemUpdating(item.id, true);
 
