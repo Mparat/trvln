@@ -88,18 +88,17 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
 
   if (!itinerary) return null;
 
-  // Clean up asterisks and duplicative patterns
+  // Clean up asterisks - convert bold markers to special tokens, then remove all remaining asterisks
   const cleanLine = (line: string): string => {
     let cleaned = line;
     // Remove leading asterisks used as bullets (replace with proper dash)
     cleaned = cleaned.replace(/^\s*\*\s+/, '- ');
-    // Remove duplicate asterisks like ** at end of lines
-    cleaned = cleaned.replace(/\*\*+\s*$/, '');
-    // Fix malformed bold like *text** or **text*
-    cleaned = cleaned.replace(/\*([^*]+)\*\*(?!\*)/g, '**$1**');
-    cleaned = cleaned.replace(/\*\*([^*]+)\*(?!\*)/g, '**$1**');
-    // Remove standalone asterisks
-    cleaned = cleaned.replace(/(?<!\*)\*(?!\*)/g, '');
+    // Convert **bold** to a special marker we can parse later
+    cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, '<<BOLD>>$1<</BOLD>>');
+    // Remove ALL remaining asterisks
+    cleaned = cleaned.replace(/\*/g, '');
+    // Convert markers back to ** for parsing
+    cleaned = cleaned.replace(/<<BOLD>>/g, '**').replace(/<\/BOLD>>/g, '**');
     return cleaned;
   };
 
