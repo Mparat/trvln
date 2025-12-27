@@ -322,22 +322,18 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
           ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(label)}`
           : rawHref;
 
-        const handleClick = (e: MouseEvent<HTMLButtonElement>) => {
-          e.preventDefault();
-          e.stopPropagation();
-          window.open(href, '_blank', 'noopener,noreferrer');
-        };
-
         return (
-          <button
+          <a
             key={i}
-            onClick={handleClick}
-            className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1 cursor-pointer bg-transparent border-none p-0 font-inherit text-inherit"
-            type="button"
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1 cursor-pointer"
+            onClick={(e) => e.stopPropagation()}
           >
             {label}
             <ExternalLink className="w-3 h-3" />
-          </button>
+          </a>
         );
       }
       return part;
