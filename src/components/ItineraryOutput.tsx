@@ -316,11 +316,40 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
       const linkMatch = part.match(/\[([^\]]+)\]\(([^)]+)\)/);
       if (linkMatch) {
         const label = linkMatch[1];
-        const rawHref = linkMatch[2];
-        const isMapsShort = /(^|\/\/)(maps\.app\.goo\.gl|goo\.gl\/maps)(\/|$)/i.test(rawHref);
-        const href = isMapsShort
-          ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(label)}`
-          : rawHref;
+        const rawHref = linkMatch[2].trim();
+
+        const makeSearchUrl = (query: string) =>
+          `https://duckduckgo.com/?q=${encodeURIComponent(query)}`;
+
+        const makeOsmUrl = (query: string) =>
+          `https://www.openstreetmap.org/search?query=${encodeURIComponent(query)}`;
+
+        const normalizeUrl = (href: string): string => {
+          // Reject dangerous schemes
+          if (/^(javascript|data):/i.test(href)) return makeSearchUrl(label);
+
+          // If no protocol, treat as https
+          const withProto = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href) ? href : `https://${href}`;
+
+          try {
+            const url = new URL(withProto);
+
+            // If google is blocked in the preview environment, route map-ish links to OSM search
+            if (/google\./i.test(url.hostname) || /goo\.gl$/i.test(url.hostname)) {
+              return makeOsmUrl(label);
+            }
+
+            if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+              return makeSearchUrl(label);
+            }
+
+            return url.toString();
+          } catch {
+            return makeSearchUrl(label);
+          }
+        };
+
+        const href = normalizeUrl(rawHref);
 
         const handleClick = (e: React.MouseEvent) => {
           e.preventDefault();
