@@ -105,6 +105,31 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
     return cleaned;
   };
 
+  // Parse bold text and links into React elements
+  const parseInlineContent = (content: string) => {
+    return content.split(/(\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g).map((part, i) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return <strong key={i} className="font-semibold text-foreground">{part.slice(2, -2)}</strong>;
+      }
+      const linkMatch = part.match(/\[([^\]]+)\]\(([^)]+)\)/);
+      if (linkMatch) {
+        return (
+          <a 
+            key={i} 
+            href={linkMatch[2]} 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1"
+          >
+            {linkMatch[1]}
+            <ExternalLink className="w-3 h-3" />
+          </a>
+        );
+      }
+      return part;
+    });
+  };
+
   // Detect indentation level (for nested bullets)
   const getIndentLevel = (line: string): number => {
     const match = line.match(/^(\s*)/);
@@ -336,28 +361,8 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
         const Icon = hasFlight ? Plane : hasFood ? Utensils : hasDrink ? PartyPopper : hasPhoto ? Camera : hasTip ? Star : hasWeather ? CloudRain : null;
         const iconColor = hasFlight ? 'text-sky-500' : hasFood ? 'text-orange-500' : hasDrink ? 'text-violet-500' : hasPhoto ? 'text-blue-500' : hasTip ? 'text-amber-500' : hasWeather ? 'text-cyan-500' : '';
         
-        // Parse bold text and links
-        const parsedContent = content.split(/(\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g).map((part, i) => {
-          if (part.startsWith('**') && part.endsWith('**')) {
-            return <strong key={i} className="font-semibold text-foreground">{part.slice(2, -2)}</strong>;
-          }
-          const linkMatch = part.match(/\[([^\]]+)\]\(([^)]+)\)/);
-          if (linkMatch) {
-            return (
-              <a 
-                key={i} 
-                href={linkMatch[2]} 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1"
-              >
-                {linkMatch[1]}
-                <ExternalLink className="w-3 h-3" />
-              </a>
-            );
-          }
-          return part;
-        });
+        // Parse bold text and links using shared function
+        const parsedContent = parseInlineContent(content);
 
         // Calculate left margin based on indent level
         const marginLeft = 1.5 + (indentLevel * 1); // base 1.5rem + 1rem per indent level
@@ -391,19 +396,20 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
       // Regular text (could be sub-headers or descriptions)
       const isSubHeader = trimmedLine.match(/^###?\s+/);
       if (isSubHeader) {
+        const headerContent = trimmedLine.replace(/^#+\s*/, '');
         return (
           <h4 key={index} className="text-base font-medium text-foreground mt-4 mb-2 ml-4">
-            {trimmedLine.replace(/^#+\s*/, '')}
+            {parseInlineContent(headerContent)}
           </h4>
         );
       }
 
-      // Clean any remaining asterisks from regular text
-      const cleanText = trimmedLine.replace(/^#+\s*/, '').replace(/\*+/g, '');
+      // Regular text - parse links and bold
+      const textContent = trimmedLine.replace(/^#+\s*/, '');
       
       return (
         <p key={index} className="text-foreground/80 ml-6 leading-relaxed py-1">
-          {cleanText}
+          {parseInlineContent(textContent)}
         </p>
       );
     });
