@@ -168,6 +168,18 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
     }
   };
 
+  // Handle generate with auto-submit of pending city input
+  const handleGenerate = () => {
+    // Auto-add any text in the city input before generating
+    if (newCity.trim()) {
+      if (!preferences.cities.includes(newCity.trim())) {
+        updatePreferences({ cities: [...preferences.cities, newCity.trim()] });
+      }
+      setNewCity("");
+    }
+    onGenerate();
+  };
+
   const removeCity = (city: string) => {
     updatePreferences({ cities: preferences.cities.filter(c => c !== city) });
   };
@@ -672,7 +684,7 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
       {/* Generate Button */}
       <div className="p-6 bg-muted/30 border-t border-border">
         <Button
-          onClick={onGenerate}
+          onClick={handleGenerate}
           disabled={isGenerating}
           variant="hero"
           className="w-full"
