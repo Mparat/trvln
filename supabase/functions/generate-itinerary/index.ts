@@ -191,19 +191,36 @@ For TRAVEL & TRANSPORT:
 - **Cost**: Approximate fares, whether railpasses covers it
 - **Timing**: How long the journey takes, best departure times
 
+## FORMATTING RULES (CRITICAL):
+1. NEVER use asterisks (*) for bullet points - use hyphens (-) only
+2. NEVER duplicate information (e.g., don't repeat "Total nights: 4 nights across Antigua" and "Cities with nights: Antigua (4 nights)")
+3. Use proper indentation for nested bullets:
+   - Top-level items start with "- "
+   - Sub-items start with "  - " (2 spaces before dash)
+   - Sub-sub-items start with "    - " (4 spaces before dash)
+4. For bold text, use exactly two asterisks: **text** (not *text* or ***text***)
+5. EVERY activity, tour, or experience MUST include a clickable URL. Format: [Link Text](https://url.com)
+   - For guided tours: link to the tour operator or booking page
+   - For activities: link to a travel blog, official site, or article about the activity
+   - For restaurants: link to Google Maps, TripAdvisor, or the restaurant's website
+
 ## OUTPUT STRUCTURE:
 
 ### Trip Summary
-- Trip theme and overall feel
-- Total nights: X nights across Y cities
-- Cities with nights: **Tokyo** (3) → **Kyoto** (4) → **Osaka** (2)
-- Total estimated budget: $X,XXX - $X,XXX (breakdown: flights, accommodation, food, activities)
-- Top 3-5 highlights of this trip
-- Key things to book early (with why)
+- Theme: [Trip theme and overall feel]
+- Duration: X nights total
+- Route: **City1** (X nights) → **City2** (Y nights) → **City3** (Z nights)
+- Budget: $X,XXX - $X,XXX total
+  - Flights: $XXX
+  - Accommodation: $XXX
+  - Food & Activities: $XXX
+- Top highlights:
+  - [Highlight 1]
+  - [Highlight 2]
+  - [Highlight 3]
 
 ### Book First
-Create an urgent, actionable booking priorities section:
-- **Flights**: Best airlines, routes, target price around ${flightBudget}, when to book
+- **Flights**: Best airlines, routes, target price around ${flightBudget}, when to book. [Search on Google Flights](https://www.google.com/flights)
 - **Lodging that books out**: Mountain huts, popular ryokans, etc. Include booking URLs
 - **Limited-availability activities**: Specific providers, URLs, costs, booking windows
 - **Transport passes**: JR Pass, regional passes - where to buy, activation tips
@@ -224,20 +241,32 @@ For each day, use this format:
 **Day X: [Location] — [Theme]**
 
 **Morning**
-- **[Activity Name]**: What it is and why it's worth doing. Include timing (e.g., "8am-10am"). If applicable, cite source (blog, guide, article). Any booking/reservation needed and URL to book.
-- Breakfast: **[Restaurant]** - what to order, price range
+- **[Activity Name]**: What it is and why it's worth doing. Include timing (e.g., "8am-10am"). [Read more](https://relevant-url.com) or [Book here](https://booking-url.com)
+- **Breakfast options**:
+  - **[Restaurant 1]** - signature dish, price range. [View on Google Maps](https://maps.google.com/...)
+  - **[Restaurant 2]** - signature dish, price range. [View on Google Maps](https://maps.google.com/...)
 
 **Afternoon**
-- **[Activity Name]**: Description, why this one specifically, practical details. Cost if applicable.
-- Lunch: **[Restaurant]** - signature dish, neighborhood
+- **[Activity Name]**: Description, why this one specifically, practical details. Cost if applicable. [More info](https://url.com)
+- **Lunch options**:
+  - **[Restaurant 1]** - signature dish, neighborhood. [View on Google Maps](https://maps.google.com/...)
+  - **[Restaurant 2]** - signature dish, neighborhood. [View on Google Maps](https://maps.google.com/...)
+- **Afternoon drinks** (if applicable):
+  - **[Bar/Brewery 1]** - what they're known for, vibe. [View on Google Maps](https://maps.google.com/...)
+  - **[Bar/Brewery 2]** - specialty, atmosphere. [View on Google Maps](https://maps.google.com/...)
 
 **Evening**
-- **[Activity/Rest]**: Details and recommendations
-- Dinner: **[Restaurant]** - reserve ahead if popular, what to order
+- **[Activity/Rest]**: Details and recommendations. [More info](https://url.com)
+- **Dinner options**:
+  - **[Restaurant 1]** - what to order, reserve ahead if popular. [View on Google Maps](https://maps.google.com/...)
+  - **[Restaurant 2]** - cuisine style, price range. [View on Google Maps](https://maps.google.com/...)
+- **Evening drinks** (if applicable):
+  - **[Bar 1]** - cocktails, vibe, neighborhood. [View on Google Maps](https://maps.google.com/...)
+  - **[Bar 2]** - specialty, atmosphere. [View on Google Maps](https://maps.google.com/...)
 
 **Logistics**
 - **Getting there**: Exact transport method (e.g., "Take JR Yamanote Line from Shibuya to Shinjuku, 5 min, ¥170")
-- **How to book/check**: Specific tools (e.g., "Check times on HyperDia.com or Google Maps")
+- **How to book/check**: Specific tools (e.g., "Check times on [HyperDia](https://hyperdia.com) or Google Maps")
 - **Tips**: Platform numbers, which exit, IC card usage, luggage forwarding if relevant
 
 ---
@@ -254,7 +283,7 @@ For each day, use this format:
 - What you assumed about their preferences
 - Any trade-offs made
 
-Use **bold** for ALL place names, restaurants, and attractions.`;
+Use **bold** for ALL place names, restaurants, and attractions. NEVER use single asterisks.`;
 
     // Build user prompt with PRIORITY on additional notes
     let inspirationContext = "";
