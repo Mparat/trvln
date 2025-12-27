@@ -1,0 +1,161 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+interface LinkToValidate {
+  label: string;
+  url: string;
+  context: string; // e.g., "restaurant in Mexico City", "guided tour Teotihuacan"
+}
+
+interface ValidatedLink {
+  label: string;
+  originalUrl: string;
+  validatedUrl: string;
+  source: string; // "google_maps" | "getyourguide" | "viator" | "official" | "original"
+}
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const { links } = await req.json() as { links: LinkToValidate[] };
+    
+    if (!links || links.length === 0) {
+      return new Response(
+        JSON.stringify({ validatedLinks: [] }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const perplexityApiKey = Deno.env.get('PERPLEXITY_API_KEY');
+    if (!perplexityApiKey) {
+      console.error('PERPLEXITY_API_KEY not configured');
+      // Return original links if Perplexity not available
+      return new Response(
+        JSON.stringify({ 
+          validatedLinks: links.map(l => ({
+            label: l.label,
+            originalUrl: l.url,
+            validatedUrl: l.url,
+            source: 'original'
+          }))
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Batch validate links - ask Perplexity for correct URLs
+    const linksToValidate = links.slice(0, 10); // Limit to 10 links per request
+    
+    const prompt = `I need verified, working URLs for these travel activities/places. For each item, provide the BEST real URL from these sources (in order of preference):
+1. Google Maps search link (format: https://www.google.com/maps/search/?api=1&query=PLACE+NAME+CITY)
+2. Official website if it's a major attraction
+3. GetYourGuide search (format: https://www.getyourguide.com/s/?q=SEARCH+TERMS)
+4. Viator search (format: https://www.viator.com/searchResults/all?text=SEARCH+TERMS)
+
+Items to find URLs for:
+${linksToValidate.map((l, i) => `${i + 1}. "${l.label}" - Context: ${l.context}`).join('\n')}
+
+Respond ONLY with a JSON array, no other text. Format:
+[
+  {"index": 1, "url": "https://...", "source": "google_maps|getyourguide|viator|official"},
+  ...
+]`;
+
+    console.log('Validating links with Perplexity...');
+
+    const response = await fetch('https://api.perplexity.ai/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${perplexityApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'sonar',
+        messages: [
+          { role: 'system', content: 'You are a helpful assistant that finds verified URLs for travel destinations. Only return real, working URLs. Respond only with valid JSON.' },
+          { role: 'user', content: prompt }
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      console.error('Perplexity API error:', response.status);
+      // Return original links on error
+      return new Response(
+        JSON.stringify({ 
+          validatedLinks: links.map(l => ({
+            label: l.label,
+            originalUrl: l.url,
+            validatedUrl: l.url,
+            source: 'original'
+          }))
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || '';
+    
+    console.log('Perplexity response:', content);
+
+    // Parse the JSON response
+    let validatedResults: { index: number; url: string; source: string }[] = [];
+    try {
+      // Extract JSON from response (might have extra text)
+      const jsonMatch = content.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        validatedResults = JSON.parse(jsonMatch[0]);
+      }
+    } catch (parseError) {
+      console.error('Failed to parse Perplexity response:', parseError);
+    }
+
+    // Build validated links array
+    const validatedLinks: ValidatedLink[] = linksToValidate.map((link, i) => {
+      const result = validatedResults.find(r => r.index === i + 1);
+      if (result && result.url) {
+        return {
+          label: link.label,
+          originalUrl: link.url,
+          validatedUrl: result.url,
+          source: result.source || 'perplexity'
+        };
+      }
+      // Fallback to Google Maps search if no result
+      return {
+        label: link.label,
+        originalUrl: link.url,
+        validatedUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(link.label + ' ' + link.context)}`,
+        source: 'google_maps_fallback'
+      };
+    });
+
+    // Add any remaining links that weren't validated
+    const remainingLinks = links.slice(10).map(l => ({
+      label: l.label,
+      originalUrl: l.url,
+      validatedUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(l.label + ' ' + l.context)}`,
+      source: 'google_maps_fallback'
+    }));
+
+    return new Response(
+      JSON.stringify({ validatedLinks: [...validatedLinks, ...remainingLinks] }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+
+  } catch (error) {
+    console.error('Error validating links:', error);
+    return new Response(
+      JSON.stringify({ error: error instanceof Error ? error.message : 'Failed to validate links' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+});
