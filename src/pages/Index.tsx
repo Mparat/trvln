@@ -35,22 +35,35 @@ export type ItineraryVariant = {
   content: string;
 };
 
-const THEME_VARIANTS = [
-  { id: "culture", name: "Cultural Immersion", emoji: "🎭" },
-  { id: "adventure", name: "Adventure & Nature", emoji: "🏔️" },
-  { id: "foodie", name: "Food & Nightlife", emoji: "🍜" },
-];
-
 const Index = () => {
   const [preferences, setPreferences] = useState<TripPreferences>(defaultPreferences);
   const [itineraries, setItineraries] = useState<ItineraryVariant[]>([]);
   const [activeVariant, setActiveVariant] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
   const [loadingVariants, setLoadingVariants] = useState<Record<string, boolean>>({});
+  const [isSuggestingThemes, setIsSuggestingThemes] = useState(false);
+
+  const suggestThemes = useCallback(async (prefs: TripPreferences): Promise<{ id: string; name: string; emoji: string }[]> => {
+    const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/suggest-themes`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+      },
+      body: JSON.stringify({ preferences: prefs }),
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to suggest themes");
+    }
+
+    const data = await response.json();
+    return data.themes;
+  }, []);
 
   const generateSingleItinerary = useCallback(async (
     prefs: TripPreferences,
-    themeVariant: string,
+    themeVariant: { id: string; name: string; emoji: string },
     onUpdate: (content: string) => void
   ) => {
     const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-itinerary`, {
@@ -123,39 +136,57 @@ const Index = () => {
     }
 
     setIsGenerating(true);
-    setItineraries(THEME_VARIANTS.map(v => ({ ...v, content: "" })));
+    setIsSuggestingThemes(true);
+    setItineraries([]);
     setActiveVariant(0);
-    setLoadingVariants(Object.fromEntries(THEME_VARIANTS.map(v => [v.id, true])));
 
-    // Generate all 3 variants in parallel
-    const promises = THEME_VARIANTS.map(async (variant) => {
-      try {
-        const content = await generateSingleItinerary(
-          preferences,
-          variant.id,
-          (updatedContent) => {
-            setItineraries(prev => 
-              prev.map(it => it.id === variant.id ? { ...it, content: updatedContent } : it)
-            );
-          }
-        );
-        setLoadingVariants(prev => ({ ...prev, [variant.id]: false }));
-        return { id: variant.id, success: true, content };
-      } catch (error) {
-        console.error(`Error generating ${variant.id}:`, error);
-        setLoadingVariants(prev => ({ ...prev, [variant.id]: false }));
-        return { id: variant.id, success: false, error };
-      }
-    });
+    try {
+      // First, get dynamic themes based on user inputs
+      const themes = await suggestThemes(preferences);
+      
+      setIsSuggestingThemes(false);
+      setItineraries(themes.map(t => ({ ...t, content: "" })));
+      setLoadingVariants(Object.fromEntries(themes.map(t => [t.id, true])));
 
-    await Promise.all(promises);
+      // Generate all 3 variants in parallel
+      const promises = themes.map(async (theme) => {
+        try {
+          const content = await generateSingleItinerary(
+            preferences,
+            theme,
+            (updatedContent) => {
+              setItineraries(prev => 
+                prev.map(it => it.id === theme.id ? { ...it, content: updatedContent } : it)
+              );
+            }
+          );
+          setLoadingVariants(prev => ({ ...prev, [theme.id]: false }));
+          return { id: theme.id, success: true, content };
+        } catch (error) {
+          console.error(`Error generating ${theme.id}:`, error);
+          setLoadingVariants(prev => ({ ...prev, [theme.id]: false }));
+          return { id: theme.id, success: false, error };
+        }
+      });
 
-    setIsGenerating(false);
-    toast({
-      title: "3 itineraries ready!",
-      description: "Explore Cultural, Adventure, and Foodie versions of your trip",
-    });
-  }, [preferences, generateSingleItinerary]);
+      await Promise.all(promises);
+
+      toast({
+        title: "3 itineraries ready!",
+        description: "Explore different themed versions of your trip",
+      });
+    } catch (error) {
+      console.error("Error in generation flow:", error);
+      toast({
+        title: "Something went wrong",
+        description: error instanceof Error ? error.message : "Please try again later",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGenerating(false);
+      setIsSuggestingThemes(false);
+    }
+  }, [preferences, suggestThemes, generateSingleItinerary]);
 
   const handleEdit = useCallback(async (editRequest: string) => {
     setPreferences(prev => ({
