@@ -94,11 +94,11 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
     // Remove leading asterisks used as bullets (replace with proper dash)
     cleaned = cleaned.replace(/^\s*\*\s+/, '- ');
     // Convert **bold** to a special marker we can parse later
-    cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, '<<BOLD>>$1<</BOLD>>');
+    cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, 'BOLDSTART$1BOLDEND');
     // Remove ALL remaining asterisks
     cleaned = cleaned.replace(/\*/g, '');
     // Convert markers back to ** for parsing
-    cleaned = cleaned.replace(/<<BOLD>>/g, '**').replace(/<\/BOLD>>/g, '**');
+    cleaned = cleaned.replace(/BOLDSTART/g, '**').replace(/BOLDEND/g, '**');
     return cleaned;
   };
 
