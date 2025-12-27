@@ -93,12 +93,15 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
     let cleaned = line;
     // Remove leading asterisks used as bullets (replace with proper dash)
     cleaned = cleaned.replace(/^\s*\*\s+/, '- ');
+    // Protect links first - convert [text](url) to special tokens
+    cleaned = cleaned.replace(/\[([^\]]+)\]\(([^)]+)\)/g, 'LINKSTART$1LINKMID$2LINKEND');
     // Convert **bold** to a special marker we can parse later
     cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, 'BOLDSTART$1BOLDEND');
     // Remove ALL remaining asterisks
     cleaned = cleaned.replace(/\*/g, '');
-    // Convert markers back to ** for parsing
+    // Convert markers back to original format for parsing
     cleaned = cleaned.replace(/BOLDSTART/g, '**').replace(/BOLDEND/g, '**');
+    cleaned = cleaned.replace(/LINKSTART/g, '[').replace(/LINKMID/g, '](').replace(/LINKEND/g, ')');
     return cleaned;
   };
 
