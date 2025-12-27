@@ -317,15 +317,24 @@ Use **bold** for ALL place names, restaurants, and attractions. NEVER use single
     // Build user prompt with PRIORITY on additional notes
     let inspirationContext = "";
     if (cities?.length > 0) {
-      inspirationContext += `\nDestinations: ${cities.join(", ")}`;
+      inspirationContext += `\nMUST-INCLUDE destinations: ${cities.join(", ")}`;
+      inspirationContext += `\n\n**IMPORTANT**: You MUST include ALL the destinations listed above, but also ADD complementary nearby cities, regions, or day-trip destinations that would enhance this trip. Consider:
+- Geographic proximity and efficient routing
+- Cultural/experiential diversity (e.g., if they want Tokyo, add Kyoto for traditional Japan, Hakone for onsen + Mt. Fuji views)
+- Seasonal highlights (e.g., cherry blossom spots, fall foliage areas)
+- The traveler's interests and vibe preferences
+- Trip duration - for 2+ weeks, definitely add 2-3 additional destinations
+- Hidden gems and less-touristy alternatives that match their interests
+
+For example: Tokyo 2 weeks → Include Kyoto (3-4 nights), day trips to Nikko, Kamakura, Hakone, possibly Osaka or Nara.`;
     }
     if (media?.length > 0) {
-      inspirationContext += `\nThe traveler shared ${media.length} image(s) - analyze to identify what draws them.`;
+      inspirationContext += `\nThe traveler shared ${media.length} image(s) - analyze to identify what draws them and suggest destinations that match that aesthetic/vibe.`;
     }
 
     const userPrompt = `Plan my trip:
 
-**DESTINATIONS**:${inspirationContext || "\nNo specific destinations - suggest based on my vibe"}
+**DESTINATIONS**:${inspirationContext || "\nNo specific destinations - suggest the best destinations based on my vibe, interests, and trip duration"}
 
 **DURATION**: ${durationContext}
 **DATES**: ${dateContext}
