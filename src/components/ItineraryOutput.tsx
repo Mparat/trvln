@@ -75,6 +75,7 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
     undoItem,
     setItemUpdating,
     canUndo,
+    getItem,
     itineraryText,
   } = useItineraryItems(itinerary);
 
@@ -94,10 +95,13 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
   };
 
   // Handle feedback submission for a specific item
-  const handleSubmitFeedback = useCallback(async (item: ItineraryItem) => {
+  const handleSubmitFeedback = useCallback(async (itemId: string) => {
+    const item = getItem(itemId);
+    if (!item) return;
+
     // Need either a vote or a comment to submit
     if (!item.vote && !item.comment) return;
-    
+
     // Upvotes without comments don't need an API call - just acknowledge
     if (item.vote === 'up' && !item.comment) {
       toast({
@@ -106,9 +110,9 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
       });
       return;
     }
-    
+
     // If only upvote with comment, still trigger update based on comment
-    const shouldUpdate = item.vote === 'down' || item.vote === 'neutral' || item.comment;
+    const shouldUpdate = item.vote === 'down' || item.vote === 'neutral' || !!item.comment;
     if (!shouldUpdate) return;
 
     setItemUpdating(item.id, true);
@@ -138,7 +142,7 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
       }
 
       const data = await response.json();
-      
+
       if (data.changed) {
         updateItemContent(item.id, data.updatedContent);
         toast({
@@ -161,7 +165,7 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
         variant: "destructive",
       });
     }
-  }, [itineraryText, tripPreferences, setItemUpdating, updateItemContent]);
+  }, [getItem, itineraryText, tripPreferences, setItemUpdating, updateItemContent]);
 
   if (isLoading) {
     return (
@@ -497,7 +501,7 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
                 canUndo={canUndo(item.id)}
                 onVote={(vote) => setVote(item.id, vote)}
                 onComment={(comment) => setComment(item.id, comment)}
-                onSubmitFeedback={() => handleSubmitFeedback(item)}
+                onSubmitFeedback={() => handleSubmitFeedback(item.id)}
                 onUndo={() => undoItem(item.id)}
               />
             </div>
