@@ -127,17 +127,21 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
           ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(label)}`
           : rawHref;
 
+        // Use window.open to bypass iframe restrictions in Lovable preview
+        const handleClick = (e: React.MouseEvent) => {
+          e.preventDefault();
+          window.open(href, '_blank', 'noopener,noreferrer');
+        };
+
         return (
-          <a
+          <button
             key={i}
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1"
+            onClick={handleClick}
+            className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1 cursor-pointer bg-transparent border-none p-0 font-inherit text-inherit"
           >
             {label}
             <ExternalLink className="w-3 h-3" />
-          </a>
+          </button>
         );
       }
       return part;
