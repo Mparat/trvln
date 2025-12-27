@@ -123,6 +123,21 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
       
       if (!trimmedLine) return null;
 
+      // Detect Alternative Guided Trips section
+      if (trimmedLine.match(/^(##\s*)?(Alternative Guided Trips|Other Tours)/i)) {
+        inNearMisses = false;
+        return (
+          <div key={index} className="mt-6 p-4 bg-gradient-to-r from-teal-500/10 to-teal-600/5 rounded-xl border border-teal-500/20">
+            <div className="flex items-center gap-2">
+              <MapPin className="w-5 h-5 text-teal-600" />
+              <h3 className="text-lg font-display font-semibold text-foreground">
+                {trimmedLine.replace(/^#+\s*/, '')}
+              </h3>
+            </div>
+          </div>
+        );
+      }
+
       // Detect near-misses section
       if (trimmedLine.match(/^(##\s*)?(Near Misses|Almost Included|Alternatives|Swap Options)/i)) {
         inNearMisses = true;

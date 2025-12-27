@@ -279,6 +279,14 @@ For each day, use this format:
 3 items max that almost made the cut:
 - What it is, why cut, what it would replace
 
+${guidedPreference === 'prefer-guided' || guidedPreference === 'some-guided' ? `### Alternative Guided Trips
+For each tour company mentioned in the itinerary, list 1-2 of their OTHER highly-rated tours that might interest this traveler:
+- **[Company Name]**: 
+  - [Tour Name 1] - brief description, duration, price. [Book here](https://url.com)
+  - [Tour Name 2] - brief description, duration, price. [Book here](https://url.com)
+
+Only include companies actually referenced in the itinerary. Focus on tours that match the traveler's interests and vibe.
+` : ''}
 ### Assumptions
 - What you assumed about their preferences
 - Any trade-offs made
