@@ -109,19 +109,33 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
   const parseInlineContent = (content: string) => {
     return content.split(/(\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g).map((part, i) => {
       if (part.startsWith('**') && part.endsWith('**')) {
-        return <strong key={i} className="font-semibold text-foreground">{part.slice(2, -2)}</strong>;
+        return (
+          <strong key={i} className="font-semibold text-foreground">
+            {part.slice(2, -2)}
+          </strong>
+        );
       }
+
       const linkMatch = part.match(/\[([^\]]+)\]\(([^)]+)\)/);
       if (linkMatch) {
+        const label = linkMatch[1];
+        const rawHref = linkMatch[2];
+
+        // Fix broken Google Maps short links (Firebase Dynamic Link Not Found)
+        // Fallback to a Google Maps search query using the link label.
+        const href = /(^|\/\/)(maps\.app\.goo\.gl|goo\.gl\/maps)(\/|$)/i.test(rawHref)
+          ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(label)}`
+          : rawHref;
+
         return (
-          <a 
-            key={i} 
-            href={linkMatch[2]} 
-            target="_blank" 
+          <a
+            key={i}
+            href={href}
+            target="_blank"
             rel="noopener noreferrer"
             className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1"
           >
-            {linkMatch[1]}
+            {label}
             <ExternalLink className="w-3 h-3" />
           </a>
         );

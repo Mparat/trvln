@@ -202,7 +202,9 @@ For TRAVEL & TRANSPORT:
 5. EVERY activity, tour, or experience MUST include a clickable URL. Format: [Link Text](https://url.com)
    - For guided tours: link to the tour operator or booking page
    - For activities: link to a travel blog, official site, or article about the activity
-   - For restaurants: link to Google Maps, TripAdvisor, or the restaurant's website
+   - For restaurants: link to Google Maps using FULL URLs (NO short links)
+     - ✅ Use: https://www.google.com/maps/search/?api=1&query=PLACE_NAME
+     - ❌ Never use: https://maps.app.goo.gl/... or https://goo.gl/maps/...
 
 ## OUTPUT STRUCTURE:
 
