@@ -228,6 +228,7 @@ const Index = () => {
                   itinerary={itinerary} 
                   isLoading={isGenerating && !itinerary}
                   onEdit={handleEdit}
+                  tripPreferences={preferences}
                 />
               </div>
             </div>

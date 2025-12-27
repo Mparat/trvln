@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from "react";
+import { useState, useEffect, useCallback, type MouseEvent } from "react";
 import { 
   MapPin, Clock, DollarSign, Utensils, Camera, Star, Plane, Sun, 
   CloudRain, Sparkles, AlertTriangle, ExternalLink, Edit3, Send,
@@ -11,11 +11,20 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { ItemFeedbackControls } from "./ItemFeedbackControls";
+import { useItineraryItems, type ItineraryItem } from "@/hooks/useItineraryItems";
+import { toast } from "@/hooks/use-toast";
 
 interface ItineraryOutputProps {
   itinerary: string;
   isLoading: boolean;
   onEdit?: (editRequest: string) => void;
+  tripPreferences?: {
+    cities?: string[];
+    atmosphere?: string[];
+    interests?: string[];
+    budgetAccommodation?: number;
+  };
 }
 
 // Activity type detection and tagging
@@ -52,10 +61,29 @@ function ActivityTag({ type }: { type: keyof typeof activityTypes }) {
   );
 }
 
-export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutputProps) {
+export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences }: ItineraryOutputProps) {
   const [editMode, setEditMode] = useState(false);
   const [editRequest, setEditRequest] = useState("");
   const [showNearMisses, setShowNearMisses] = useState(false);
+
+  const {
+    items,
+    syncWithItinerary,
+    setVote,
+    setComment,
+    updateItemContent,
+    undoItem,
+    setItemUpdating,
+    canUndo,
+    itineraryText,
+  } = useItineraryItems(itinerary);
+
+  // Sync items when itinerary changes (streaming updates)
+  useEffect(() => {
+    if (itinerary) {
+      syncWithItinerary(itinerary);
+    }
+  }, [itinerary, syncWithItinerary]);
 
   const handleSubmitEdit = () => {
     if (editRequest.trim() && onEdit) {
@@ -64,6 +92,71 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
       setEditMode(false);
     }
   };
+
+  // Handle feedback submission for a specific item
+  const handleSubmitFeedback = useCallback(async (item: ItineraryItem) => {
+    if (!item.vote) return;
+    
+    // Upvotes don't need an API call - just acknowledge
+    if (item.vote === 'up') {
+      toast({
+        title: "Noted!",
+        description: "We'll keep this recommendation.",
+      });
+      return;
+    }
+
+    setItemUpdating(item.id, true);
+
+    try {
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-itinerary-item`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({
+          itemContent: item.content,
+          itemContext: item.context,
+          feedback: {
+            vote: item.vote,
+            comment: item.comment,
+          },
+          fullItinerary: itineraryText,
+          tripPreferences: tripPreferences || {},
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to update item");
+      }
+
+      const data = await response.json();
+      
+      if (data.changed) {
+        updateItemContent(item.id, data.updatedContent);
+        toast({
+          title: "Updated!",
+          description: "This recommendation has been refreshed.",
+        });
+      } else {
+        setItemUpdating(item.id, false);
+        toast({
+          title: "Kept as is",
+          description: data.reason || "No changes needed.",
+        });
+      }
+    } catch (error) {
+      console.error("Error updating item:", error);
+      setItemUpdating(item.id, false);
+      toast({
+        title: "Couldn't update",
+        description: error instanceof Error ? error.message : "Please try again",
+        variant: "destructive",
+      });
+    }
+  }, [itineraryText, tripPreferences, setItemUpdating, updateItemContent]);
 
   if (isLoading) {
     return (
@@ -88,24 +181,19 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
 
   if (!itinerary) return null;
 
-  // Clean up asterisks - convert bold markers to special tokens, then remove all remaining asterisks
+  // Clean up asterisks
   const cleanLine = (line: string): string => {
     let cleaned = line;
-    // Remove leading asterisks used as bullets (replace with proper dash)
     cleaned = cleaned.replace(/^\s*\*\s+/, '- ');
-    // Protect links first - convert [text](url) to special tokens
     cleaned = cleaned.replace(/\[([^\]]+)\]\(([^)]+)\)/g, 'LINKSTART$1LINKMID$2LINKEND');
-    // Convert **bold** to a special marker we can parse later
     cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, 'BOLDSTART$1BOLDEND');
-    // Remove ALL remaining asterisks
     cleaned = cleaned.replace(/\*/g, '');
-    // Convert markers back to original format for parsing
     cleaned = cleaned.replace(/BOLDSTART/g, '**').replace(/BOLDEND/g, '**');
     cleaned = cleaned.replace(/LINKSTART/g, '[').replace(/LINKMID/g, '](').replace(/LINKEND/g, ')');
     return cleaned;
   };
 
-  // Parse bold text and links into React elements
+  // Parse inline content
   const parseInlineContent = (content: string) => {
     return content.split(/(\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g).map((part, i) => {
       if (part.startsWith('**') && part.endsWith('**')) {
@@ -120,8 +208,6 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
       if (linkMatch) {
         const label = linkMatch[1];
         const rawHref = linkMatch[2];
-
-        // Fix broken Google Maps short links (Firebase Dynamic Link Not Found)
         const isMapsShort = /(^|\/\/)(maps\.app\.goo\.gl|goo\.gl\/maps)(\/|$)/i.test(rawHref);
         const href = isMapsShort
           ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(label)}`
@@ -129,6 +215,7 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
 
         const handleClick = (e: MouseEvent<HTMLButtonElement>) => {
           e.preventDefault();
+          e.stopPropagation();
           window.open(href, '_blank', 'noopener,noreferrer');
         };
 
@@ -148,289 +235,290 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
     });
   };
 
-  // Detect indentation level (for nested bullets)
   const getIndentLevel = (line: string): number => {
     const match = line.match(/^(\s*)/);
     if (!match) return 0;
     return Math.floor(match[1].length / 2);
   };
 
-  const lines = itinerary.split('\n');
-  let currentDay = 0;
-  let inNearMisses = false;
-  let inConstraints = false;
-  
-  const renderContent = () => {
-    return lines.map((line, index) => {
-      const cleanedLine = cleanLine(line);
-      const trimmedLine = cleanedLine.trim();
-      const indentLevel = getIndentLevel(line);
-      
-      if (!trimmedLine) return null;
+  // Render a single itinerary item with feedback controls
+  const renderItemWithFeedback = (item: ItineraryItem, index: number) => {
+    const cleanedLine = cleanLine(item.content);
+    const trimmedLine = cleanedLine.trim();
+    const indentLevel = item.indentLevel;
 
-      // Detect Alternative Guided Trips section
-      if (trimmedLine.match(/^(##\s*)?(Alternative Guided Trips|Other Tours)/i)) {
-        inNearMisses = false;
-        return (
-          <div key={index} className="mt-6 p-4 bg-gradient-to-r from-teal-500/10 to-teal-600/5 rounded-xl border border-teal-500/20">
-            <div className="flex items-center gap-2">
-              <MapPin className="w-5 h-5 text-teal-600" />
-              <h3 className="text-lg font-display font-semibold text-foreground">
-                {trimmedLine.replace(/^#+\s*/, '')}
-              </h3>
-            </div>
+    if (!trimmedLine) return null;
+
+    // Check if this item type should have feedback controls
+    const canHaveFeedback = item.type === 'bullet';
+
+    // Detect Alternative Guided Trips section
+    if (trimmedLine.match(/^(##\s*)?(Alternative Guided Trips|Other Tours)/i)) {
+      return (
+        <div key={item.id} className="mt-6 p-4 bg-gradient-to-r from-teal-500/10 to-teal-600/5 rounded-xl border border-teal-500/20">
+          <div className="flex items-center gap-2">
+            <MapPin className="w-5 h-5 text-teal-600" />
+            <h3 className="text-lg font-display font-semibold text-foreground">
+              {trimmedLine.replace(/^#+\s*/, '')}
+            </h3>
           </div>
-        );
-      }
+        </div>
+      );
+    }
 
-      // Detect near-misses section
-      if (trimmedLine.match(/^(##\s*)?(Near Misses|Almost Included|Alternatives|Swap Options)/i)) {
-        inNearMisses = true;
-        return (
-          <Collapsible key={index} open={showNearMisses} onOpenChange={setShowNearMisses}>
-            <CollapsibleTrigger className="w-full mt-8">
-              <div className="p-4 bg-gradient-to-r from-amber-500/10 to-amber-600/5 rounded-xl border border-amber-500/20 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Lightbulb className="w-5 h-5 text-amber-600" />
-                  <h3 className="text-lg font-display font-semibold text-foreground">
-                    {trimmedLine.replace(/^#+\s*/, '')}
-                  </h3>
-                </div>
-                {showNearMisses ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+    // Detect near-misses section
+    if (trimmedLine.match(/^(##\s*)?(Near Misses|Almost Included|Alternatives|Swap Options)/i)) {
+      return (
+        <Collapsible key={item.id} open={showNearMisses} onOpenChange={setShowNearMisses}>
+          <CollapsibleTrigger className="w-full mt-8">
+            <div className="p-4 bg-gradient-to-r from-amber-500/10 to-amber-600/5 rounded-xl border border-amber-500/20 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Lightbulb className="w-5 h-5 text-amber-600" />
+                <h3 className="text-lg font-display font-semibold text-foreground">
+                  {trimmedLine.replace(/^#+\s*/, '')}
+                </h3>
               </div>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="mt-2 ml-4">
-              {/* Near misses content will be rendered in subsequent lines */}
-            </CollapsibleContent>
-          </Collapsible>
-        );
-      }
-
-      // Constraints/Assumptions section
-      if (trimmedLine.match(/^(##\s*)?(Constraints|Assumptions|Trade-?offs|Notes|Important)/i)) {
-        inConstraints = true;
-        return (
-          <div key={index} className="mt-6 p-4 bg-gradient-to-r from-slate-500/10 to-slate-600/5 rounded-xl border border-slate-500/20">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-slate-600" />
-              <h3 className="text-lg font-display font-semibold text-foreground">
-                {trimmedLine.replace(/^#+\s*/, '')}
-              </h3>
+              {showNearMisses ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
             </div>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-2 ml-4" />
+        </Collapsible>
+      );
+    }
+
+    // Constraints/Assumptions section
+    if (trimmedLine.match(/^(##\s*)?(Constraints|Assumptions|Trade-?offs|Notes|Important)/i)) {
+      return (
+        <div key={item.id} className="mt-6 p-4 bg-gradient-to-r from-slate-500/10 to-slate-600/5 rounded-xl border border-slate-500/20">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 text-slate-600" />
+            <h3 className="text-lg font-display font-semibold text-foreground">
+              {trimmedLine.replace(/^#+\s*/, '')}
+            </h3>
           </div>
-        );
-      }
+        </div>
+      );
+    }
 
-      // Trip Summary section
-      if (trimmedLine.match(/^(##\s*)?(Trip Summary|Overview|At a Glance)/i)) {
-        return (
-          <div key={index} className="p-4 bg-gradient-to-r from-primary/10 to-primary/5 rounded-xl border border-primary/20">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-primary" />
-              <h3 className="text-lg font-display font-semibold text-foreground">
-                {trimmedLine.replace(/^#+\s*/, '')}
-              </h3>
-            </div>
+    // Trip Summary section
+    if (trimmedLine.match(/^(##\s*)?(Trip Summary|Overview|At a Glance)/i)) {
+      return (
+        <div key={item.id} className="p-4 bg-gradient-to-r from-primary/10 to-primary/5 rounded-xl border border-primary/20">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-primary" />
+            <h3 className="text-lg font-display font-semibold text-foreground">
+              {trimmedLine.replace(/^#+\s*/, '')}
+            </h3>
           </div>
-        );
-      }
+        </div>
+      );
+    }
 
-      // Day headers
-      if (trimmedLine.match(/^(Day\s+\d+|##\s*Day)/i)) {
-        currentDay++;
-        inNearMisses = false;
-        inConstraints = false;
-        const dayColors = [
-          'from-blue-500/20 to-blue-600/10 border-blue-500/30',
-          'from-emerald-500/20 to-emerald-600/10 border-emerald-500/30',
-          'from-purple-500/20 to-purple-600/10 border-purple-500/30',
-          'from-amber-500/20 to-amber-600/10 border-amber-500/30',
-          'from-rose-500/20 to-rose-600/10 border-rose-500/30',
-          'from-cyan-500/20 to-cyan-600/10 border-cyan-500/30',
-          'from-indigo-500/20 to-indigo-600/10 border-indigo-500/30',
-        ];
-        const colorClass = dayColors[(currentDay - 1) % dayColors.length];
-        
-        return (
-          <div 
-            key={index} 
-            className={cn(
-              "mt-8 first:mt-0 p-4 rounded-xl bg-gradient-to-r border",
-              colorClass
-            )}
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-full bg-background/80 flex items-center justify-center shadow-sm">
-                <span className="text-lg font-bold text-primary">{currentDay}</span>
-              </div>
-              <h3 className="text-xl font-display font-semibold text-foreground">
-                {trimmedLine.replace(/^#+\s*/, '').replace(/^Day\s+\d+:?\s*/i, '')}
-              </h3>
-            </div>
-          </div>
-        );
-      }
-
-      // Flight info section
-      if (trimmedLine.match(/^(##\s*)?(Flights?|Flight Details|Getting There|Travel Info)/i)) {
-        inNearMisses = false;
-        return (
-          <div key={index} className="mt-6 p-4 bg-gradient-to-r from-sky-500/10 to-sky-600/5 rounded-xl border border-sky-500/20">
-            <div className="flex items-center gap-2">
-              <Plane className="w-5 h-5 text-sky-600" />
-              <h3 className="text-lg font-display font-semibold text-foreground">
-                {trimmedLine.replace(/^#+\s*/, '')}
-              </h3>
-            </div>
-          </div>
-        );
-      }
-
-      // Best time to visit section
-      if (trimmedLine.match(/^(##\s*)?(Best Time|When to Visit|Travel Season|Timing)/i)) {
-        inNearMisses = false;
-        return (
-          <div key={index} className="mt-6 p-4 bg-gradient-to-r from-amber-500/10 to-amber-600/5 rounded-xl border border-amber-500/20">
-            <div className="flex items-center gap-2">
-              <Sun className="w-5 h-5 text-amber-600" />
-              <h3 className="text-lg font-display font-semibold text-foreground">
-                {trimmedLine.replace(/^#+\s*/, '')}
-              </h3>
-            </div>
-          </div>
-        );
-      }
-
-      // Budget section
-      if (trimmedLine.match(/^(##\s*)?(Budget|Cost|Estimated Budget|Daily Budget)/i)) {
-        inNearMisses = false;
-        return (
-          <div key={index} className="mt-6 p-4 bg-gradient-to-r from-emerald-500/10 to-emerald-600/5 rounded-xl border border-emerald-500/20">
-            <div className="flex items-center gap-2">
-              <DollarSign className="w-5 h-5 text-emerald-600" />
-              <h3 className="text-lg font-display font-semibold text-foreground">
-                {trimmedLine.replace(/^#+\s*/, '')}
-              </h3>
-            </div>
-          </div>
-        );
-      }
-
-      // Accommodation section
-      if (trimmedLine.match(/^(##\s*)?(Accommodation|Where to Stay|Hotels?|Lodging)/i)) {
-        inNearMisses = false;
-        return (
-          <div key={index} className="mt-6 p-4 bg-gradient-to-r from-indigo-500/10 to-indigo-600/5 rounded-xl border border-indigo-500/20">
-            <div className="flex items-center gap-2">
-              <Building className="w-5 h-5 text-indigo-600" />
-              <h3 className="text-lg font-display font-semibold text-foreground">
-                {trimmedLine.replace(/^#+\s*/, '')}
-              </h3>
-            </div>
-          </div>
-        );
-      }
-
-      // Section headers (Morning, Afternoon, Evening, Meals, Logistics, etc.)
-      if (trimmedLine.match(/^\*?\*?(Morning|Afternoon|Evening|Night|Meals|Logistics|Getting there|How to book)\*?\*?:?$/i)) {
-        const timeIcons: Record<string, string> = {
-          'morning': '🌅',
-          'afternoon': '☀️',
-          'evening': '🌆',
-          'night': '🌙',
-          'meals': '🍽️',
-          'logistics': '🚃',
-          'getting there': '🚃',
-          'how to book': '📱',
-        };
-        const cleanedLine = trimmedLine.replace(/\*\*/g, '').replace(/:$/, '').toLowerCase();
-        const timeKey = Object.keys(timeIcons).find(k => cleanedLine.includes(k)) || '';
-        
-        return (
-          <div key={index} className="flex items-center gap-3 ml-4 mt-5 mb-2">
-            <span className="text-lg">{timeIcons[timeKey] || '📍'}</span>
-            <h4 className="text-sm font-semibold text-foreground uppercase tracking-wide">{trimmedLine.replace(/\*\*/g, '')}</h4>
-            <div className="flex-1 h-px bg-border" />
-          </div>
-        );
-      }
-
-      // Bold section headers like **Theme:** or **Book First**
-      if (trimmedLine.match(/^\*\*[^*]+\*\*:?$/)) {
-        const headerText = trimmedLine.replace(/\*\*/g, '').replace(/:$/, '');
-        return (
-          <h4 key={index} className="text-base font-semibold text-foreground mt-4 mb-2 ml-4">
-            {headerText}
-          </h4>
-        );
-      }
-
-      // Bullet points with activity tags and nested indentation
-      if (trimmedLine.startsWith('-') || trimmedLine.startsWith('•')) {
-        const content = trimmedLine.replace(/^[-•]\s*/, '');
-        const activityType = detectActivityType(content);
-        const hasFood = /restaurant|eat|food|breakfast|lunch|dinner|café|cafe|meal|dine|cuisine/i.test(content);
-        const hasPhoto = /photo|view|scenic|visit|see|explore|landmark|monument|museum/i.test(content);
-        const hasTip = /tip|recommend|don't miss|must|should|pro tip|insider/i.test(content);
-        const hasFlight = /flight|airport|airline|depart|arrive|layover/i.test(content);
-        const hasWeather = /weather|rain|sun|temperature|climate|season/i.test(content);
-        const hasDrink = /bar|brewery|cocktail|beer|wine|drinks?|pub/i.test(content);
-        
-        const Icon = hasFlight ? Plane : hasFood ? Utensils : hasDrink ? PartyPopper : hasPhoto ? Camera : hasTip ? Star : hasWeather ? CloudRain : null;
-        const iconColor = hasFlight ? 'text-sky-500' : hasFood ? 'text-orange-500' : hasDrink ? 'text-violet-500' : hasPhoto ? 'text-blue-500' : hasTip ? 'text-amber-500' : hasWeather ? 'text-cyan-500' : '';
-        
-        // Parse bold text and links using shared function
-        const parsedContent = parseInlineContent(content);
-
-        // Calculate left margin based on indent level
-        const marginLeft = 1.5 + (indentLevel * 1); // base 1.5rem + 1rem per indent level
-        
-        return (
-          <div 
-            key={index} 
-            className="flex items-start gap-3 py-2 group hover:bg-muted/30 px-3 -mx-3 rounded-lg transition-colors"
-            style={{ marginLeft: `${marginLeft}rem` }}
-          >
-            {Icon ? (
-              <Icon className={cn("w-4 h-4 mt-1 shrink-0", iconColor)} />
-            ) : (
-              <div className={cn(
-                "rounded-full mt-2 shrink-0",
-                indentLevel === 0 ? "w-2 h-2 bg-primary/60" : "w-1.5 h-1.5 bg-muted-foreground/40"
-              )} />
-            )}
-            <div className="flex-1">
-              <p className="text-foreground/90 leading-relaxed">{parsedContent}</p>
-              {activityType && indentLevel === 0 && (
-                <div className="mt-1">
-                  <ActivityTag type={activityType} />
-                </div>
-              )}
-            </div>
-          </div>
-        );
-      }
-
-      // Regular text (could be sub-headers or descriptions)
-      const isSubHeader = trimmedLine.match(/^###?\s+/);
-      if (isSubHeader) {
-        const headerContent = trimmedLine.replace(/^#+\s*/, '');
-        return (
-          <h4 key={index} className="text-base font-medium text-foreground mt-4 mb-2 ml-4">
-            {parseInlineContent(headerContent)}
-          </h4>
-        );
-      }
-
-      // Regular text - parse links and bold
-      const textContent = trimmedLine.replace(/^#+\s*/, '');
+    // Day headers
+    if (trimmedLine.match(/^(Day\s+\d+|##\s*Day)/i)) {
+      const dayMatch = trimmedLine.match(/Day\s+(\d+)/i);
+      const dayNum = dayMatch ? parseInt(dayMatch[1]) : index;
+      const dayColors = [
+        'from-blue-500/20 to-blue-600/10 border-blue-500/30',
+        'from-emerald-500/20 to-emerald-600/10 border-emerald-500/30',
+        'from-purple-500/20 to-purple-600/10 border-purple-500/30',
+        'from-amber-500/20 to-amber-600/10 border-amber-500/30',
+        'from-rose-500/20 to-rose-600/10 border-rose-500/30',
+        'from-cyan-500/20 to-cyan-600/10 border-cyan-500/30',
+        'from-indigo-500/20 to-indigo-600/10 border-indigo-500/30',
+      ];
+      const colorClass = dayColors[(dayNum - 1) % dayColors.length];
       
       return (
-        <p key={index} className="text-foreground/80 ml-6 leading-relaxed py-1">
-          {parseInlineContent(textContent)}
-        </p>
+        <div 
+          key={item.id} 
+          className={cn("mt-8 first:mt-0 p-4 rounded-xl bg-gradient-to-r border", colorClass)}
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-full bg-background/80 flex items-center justify-center shadow-sm">
+              <span className="text-lg font-bold text-primary">{dayNum}</span>
+            </div>
+            <h3 className="text-xl font-display font-semibold text-foreground">
+              {trimmedLine.replace(/^#+\s*/, '').replace(/^Day\s+\d+:?\s*/i, '')}
+            </h3>
+          </div>
+        </div>
       );
-    });
+    }
+
+    // Flight info section
+    if (trimmedLine.match(/^(##\s*)?(Flights?|Flight Details|Getting There|Travel Info)/i)) {
+      return (
+        <div key={item.id} className="mt-6 p-4 bg-gradient-to-r from-sky-500/10 to-sky-600/5 rounded-xl border border-sky-500/20">
+          <div className="flex items-center gap-2">
+            <Plane className="w-5 h-5 text-sky-600" />
+            <h3 className="text-lg font-display font-semibold text-foreground">
+              {trimmedLine.replace(/^#+\s*/, '')}
+            </h3>
+          </div>
+        </div>
+      );
+    }
+
+    // Best time to visit section
+    if (trimmedLine.match(/^(##\s*)?(Best Time|When to Visit|Travel Season|Timing)/i)) {
+      return (
+        <div key={item.id} className="mt-6 p-4 bg-gradient-to-r from-amber-500/10 to-amber-600/5 rounded-xl border border-amber-500/20">
+          <div className="flex items-center gap-2">
+            <Sun className="w-5 h-5 text-amber-600" />
+            <h3 className="text-lg font-display font-semibold text-foreground">
+              {trimmedLine.replace(/^#+\s*/, '')}
+            </h3>
+          </div>
+        </div>
+      );
+    }
+
+    // Budget section
+    if (trimmedLine.match(/^(##\s*)?(Budget|Cost|Estimated Budget|Daily Budget)/i)) {
+      return (
+        <div key={item.id} className="mt-6 p-4 bg-gradient-to-r from-emerald-500/10 to-emerald-600/5 rounded-xl border border-emerald-500/20">
+          <div className="flex items-center gap-2">
+            <DollarSign className="w-5 h-5 text-emerald-600" />
+            <h3 className="text-lg font-display font-semibold text-foreground">
+              {trimmedLine.replace(/^#+\s*/, '')}
+            </h3>
+          </div>
+        </div>
+      );
+    }
+
+    // Accommodation section
+    if (trimmedLine.match(/^(##\s*)?(Accommodation|Where to Stay|Hotels?|Lodging)/i)) {
+      return (
+        <div key={item.id} className="mt-6 p-4 bg-gradient-to-r from-indigo-500/10 to-indigo-600/5 rounded-xl border border-indigo-500/20">
+          <div className="flex items-center gap-2">
+            <Building className="w-5 h-5 text-indigo-600" />
+            <h3 className="text-lg font-display font-semibold text-foreground">
+              {trimmedLine.replace(/^#+\s*/, '')}
+            </h3>
+          </div>
+        </div>
+      );
+    }
+
+    // Section headers (Morning, Afternoon, etc.)
+    if (trimmedLine.match(/^\*?\*?(Morning|Afternoon|Evening|Night|Meals|Logistics|Getting there|How to book)\*?\*?:?$/i)) {
+      const timeIcons: Record<string, string> = {
+        'morning': '🌅',
+        'afternoon': '☀️',
+        'evening': '🌆',
+        'night': '🌙',
+        'meals': '🍽️',
+        'logistics': '🚃',
+        'getting there': '🚃',
+        'how to book': '📱',
+      };
+      const cleanedSectionLine = trimmedLine.replace(/\*\*/g, '').replace(/:$/, '').toLowerCase();
+      const timeKey = Object.keys(timeIcons).find(k => cleanedSectionLine.includes(k)) || '';
+      
+      return (
+        <div key={item.id} className="flex items-center gap-3 ml-4 mt-5 mb-2">
+          <span className="text-lg">{timeIcons[timeKey] || '📍'}</span>
+          <h4 className="text-sm font-semibold text-foreground uppercase tracking-wide">{trimmedLine.replace(/\*\*/g, '')}</h4>
+          <div className="flex-1 h-px bg-border" />
+        </div>
+      );
+    }
+
+    // Bold section headers like **Theme:** or **Book First**
+    if (trimmedLine.match(/^\*\*[^*]+\*\*:?$/)) {
+      const headerText = trimmedLine.replace(/\*\*/g, '').replace(/:$/, '');
+      return (
+        <h4 key={item.id} className="text-base font-semibold text-foreground mt-4 mb-2 ml-4">
+          {headerText}
+        </h4>
+      );
+    }
+
+    // Bullet points with activity tags and feedback controls
+    if (trimmedLine.startsWith('-') || trimmedLine.startsWith('•')) {
+      const content = trimmedLine.replace(/^[-•]\s*/, '');
+      const activityType = detectActivityType(content);
+      const hasFood = /restaurant|eat|food|breakfast|lunch|dinner|café|cafe|meal|dine|cuisine/i.test(content);
+      const hasPhoto = /photo|view|scenic|visit|see|explore|landmark|monument|museum/i.test(content);
+      const hasTip = /tip|recommend|don't miss|must|should|pro tip|insider/i.test(content);
+      const hasFlight = /flight|airport|airline|depart|arrive|layover/i.test(content);
+      const hasWeather = /weather|rain|sun|temperature|climate|season/i.test(content);
+      const hasDrink = /bar|brewery|cocktail|beer|wine|drinks?|pub/i.test(content);
+      
+      const Icon = hasFlight ? Plane : hasFood ? Utensils : hasDrink ? PartyPopper : hasPhoto ? Camera : hasTip ? Star : hasWeather ? CloudRain : null;
+      const iconColor = hasFlight ? 'text-sky-500' : hasFood ? 'text-orange-500' : hasDrink ? 'text-violet-500' : hasPhoto ? 'text-blue-500' : hasTip ? 'text-amber-500' : hasWeather ? 'text-cyan-500' : '';
+      
+      const parsedContent = parseInlineContent(content);
+      const marginLeft = 1.5 + (indentLevel * 1);
+      
+      return (
+        <div 
+          key={item.id} 
+          className={cn(
+            "flex items-start gap-3 py-2 group hover:bg-muted/30 px-3 -mx-3 rounded-lg transition-colors relative",
+            item.isUpdating && "opacity-60"
+          )}
+          style={{ marginLeft: `${marginLeft}rem` }}
+        >
+          {Icon ? (
+            <Icon className={cn("w-4 h-4 mt-1 shrink-0", iconColor)} />
+          ) : (
+            <div className={cn(
+              "rounded-full mt-2 shrink-0",
+              indentLevel === 0 ? "w-2 h-2 bg-primary/60" : "w-1.5 h-1.5 bg-muted-foreground/40"
+            )} />
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="text-foreground/90 leading-relaxed">{parsedContent}</p>
+            {activityType && indentLevel === 0 && (
+              <div className="mt-1">
+                <ActivityTag type={activityType} />
+              </div>
+            )}
+            {item.comment && !item.isUpdating && (
+              <div className="mt-2 text-xs text-muted-foreground bg-muted/50 px-2 py-1 rounded">
+                💬 {item.comment}
+              </div>
+            )}
+          </div>
+          
+          {/* Feedback controls - show on hover for bullet items */}
+          {canHaveFeedback && (
+            <div className="shrink-0 self-center">
+              <ItemFeedbackControls
+                item={item}
+                canUndo={canUndo(item.id)}
+                onVote={(vote) => setVote(item.id, vote)}
+                onComment={(comment) => setComment(item.id, comment)}
+                onSubmitFeedback={() => handleSubmitFeedback(item)}
+                onUndo={() => undoItem(item.id)}
+              />
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Regular text
+    const isSubHeader = trimmedLine.match(/^###?\s+/);
+    if (isSubHeader) {
+      const headerContent = trimmedLine.replace(/^#+\s*/, '');
+      return (
+        <h4 key={item.id} className="text-base font-medium text-foreground mt-4 mb-2 ml-4">
+          {parseInlineContent(headerContent)}
+        </h4>
+      );
+    }
+
+    const textContent = trimmedLine.replace(/^#+\s*/, '');
+    
+    return (
+      <p key={item.id} className="text-foreground/80 ml-6 leading-relaxed py-1">
+        {parseInlineContent(textContent)}
+      </p>
+    );
   };
 
   return (
@@ -445,37 +533,45 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
                   <Edit3 className="w-4 h-4" />
                   Request changes
                 </h4>
-                <Button variant="ghost" size="sm" onClick={() => setEditMode(false)}>
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => setEditMode(false)}
+                >
                   <X className="w-4 h-4" />
                 </Button>
               </div>
               <Textarea
                 value={editRequest}
                 onChange={(e) => setEditRequest(e.target.value)}
-                placeholder="e.g., 'Add more restaurant options for Day 2' or 'Swap the museum visit with a hiking trip'"
+                placeholder="e.g., 'Add more food options' or 'Replace day 2 with beach activities'"
                 className="min-h-[80px] resize-none"
               />
-              <Button onClick={handleSubmitEdit} disabled={!editRequest.trim()} className="gap-2">
-                <Send className="w-4 h-4" />
-                Update Itinerary
-              </Button>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => setEditMode(false)}>
+                  Cancel
+                </Button>
+                <Button size="sm" onClick={handleSubmitEdit} disabled={!editRequest.trim()}>
+                  <Send className="w-4 h-4 mr-2" />
+                  Submit
+                </Button>
+              </div>
             </div>
           ) : (
-            <Button 
-              variant="outline" 
-              className="w-full gap-2" 
+            <button
               onClick={() => setEditMode(true)}
+              className="w-full flex items-center justify-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors py-2"
             >
               <Edit3 className="w-4 h-4" />
-              Edit this itinerary
-            </Button>
+              <span>Want to make changes? Click here or hover over items to give feedback</span>
+            </button>
           )}
         </Card>
       )}
 
-      {/* Itinerary content */}
-      <div className="animate-fade-in">
-        {renderContent()}
+      {/* Itinerary content with feedback controls */}
+      <div className="space-y-1">
+        {items.map((item, index) => renderItemWithFeedback(item, index))}
       </div>
     </div>
   );
