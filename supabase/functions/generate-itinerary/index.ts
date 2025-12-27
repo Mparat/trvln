@@ -134,57 +134,22 @@ Guided vs self-serve: ${guidedLabel}
 Food & drink: ${foodDrink?.length > 0 ? foodDrink.join(", ") : "No preference"}
 Interests (ranked): ${interests?.length > 0 ? interests.join(" > ") : "No preference"}`;
 
-    // Theme variant instructions
-    const themeInstructions: Record<string, { name: string; focus: string }> = {
-      "culture": {
-        name: "Cultural Immersion",
-        focus: `## 🎭 THEME: CULTURAL IMMERSION
-This itinerary MUST focus heavily on:
-- Museums, galleries, and art exhibitions
-- Historic temples, shrines, castles, and monuments
-- Traditional crafts and artisan workshops
-- Cultural performances (theater, dance, music)
-- Local festivals and ceremonies
-- Architectural tours and heritage sites
-- Traditional neighborhoods with historic character
-- Limit food/nightlife to culturally significant experiences only`
-      },
-      "adventure": {
-        name: "Adventure & Nature",
-        focus: `## 🏔️ THEME: ADVENTURE & NATURE
-This itinerary MUST focus heavily on:
-- Hiking trails and mountain experiences
-- Outdoor activities (kayaking, cycling, snorkeling, etc.)
-- National parks and natural wonders
-- Scenic viewpoints and photo opportunities
-- Wildlife encounters
-- Day trips to natural areas outside the city
-- Active experiences over passive sightseeing
-- Limit urban activities to essential logistics only`
-      },
-      "foodie": {
-        name: "Food & Nightlife",
-        focus: `## 🍜 THEME: FOOD & NIGHTLIFE
-This itinerary MUST focus heavily on:
-- Iconic local restaurants and hidden food gems
-- Street food tours and market explorations
-- Cooking classes and food workshops
-- Sake/wine/beer tastings and brewery visits
-- Trendy bars, speakeasies, and rooftop lounges
-- Night markets and evening food districts
-- Breakfast spots, lunch counters, and late-night eats
-- Build the entire day around food experiences`
-      }
-    };
-
-    const selectedTheme = themeVariant && themeInstructions[themeVariant] 
-      ? themeInstructions[themeVariant] 
-      : null;
+    // Theme variant - now accepts dynamic theme object or falls back to generic
+    // themeVariant can be: { id: string, name: string, emoji: string } or a string ID for legacy
+    let themeContext = "";
+    if (themeVariant && typeof themeVariant === 'object' && themeVariant.name) {
+      themeContext = `## ${themeVariant.emoji || "🌟"} THEME: ${themeVariant.name.toUpperCase()}
+This itinerary MUST embody the "${themeVariant.name}" theme throughout.
+- Every activity, restaurant, and experience should reinforce this theme
+- Make bold choices that fit this specific angle on the trip
+- This theme should make this itinerary feel DISTINCTLY different from other possible versions
+- The theme should influence: which neighborhoods to visit, which activities to prioritize, dining choices, timing of activities, and overall vibe`;
+    }
 
 const systemPrompt = `You are an expert travel planner with DEEP LOCAL KNOWLEDGE who uncovers extraordinary experiences.
 Your output must be structured and decision-oriented, with genuinely unique and enticing recommendations.
 
-${selectedTheme ? selectedTheme.focus + "\n\n" : ""}
+${themeContext ? themeContext + "\n\n" : ""}
 
 ## CORE PRINCIPLES:
 1. OBEY THE TRAVELER: Their written requests are COMMANDS, not suggestions. Read them carefully. If they ask to exclude something, exclude it. If they want more of something, add more. If they want changes, make those exact changes.

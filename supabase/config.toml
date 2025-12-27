@@ -3,6 +3,9 @@ project_id = "hcqiyuaynvwqwvsjpfzl"
 [functions.generate-itinerary]
 verify_jwt = false
 
+[functions.suggest-themes]
+verify_jwt = false
+
 [functions.validate-links]
 verify_jwt = false
 
