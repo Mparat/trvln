@@ -161,6 +161,83 @@ export function useItineraryItems(initialItinerary: string = '') {
     }));
   }, []);
 
+  // Insert a new item after a specific item or at a specific position
+  const insertItemAfter = useCallback((afterItemId: string | null, newContent: string, context: string): string => {
+    const newId = generateItemId(newContent, Date.now());
+    const newItem: ItineraryItem = {
+      id: newId,
+      content: newContent,
+      type: 'bullet',
+      indentLevel: 0,
+      history: [{ content: newContent, timestamp: Date.now() }],
+      vote: null,
+      comment: null,
+      isUpdating: false,
+      context,
+    };
+
+    setItems(prev => {
+      if (!afterItemId) {
+        // Insert at the end
+        return [...prev, newItem];
+      }
+      
+      const index = prev.findIndex(item => item.id === afterItemId);
+      if (index === -1) {
+        return [...prev, newItem];
+      }
+      
+      // Insert after the found item
+      return [...prev.slice(0, index + 1), newItem, ...prev.slice(index + 1)];
+    });
+
+    return newId;
+  }, []);
+
+  // Find item by partial content match
+  const findItemByContent = useCallback((searchText: string): ItineraryItem | undefined => {
+    return items.find(item => 
+      item.content.toLowerCase().includes(searchText.toLowerCase())
+    );
+  }, [items]);
+
+  // Find items in a specific day/section
+  const findItemsInSection = useCallback((dayNumber: number, section: string): ItineraryItem[] => {
+    let inTargetDay = false;
+    let inTargetSection = false;
+    const result: ItineraryItem[] = [];
+
+    for (const item of items) {
+      // Check if we're entering the target day
+      const dayMatch = item.content.match(/Day\s+(\d+)/i);
+      if (dayMatch) {
+        inTargetDay = parseInt(dayMatch[1]) === dayNumber;
+        inTargetSection = false;
+      }
+
+      // Check if we're entering the target section within the day
+      if (inTargetDay && item.content.toLowerCase().includes(section.toLowerCase())) {
+        inTargetSection = true;
+      }
+
+      // Check if we're leaving the section (new section header)
+      if (inTargetSection && item.type === 'section-header' && !item.content.toLowerCase().includes(section.toLowerCase())) {
+        inTargetSection = false;
+      }
+
+      // Check if we're leaving the day
+      if (inTargetDay && item.type === 'day-header' && item.content !== items.find(i => i.content.match(new RegExp(`Day\\s+${dayNumber}`, 'i')))?.content) {
+        break;
+      }
+
+      if (inTargetDay && inTargetSection && item.type === 'bullet') {
+        result.push(item);
+      }
+    }
+
+    return result;
+  }, [items]);
+
   // Set updating state
   const setItemUpdating = useCallback((itemId: string, isUpdating: boolean) => {
     setItems(prev => prev.map(item => 
@@ -194,5 +271,8 @@ export function useItineraryItems(initialItinerary: string = '') {
     getItem,
     canUndo,
     itineraryText,
+    insertItemAfter,
+    findItemByContent,
+    findItemsInSection,
   };
 }

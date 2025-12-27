@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback, type MouseEvent } from "react";
+import { useState, useEffect, useCallback, useRef, type MouseEvent } from "react";
 import { 
   MapPin, Clock, DollarSign, Utensils, Camera, Star, Plane, Sun, 
   CloudRain, Sparkles, AlertTriangle, ExternalLink, Edit3, Send,
   Mountain, Building, Trees, Tent, Heart, Zap, PartyPopper,
-  ChevronDown, ChevronUp, Lightbulb, X
+  ChevronDown, ChevronUp, Lightbulb, X, Plus, Loader2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -65,6 +65,9 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
   const [editMode, setEditMode] = useState(false);
   const [editRequest, setEditRequest] = useState("");
   const [showNearMisses, setShowNearMisses] = useState(false);
+  const [addingNearMiss, setAddingNearMiss] = useState<string | null>(null);
+  const [isInNearMissSection, setIsInNearMissSection] = useState(false);
+  const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const {
     items,
@@ -77,6 +80,8 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
     canUndo,
     getItem,
     itineraryText,
+    insertItemAfter,
+    findItemsInSection,
   } = useItineraryItems(itinerary);
 
   // Sync items when itinerary changes (streaming updates)
@@ -181,6 +186,87 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
     }
   }, [getItem, itineraryText, tripPreferences, setItemUpdating, updateItemContent, setVote, setComment]);
 
+  // Handle adding a Near Miss item to the itinerary
+  const handleAddNearMiss = useCallback(async (nearMissItem: ItineraryItem) => {
+    setAddingNearMiss(nearMissItem.id);
+
+    try {
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/add-near-miss`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({
+          nearMissContent: nearMissItem.content,
+          fullItinerary: itineraryText,
+          tripPreferences: tripPreferences || {},
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to add item");
+      }
+
+      const data = await response.json();
+      
+      if (data.success && data.placement) {
+        const { dayNumber, section, insertAfterText, formattedItem } = data.placement;
+        
+        // Find items in the target section
+        const sectionItems = findItemsInSection(dayNumber, section);
+        
+        // Find the item to insert after
+        let afterItemId: string | null = null;
+        if (insertAfterText && sectionItems.length > 0) {
+          const matchingItem = sectionItems.find(item => 
+            item.content.toLowerCase().includes(insertAfterText.toLowerCase().slice(0, 30))
+          );
+          if (matchingItem) {
+            afterItemId = matchingItem.id;
+          } else {
+            // Insert after the last item in the section
+            afterItemId = sectionItems[sectionItems.length - 1]?.id || null;
+          }
+        } else if (sectionItems.length > 0) {
+          // Insert after the last item in the section
+          afterItemId = sectionItems[sectionItems.length - 1].id;
+        }
+
+        // Insert the new item
+        const context = `Day ${dayNumber} > ${section}`;
+        const newItemId = insertItemAfter(afterItemId, formattedItem, context);
+
+        toast({
+          title: "Added to itinerary!",
+          description: `Added to Day ${dayNumber} - ${section}. Scroll up to see it.`,
+        });
+
+        // Scroll to the new item after a brief delay for DOM update
+        setTimeout(() => {
+          const element = itemRefs.current[newItemId];
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            element.classList.add('ring-2', 'ring-primary', 'ring-offset-2');
+            setTimeout(() => {
+              element.classList.remove('ring-2', 'ring-primary', 'ring-offset-2');
+            }, 3000);
+          }
+        }, 100);
+      }
+    } catch (error) {
+      console.error("Error adding near miss:", error);
+      toast({
+        title: "Couldn't add item",
+        description: error instanceof Error ? error.message : "Please try again",
+        variant: "destructive",
+      });
+    } finally {
+      setAddingNearMiss(null);
+    }
+  }, [itineraryText, tripPreferences, findItemsInSection, insertItemAfter]);
+
   if (isLoading) {
     return (
       <div className="space-y-6 animate-pulse">
@@ -264,6 +350,9 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
     return Math.floor(match[1].length / 2);
   };
 
+  // Track if we're in Near Misses section
+  let inNearMissSection = false;
+
   // Render a single itinerary item with feedback controls
   const renderItemWithFeedback = (item: ItineraryItem, index: number) => {
     const cleanedLine = cleanLine(item.content);
@@ -272,8 +361,16 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
 
     if (!trimmedLine) return null;
 
+    // Track entering/leaving Near Misses section
+    if (trimmedLine.match(/^(##\s*)?(Near Misses|Almost Included|Alternatives|Swap Options)/i)) {
+      inNearMissSection = true;
+    } else if (trimmedLine.match(/^(##\s*)?(Day\s+\d+|Trip Summary|Constraints|Assumptions|Alternative Guided|Book First|Flights?|Accommodation|Budget)/i)) {
+      inNearMissSection = false;
+    }
+
     // Check if this item type should have feedback controls
     const canHaveFeedback = item.type === 'bullet';
+    const isNearMissItem = inNearMissSection && item.type === 'bullet';
 
     // Detect Alternative Guided Trips section
     if (trimmedLine.match(/^(##\s*)?(Alternative Guided Trips|Other Tours)/i)) {
@@ -478,10 +575,12 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
       
       return (
         <div 
-          key={item.id} 
+          key={item.id}
+          ref={(el) => { itemRefs.current[item.id] = el; }}
           className={cn(
-            "flex items-start gap-3 py-2 group hover:bg-muted/30 px-3 -mx-3 rounded-lg transition-colors relative",
-            item.isUpdating && "opacity-60"
+            "flex items-start gap-3 py-2 group hover:bg-muted/30 px-3 -mx-3 rounded-lg transition-all relative",
+            item.isUpdating && "opacity-60",
+            isNearMissItem && "bg-amber-500/5 border-l-2 border-amber-500/30"
           )}
           style={{ marginLeft: `${marginLeft}rem` }}
         >
@@ -507,8 +606,31 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
             )}
           </div>
           
-          {/* Feedback controls - show on hover for bullet items */}
-          {canHaveFeedback && (
+          {/* Add to itinerary button for Near Miss items */}
+          {isNearMissItem && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="shrink-0 h-7 px-2 opacity-0 group-hover:opacity-100 transition-opacity bg-amber-500/10 hover:bg-amber-500/20 text-amber-700"
+              onClick={() => handleAddNearMiss(item)}
+              disabled={addingNearMiss === item.id}
+            >
+              {addingNearMiss === item.id ? (
+                <>
+                  <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                  Adding...
+                </>
+              ) : (
+                <>
+                  <Plus className="w-3 h-3 mr-1" />
+                  Add to trip
+                </>
+              )}
+            </Button>
+          )}
+
+          {/* Feedback controls - show on hover for regular bullet items */}
+          {canHaveFeedback && !isNearMissItem && (
             <div className="shrink-0 self-center">
               <ItemFeedbackControls
                 item={item}

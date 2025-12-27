@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.update-itinerary-item]
 verify_jwt = false
+
+[functions.add-near-miss]
+verify_jwt = false
