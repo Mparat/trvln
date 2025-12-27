@@ -4,6 +4,7 @@ import { TripInputForm, TripPreferences } from "@/components/TripInputForm";
 import { ItineraryOutput } from "@/components/ItineraryOutput";
 import { TripSummaryCard } from "@/components/TripSummaryCard";
 import { ItineraryMap } from "@/components/ItineraryMap";
+import { ItinerarySwitcher } from "@/components/ItinerarySwitcher";
 import { toast } from "@/hooks/use-toast";
 
 const defaultPreferences: TripPreferences = {
@@ -27,10 +28,87 @@ const defaultPreferences: TripPreferences = {
   additionalNotes: '',
 };
 
+export type ItineraryVariant = {
+  id: string;
+  name: string;
+  emoji: string;
+  content: string;
+};
+
+const THEME_VARIANTS = [
+  { id: "culture", name: "Cultural Immersion", emoji: "🎭" },
+  { id: "adventure", name: "Adventure & Nature", emoji: "🏔️" },
+  { id: "foodie", name: "Food & Nightlife", emoji: "🍜" },
+];
+
 const Index = () => {
   const [preferences, setPreferences] = useState<TripPreferences>(defaultPreferences);
-  const [itinerary, setItinerary] = useState("");
+  const [itineraries, setItineraries] = useState<ItineraryVariant[]>([]);
+  const [activeVariant, setActiveVariant] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [loadingVariants, setLoadingVariants] = useState<Record<string, boolean>>({});
+
+  const generateSingleItinerary = useCallback(async (
+    prefs: TripPreferences,
+    themeVariant: string,
+    onUpdate: (content: string) => void
+  ) => {
+    const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-itinerary`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+      },
+      body: JSON.stringify({ preferences: prefs, themeVariant }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || "Failed to generate itinerary");
+    }
+
+    if (!response.body) {
+      throw new Error("No response body");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let textBuffer = "";
+    let fullContent = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      textBuffer += decoder.decode(value, { stream: true });
+
+      let newlineIndex: number;
+      while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
+        let line = textBuffer.slice(0, newlineIndex);
+        textBuffer = textBuffer.slice(newlineIndex + 1);
+
+        if (line.endsWith("\r")) line = line.slice(0, -1);
+        if (line.startsWith(":") || line.trim() === "") continue;
+        if (!line.startsWith("data: ")) continue;
+
+        const jsonStr = line.slice(6).trim();
+        if (jsonStr === "[DONE]") break;
+
+        try {
+          const parsed = JSON.parse(jsonStr);
+          const content = parsed.choices?.[0]?.delta?.content;
+          if (content) {
+            fullContent += content;
+            onUpdate(fullContent);
+          }
+        } catch {
+          // Incomplete JSON, continue
+        }
+      }
+    }
+
+    return fullContent;
+  }, []);
 
   const handleGenerate = useCallback(async () => {
     const hasInspiration = preferences.media.length > 0 || preferences.cities.length > 0 || preferences.additionalNotes.trim();
@@ -45,81 +123,41 @@ const Index = () => {
     }
 
     setIsGenerating(true);
-    setItinerary("");
+    setItineraries(THEME_VARIANTS.map(v => ({ ...v, content: "" })));
+    setActiveVariant(0);
+    setLoadingVariants(Object.fromEntries(THEME_VARIANTS.map(v => [v.id, true])));
 
-    try {
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-itinerary`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
-        body: JSON.stringify({ preferences }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || "Failed to generate itinerary");
-      }
-
-      if (!response.body) {
-        throw new Error("No response body");
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let textBuffer = "";
-      let fullItinerary = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        textBuffer += decoder.decode(value, { stream: true });
-
-        let newlineIndex: number;
-        while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
-          let line = textBuffer.slice(0, newlineIndex);
-          textBuffer = textBuffer.slice(newlineIndex + 1);
-
-          if (line.endsWith("\r")) line = line.slice(0, -1);
-          if (line.startsWith(":") || line.trim() === "") continue;
-          if (!line.startsWith("data: ")) continue;
-
-          const jsonStr = line.slice(6).trim();
-          if (jsonStr === "[DONE]") break;
-
-          try {
-            const parsed = JSON.parse(jsonStr);
-            const content = parsed.choices?.[0]?.delta?.content;
-            if (content) {
-              fullItinerary += content;
-              setItinerary(fullItinerary);
-            }
-          } catch {
-            // Incomplete JSON, continue
+    // Generate all 3 variants in parallel
+    const promises = THEME_VARIANTS.map(async (variant) => {
+      try {
+        const content = await generateSingleItinerary(
+          preferences,
+          variant.id,
+          (updatedContent) => {
+            setItineraries(prev => 
+              prev.map(it => it.id === variant.id ? { ...it, content: updatedContent } : it)
+            );
           }
-        }
+        );
+        setLoadingVariants(prev => ({ ...prev, [variant.id]: false }));
+        return { id: variant.id, success: true, content };
+      } catch (error) {
+        console.error(`Error generating ${variant.id}:`, error);
+        setLoadingVariants(prev => ({ ...prev, [variant.id]: false }));
+        return { id: variant.id, success: false, error };
       }
+    });
 
-      toast({
-        title: "Itinerary ready!",
-        description: "Your personalized travel plan has been crafted",
-      });
-    } catch (error) {
-      console.error("Error generating itinerary:", error);
-      toast({
-        title: "Something went wrong",
-        description: error instanceof Error ? error.message : "Please try again later",
-        variant: "destructive",
-      });
-    } finally {
-      setIsGenerating(false);
-    }
-  }, [preferences]);
+    await Promise.all(promises);
+
+    setIsGenerating(false);
+    toast({
+      title: "3 itineraries ready!",
+      description: "Explore Cultural, Adventure, and Foodie versions of your trip",
+    });
+  }, [preferences, generateSingleItinerary]);
 
   const handleEdit = useCallback(async (editRequest: string) => {
-    // For now, append edit request to additional notes and regenerate
     setPreferences(prev => ({
       ...prev,
       additionalNotes: prev.additionalNotes + `\n\nEdit request: ${editRequest}`
@@ -127,12 +165,13 @@ const Index = () => {
     
     toast({
       title: "Processing your changes...",
-      description: "Updating the itinerary based on your feedback",
+      description: "Updating all 3 itineraries based on your feedback",
     });
     
-    // Trigger regeneration after state updates
     setTimeout(() => handleGenerate(), 100);
   }, [handleGenerate]);
+
+  const currentItinerary = itineraries[activeVariant];
 
   return (
     <div className="min-h-screen gradient-hero">
@@ -187,12 +226,22 @@ const Index = () => {
           />
 
           {/* Results */}
-          {(itinerary || isGenerating) && (
+          {(itineraries.length > 0 || isGenerating) && (
             <div className="space-y-6 animate-slide-up" style={{ animationDelay: '0.1s' }}>
+              {/* Itinerary Switcher */}
+              {itineraries.length > 0 && (
+                <ItinerarySwitcher
+                  variants={itineraries}
+                  activeIndex={activeVariant}
+                  onSelect={setActiveVariant}
+                  loadingVariants={loadingVariants}
+                />
+              )}
+
               {/* Summary Card */}
-              {itinerary && !isGenerating && (
+              {currentItinerary?.content && !loadingVariants[currentItinerary.id] && (
                 <TripSummaryCard 
-                  itinerary={itinerary}
+                  itinerary={currentItinerary.content}
                   departureCity={preferences.departureCity}
                   startDate={preferences.startDate}
                   endDate={preferences.endDate}
@@ -200,13 +249,13 @@ const Index = () => {
               )}
 
               {/* Map */}
-              {itinerary && !isGenerating && (
+              {currentItinerary?.content && !loadingVariants[currentItinerary.id] && (
                 <div className="bg-card rounded-2xl shadow-medium p-6 md:p-8">
                   <h3 className="font-display text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
                     <MapPin className="w-5 h-5 text-primary" />
                     Your Journey Map
                   </h3>
-                  <ItineraryMap itinerary={itinerary} />
+                  <ItineraryMap itinerary={currentItinerary.content} />
                 </div>
               )}
 
@@ -217,16 +266,18 @@ const Index = () => {
                     <Sparkles className="w-5 h-5 text-primary" />
                   </div>
                   <div>
-                    <h2 className="font-display text-xl font-semibold text-foreground">Your Personalized Itinerary</h2>
+                    <h2 className="font-display text-xl font-semibold text-foreground">
+                      {currentItinerary ? `${currentItinerary.emoji} ${currentItinerary.name}` : "Your Personalized Itinerary"}
+                    </h2>
                     <p className="text-sm text-muted-foreground">
-                      Crafted based on your preferences
+                      {currentItinerary ? "Swipe between themes above" : "Crafted based on your preferences"}
                     </p>
                   </div>
                 </div>
                 
                 <ItineraryOutput 
-                  itinerary={itinerary} 
-                  isLoading={isGenerating && !itinerary}
+                  itinerary={currentItinerary?.content || ""} 
+                  isLoading={isGenerating && !currentItinerary?.content}
                   onEdit={handleEdit}
                   tripPreferences={preferences}
                 />
