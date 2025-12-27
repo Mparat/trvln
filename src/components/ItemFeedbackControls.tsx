@@ -11,7 +11,7 @@ interface ItemFeedbackControlsProps {
   canUndo: boolean;
   onVote: (vote: 'up' | 'down' | 'neutral') => void;
   onComment: (comment: string) => void;
-  onSubmitFeedback: () => void;
+  onSubmitFeedback: (overrides?: { vote?: 'up' | 'down' | 'neutral' | null; comment?: string | null }) => void;
   onUndo: () => void;
 }
 
@@ -31,15 +31,17 @@ export function ItemFeedbackControls({
     onVote(vote);
     // Auto-submit for upvote (no changes needed)
     if (vote === 'up') {
-      onSubmitFeedback();
+      onSubmitFeedback({ vote });
     }
   };
 
   const handleSubmitComment = (e: MouseEvent) => {
     e.stopPropagation();
-    onComment(commentText);
+    const nextComment = commentText.trim();
+    onComment(nextComment);
     setShowCommentInput(false);
-    onSubmitFeedback();
+    // Ensure submit sees the latest comment even before state propagation
+    onSubmitFeedback({ comment: nextComment });
   };
 
   const handleUndo = (e: MouseEvent) => {
@@ -171,7 +173,7 @@ export function ItemFeedbackControls({
           className="h-7 px-2 ml-1"
           onClick={(e) => {
             e.stopPropagation();
-            onSubmitFeedback();
+            onSubmitFeedback({ vote: item.vote, comment: item.comment });
           }}
         >
           <Send className="w-3 h-3 mr-1" />

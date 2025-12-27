@@ -95,15 +95,22 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
   };
 
   // Handle feedback submission for a specific item
-  const handleSubmitFeedback = useCallback(async (itemId: string) => {
-    const item = getItem(itemId);
-    if (!item) return;
+  const handleSubmitFeedback = useCallback(async (
+    itemId: string,
+    overrides?: { vote?: 'up' | 'down' | 'neutral' | null; comment?: string | null }
+  ) => {
+    // Pull latest state (avoids stale closures when comment/vote just changed)
+    const current = getItem(itemId);
+    if (!current) return;
+
+    const vote = overrides?.vote ?? current.vote;
+    const comment = overrides?.comment ?? current.comment;
 
     // Need either a vote or a comment to submit
-    if (!item.vote && !item.comment) return;
+    if (!vote && !comment) return;
 
     // Upvotes without comments don't need an API call - just acknowledge
-    if (item.vote === 'up' && !item.comment) {
+    if (vote === 'up' && !comment) {
       toast({
         title: "Noted!",
         description: "We'll keep this recommendation.",
@@ -111,11 +118,18 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
       return;
     }
 
-    // If only upvote with comment, still trigger update based on comment
-    const shouldUpdate = item.vote === 'down' || item.vote === 'neutral' || !!item.comment;
+    const shouldUpdate = vote === 'down' || vote === 'neutral' || !!comment;
     if (!shouldUpdate) return;
 
-    setItemUpdating(item.id, true);
+    // Keep UI state in sync if overrides were provided
+    if (overrides?.vote !== undefined && overrides.vote !== current.vote) {
+      setVote(itemId, overrides.vote as any);
+    }
+    if (overrides?.comment !== undefined && overrides.comment !== current.comment) {
+      setComment(itemId, (overrides.comment ?? '') as any);
+    }
+
+    setItemUpdating(itemId, true);
 
     try {
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-itinerary-item`, {
@@ -125,11 +139,11 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
         body: JSON.stringify({
-          itemContent: item.content,
-          itemContext: item.context,
+          itemContent: current.content,
+          itemContext: current.context,
           feedback: {
-            vote: item.vote,
-            comment: item.comment,
+            vote,
+            comment,
           },
           fullItinerary: itineraryText,
           tripPreferences: tripPreferences || {},
@@ -144,13 +158,13 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
       const data = await response.json();
 
       if (data.changed) {
-        updateItemContent(item.id, data.updatedContent);
+        updateItemContent(itemId, data.updatedContent);
         toast({
           title: "Updated!",
           description: "This recommendation has been refreshed.",
         });
       } else {
-        setItemUpdating(item.id, false);
+      setItemUpdating(itemId, false);
         toast({
           title: "Kept as is",
           description: data.reason || "No changes needed.",
@@ -158,14 +172,14 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
       }
     } catch (error) {
       console.error("Error updating item:", error);
-      setItemUpdating(item.id, false);
+      setItemUpdating(itemId, false);
       toast({
         title: "Couldn't update",
         description: error instanceof Error ? error.message : "Please try again",
         variant: "destructive",
       });
     }
-  }, [getItem, itineraryText, tripPreferences, setItemUpdating, updateItemContent]);
+  }, [getItem, itineraryText, tripPreferences, setItemUpdating, updateItemContent, setVote, setComment]);
 
   if (isLoading) {
     return (
@@ -501,7 +515,7 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
                 canUndo={canUndo(item.id)}
                 onVote={(vote) => setVote(item.id, vote)}
                 onComment={(comment) => setComment(item.id, comment)}
-                onSubmitFeedback={() => handleSubmitFeedback(item.id)}
+                onSubmitFeedback={(overrides) => handleSubmitFeedback(item.id, overrides)}
                 onUndo={() => undoItem(item.id)}
               />
             </div>
