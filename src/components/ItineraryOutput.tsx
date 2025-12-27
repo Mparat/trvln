@@ -88,6 +88,28 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
 
   if (!itinerary) return null;
 
+  // Clean up asterisks and duplicative patterns
+  const cleanLine = (line: string): string => {
+    let cleaned = line;
+    // Remove leading asterisks used as bullets (replace with proper dash)
+    cleaned = cleaned.replace(/^\s*\*\s+/, '- ');
+    // Remove duplicate asterisks like ** at end of lines
+    cleaned = cleaned.replace(/\*\*+\s*$/, '');
+    // Fix malformed bold like *text** or **text*
+    cleaned = cleaned.replace(/\*([^*]+)\*\*(?!\*)/g, '**$1**');
+    cleaned = cleaned.replace(/\*\*([^*]+)\*(?!\*)/g, '**$1**');
+    // Remove standalone asterisks
+    cleaned = cleaned.replace(/(?<!\*)\*(?!\*)/g, '');
+    return cleaned;
+  };
+
+  // Detect indentation level (for nested bullets)
+  const getIndentLevel = (line: string): number => {
+    const match = line.match(/^(\s*)/);
+    if (!match) return 0;
+    return Math.floor(match[1].length / 2);
+  };
+
   const lines = itinerary.split('\n');
   let currentDay = 0;
   let inNearMisses = false;
@@ -95,7 +117,9 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
   
   const renderContent = () => {
     return lines.map((line, index) => {
-      const trimmedLine = line.trim();
+      const cleanedLine = cleanLine(line);
+      const trimmedLine = cleanedLine.trim();
+      const indentLevel = getIndentLevel(line);
       
       if (!trimmedLine) return null;
 
@@ -281,19 +305,19 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
         );
       }
 
-      // Bullet points with activity tags
-      if (trimmedLine.startsWith('-') || trimmedLine.startsWith('•') || trimmedLine.startsWith('*')) {
-        const content = trimmedLine.replace(/^[-•*]\s*/, '');
+      // Bullet points with activity tags and nested indentation
+      if (trimmedLine.startsWith('-') || trimmedLine.startsWith('•')) {
+        const content = trimmedLine.replace(/^[-•]\s*/, '');
         const activityType = detectActivityType(content);
         const hasFood = /restaurant|eat|food|breakfast|lunch|dinner|café|cafe|meal|dine|cuisine/i.test(content);
         const hasPhoto = /photo|view|scenic|visit|see|explore|landmark|monument|museum/i.test(content);
         const hasTip = /tip|recommend|don't miss|must|should|pro tip|insider/i.test(content);
         const hasFlight = /flight|airport|airline|depart|arrive|layover/i.test(content);
         const hasWeather = /weather|rain|sun|temperature|climate|season/i.test(content);
-        const hasLink = /\[([^\]]+)\]\(([^)]+)\)/g.test(content);
+        const hasDrink = /bar|brewery|cocktail|beer|wine|drinks?|pub/i.test(content);
         
-        const Icon = hasFlight ? Plane : hasFood ? Utensils : hasPhoto ? Camera : hasTip ? Star : hasWeather ? CloudRain : null;
-        const iconColor = hasFlight ? 'text-sky-500' : hasFood ? 'text-orange-500' : hasPhoto ? 'text-blue-500' : hasTip ? 'text-amber-500' : hasWeather ? 'text-cyan-500' : '';
+        const Icon = hasFlight ? Plane : hasFood ? Utensils : hasDrink ? PartyPopper : hasPhoto ? Camera : hasTip ? Star : hasWeather ? CloudRain : null;
+        const iconColor = hasFlight ? 'text-sky-500' : hasFood ? 'text-orange-500' : hasDrink ? 'text-violet-500' : hasPhoto ? 'text-blue-500' : hasTip ? 'text-amber-500' : hasWeather ? 'text-cyan-500' : '';
         
         // Parse bold text and links
         const parsedContent = content.split(/(\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g).map((part, i) => {
@@ -317,17 +341,27 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
           }
           return part;
         });
+
+        // Calculate left margin based on indent level
+        const marginLeft = 1.5 + (indentLevel * 1); // base 1.5rem + 1rem per indent level
         
         return (
-          <div key={index} className="flex items-start gap-3 ml-6 py-2 group hover:bg-muted/30 px-3 -mx-3 rounded-lg transition-colors">
+          <div 
+            key={index} 
+            className="flex items-start gap-3 py-2 group hover:bg-muted/30 px-3 -mx-3 rounded-lg transition-colors"
+            style={{ marginLeft: `${marginLeft}rem` }}
+          >
             {Icon ? (
               <Icon className={cn("w-4 h-4 mt-1 shrink-0", iconColor)} />
             ) : (
-              <div className="w-2 h-2 rounded-full bg-primary/60 mt-2 shrink-0" />
+              <div className={cn(
+                "rounded-full mt-2 shrink-0",
+                indentLevel === 0 ? "w-2 h-2 bg-primary/60" : "w-1.5 h-1.5 bg-muted-foreground/40"
+              )} />
             )}
             <div className="flex-1">
               <p className="text-foreground/90 leading-relaxed">{parsedContent}</p>
-              {activityType && (
+              {activityType && indentLevel === 0 && (
                 <div className="mt-1">
                   <ActivityTag type={activityType} />
                 </div>
@@ -347,9 +381,12 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
         );
       }
 
+      // Clean any remaining asterisks from regular text
+      const cleanText = trimmedLine.replace(/^#+\s*/, '').replace(/\*+/g, '');
+      
       return (
         <p key={index} className="text-foreground/80 ml-6 leading-relaxed py-1">
-          {trimmedLine.replace(/^#+\s*/, '')}
+          {cleanText}
         </p>
       );
     });
