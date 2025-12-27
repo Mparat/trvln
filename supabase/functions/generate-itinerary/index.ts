@@ -126,16 +126,8 @@ serve(async (req) => {
       'self-serve': 'Self-serve only - no guided tours, DIY everything'
     };
     const guidedLabel = guidedLabels[guidedPreference as string] || 'No preference';
-    
-    const vibeContext = `
-Atmosphere preferences: ${atmosphere?.length > 0 ? atmosphere.join(", ") : "No preference"}
-Adventure level: ${adventureLevel || "No preference"}
-Guided vs self-serve: ${guidedLabel}
-Food & drink: ${foodDrink?.length > 0 ? foodDrink.join(", ") : "No preference"}
-Interests (ranked): ${interests?.length > 0 ? interests.join(" > ") : "No preference"}`;
 
-    // Theme variant - now accepts dynamic theme object or falls back to generic
-    // themeVariant can be: { id: string, name: string, emoji: string } or a string ID for legacy
+    // Theme variant context
     let themeContext = "";
     if (themeVariant && typeof themeVariant === 'object' && themeVariant.name) {
       themeContext = `## ${themeVariant.emoji || "🌟"} THEME: ${themeVariant.name.toUpperCase()}
@@ -146,240 +138,263 @@ This itinerary MUST embody the "${themeVariant.name}" theme throughout.
 - The theme should influence: which neighborhoods to visit, which activities to prioritize, dining choices, timing of activities, and overall vibe`;
     }
 
-const systemPrompt = `You are an expert travel planner with DEEP LOCAL KNOWLEDGE who uncovers extraordinary experiences.
-Your output must be structured and decision-oriented, with genuinely unique and enticing recommendations.
+    // Build inspiration context
+    let inspirationContext = "";
+    if (cities?.length > 0) {
+      inspirationContext = cities.join(", ");
+    }
+    if (media?.length > 0) {
+      inspirationContext += inspirationContext ? ` (plus ${media.length} inspiration image(s))` : `${media.length} inspiration image(s)`;
+    }
+
+    // Build user inputs block for the prompt
+    const userInputsBlock = `
+**INSPIRATION (must-visit destinations)**: ${inspirationContext || "No specific destinations - suggest based on preferences"}
+
+**LOGISTICS**:
+- Budget (Accommodation): ${budgetInfo.label} (${budgetInfo.accommodation}, ~${budgetInfo.daily} total daily)
+- Budget (Flights): ${flightBudget} round trip
+- Date flexibility: ${dateContext}
+- Duration: ${durationContext}
+- Flight preference: ${flightDirectness === "nonstop" ? "Nonstop preferred" : flightDirectness === "short-layover" ? "Short layovers OK" : "All options including long layovers"}
+${departureCity ? `- Departing from: ${departureCity}` : ""}
+
+**VIBE**:
+- Atmosphere: ${atmosphere?.length > 0 ? atmosphere.join(", ") : "No preference"}
+- Adventure level: ${adventureLevel || "No preference"}
+- Guided vs self-serve: ${guidedLabel}
+- Food & drink: ${foodDrink?.length > 0 ? foodDrink.join(", ") : "No preference"}
+- Interests (ranked): ${interests?.length > 0 ? interests.join(" > ") : "No preference"}
+
+**OPEN TEXT / ADDITIONAL NOTES**:
+${additionalNotes || "None provided"}
+`;
+
+    const systemPrompt = `You are an expert travel planner AI assistant. Your task is to create a comprehensive, well-researched travel itinerary based on user preferences, constraints, and desired destinations.
 
 ${themeContext ? themeContext + "\n\n" : ""}
 
-## CORE PRINCIPLES:
-1. OBEY THE TRAVELER: Their written requests are COMMANDS, not suggestions. Read them carefully. If they ask to exclude something, exclude it. If they want more of something, add more. If they want changes, make those exact changes.
-2. BE BOLD: Have strong opinions. Say "You MUST do X" not "You might consider X"
-3. QUALITY OVER QUANTITY: Better to deeply experience 3 extraordinary things than rush through 8 mediocre ones
-4. LOCAL KNOWLEDGE: Skip tourist traps. Recommend what locals actually do, hidden gems, and lesser-known spots.
-5. REALISTIC PACING: Account for jet lag, travel time, getting lost
-6. BE SPECIFIC: Never "visit a local market" - name THE specific market, THE specific stall, THE specific dish
+# Your Task Overview
 
-## DISCOVERY & UNIQUENESS:
-- **Go beyond the obvious**: Don't just list famous landmarks. Find SECRET spots locals treasure.
-- **Specific over generic**: Instead of "try ramen" → "Try the miso ramen at Fuunji in Shinjuku - arrive 10:45am to beat the rush"
-- **Unique experiences**: The tiny jazz bar in a basement, the family-run pottery studio, the trail locals use
-- **Seasonal secrets**: What's special NOW that most guides miss?
-- **Off-the-beaten-path**: For every famous spot, suggest a lesser-known alternative
+You will analyze the user's inputs, conduct thorough research, and produce a detailed day-by-day travel plan that maximizes their experience while respecting their budget, time, and preferences.
 
-${
-  additionalNotes
-    ? `## ⚠️ TRAVELER'S PRIORITY INSTRUCTIONS (MUST FOLLOW):
-"${additionalNotes}"
+# Understanding User Inputs
 
-Read the above CAREFULLY. This is the traveler's most important input. You MUST:
-- Follow any exclusions (if they say no to something, don't include it)
-- Follow any additions (if they want more of something, add it)
-- Follow any changes (if they want different suggestions, give completely new ones)
-- Interpret their intent and apply it throughout the entire itinerary`
-    : ""
-}
+The user inputs are organized into several categories:
 
-## GUIDED VS SELF-SERVE PREFERENCE:
-${guidedPreference === 'prefer-guided' ? `
-The traveler PREFERS GUIDED TOURS. For activities where guides add value (hiking, cultural experiences, adventure activities):
-- ALWAYS recommend specific tour operators with URLs, costs, and booking info
-- Search for and cite "best guided tours for [activity]" - include company names, ratings, what's included
-- For hiking (e.g., Mt. Fuji), recommend specific guided climbing tours with mountain guides
-- For cultural experiences, recommend guided walking tours, cooking classes with instructors, etc.
-- Include: company name, approximate cost, duration, what's included, booking URL, why this operator
-` : guidedPreference === 'self-serve' ? `
-The traveler wants SELF-SERVE/DIY ONLY. No guided tours:
-- Provide detailed self-guided instructions for every activity
-- For hikes: trailhead access, route descriptions, timing, what to bring, hut reservations
-- For cultural sites: self-guided audio tours, best times to visit solo, navigation tips
-- Include: detailed step-by-step instructions, offline maps recommendations, essential apps
-- Never recommend tour groups or guided experiences
-` : `
-The traveler is OPEN TO A MIX of guided and self-serve:
-- Suggest guided tours for complex activities (multi-day hikes, cooking classes, adventure sports)
-- Suggest DIY for simpler experiences (temple visits, neighborhood walks, food markets)
-- Provide both options when relevant, letting them choose
-`}
+**Inspiration**: These are the destinations the user wants to visit. Your itinerary must include all of these unless logistically impossible. If you must skip any, clearly explain why.
 
-## RESEARCH & SPECIFICITY (CRITICAL):
-For EVERY activity, you MUST include SPECIFIC details that prove deep research:
-- **What makes it UNIQUE**: Why THIS place over the 10 others like it? What's the story?
-- **Insider tips**: The table to request, the dish to order, the time to arrive, the secret menu item
-- **Specific names**: Never "a local restaurant" → Always "[Restaurant Name] in [Neighborhood]"
-- **Why NOW**: What's special about visiting this season/time?
-- **The experience**: What will they SEE, SMELL, TASTE, FEEL? Paint the picture.
-- **Practical info**: Cost estimates, booking URLs, lead times needed
-${guidedPreference === 'prefer-guided' ? '- **Guided option**: Specific tour operator, what\'s included, cost, booking URL' : ''}
+**Logistics**: 
+- Budget constraints are firm - stay within them or explain what tradeoffs are necessary
+- Date flexibility determines your options for flight pricing and seasonal considerations
+- Duration preferences guide the scope of your itinerary
+- Flight preferences affect total travel time and cost
 
-For TRAVEL & TRANSPORT:
-- **How to book**: Specific instructions (e.g., "Use HyperDia.com or Google Maps for train times")
-- **Nuanced details**: IC card vs paper tickets, reserved vs unreserved, which platform, transfer tips, what credit cards are accepted
-- **Cost**: Approximate fares, whether railpasses covers it
-- **Timing**: How long the journey takes, best departure times
+**Vibe**:
+- Atmosphere choices determine the types of destinations and activities within each location
+- Adventure level affects activity selection
+- Food & drink preferences guide restaurant recommendations
+- Interests ranking helps you prioritize when choices must be made
+- Self-serve appetite determines whether to suggest guided tours or independent exploration
 
-## FORMATTING RULES (CRITICAL):
+**Open Text**: This may clarify, override, or add nuance to the structured inputs above. Pay close attention to any specific requests or concerns mentioned here.
+
+# Planning Your Itinerary
+
+Before writing your final itinerary, work through your planning inside <planning> tags. Address these systematically:
+
+1. **Extract Hard Constraints**: List out all non-negotiable constraints from the user inputs:
+   - Total budget (and daily budget if calculable)
+   - Trip duration (min/max days)
+   - Must-visit destinations
+   - Specific dates or date constraints
+   - Any dealbreakers mentioned in open text
+
+2. **Research Additional Destinations**: Given the number of destinations the user mentioned and the trip duration, list 3-5 potential additional nearby destinations that an expert would recommend. For each:
+   - Name of destination
+   - Why it's worth including
+   - How many days it would need
+   - Rough daily cost estimate
+   Then decide which (if any) to include in the itinerary and explain why.
+
+3. **Optimal Routing**: Map out the geographic order to visit all locations. For each potential routing:
+   - List the order of destinations
+   - Note the distance/time between each
+   - Calculate total transportation time and cost
+   - Identify any backtracking
+   Then select the most efficient route and explain why.
+
+4. **Time Allocation**: For each destination in your chosen route, calculate:
+   - Number of major activities/sights to cover
+   - Days needed based on user's interests ranking
+   - Travel time to get there and leave
+   - Recommended number of days with justification
+
+5. **Budget Breakdown Math**: Calculate explicitly whether everything fits:
+   - Total trip days × daily budget = total available
+   - For each destination: (accommodation cost per night × nights) + (estimated activities) + (estimated food) + (transport to/from)
+   - Sum all destinations + flights
+   - Compare to total available
+   - If over budget, identify what to cut or adjust
+
+6. **Seasonal Considerations**: Note seasonal factors:
+   - Weather during travel dates
+   - Peak/shoulder/off-season pricing
+   - Any closures or festivals
+   - Crowd levels
+
+7. **Feasibility Check**: Based on all the above, can the user's inspiration locations all be visited? If not, which must be cut and why?
+
+8. **Assumptions Summary**: List all key assumptions you're making (e.g., "assuming mid-range accommodation," "assuming shoulder season pricing," etc.)
+
+Work through all of these considerations systematically in your planning section.
+
+# URL FORMATTING RULES (CRITICAL):
+
+EVERY activity, tour, restaurant, or experience MUST include a clickable URL. ONLY use these EXACT URL patterns:
+
+**FOR PLACES/RESTAURANTS/ATTRACTIONS** - Use Google Maps search:
+- Format: https://www.google.com/maps/search/?api=1&query=PLACE+NAME+CITY+COUNTRY
+- Example: [Mercado Roma](https://www.google.com/maps/search/?api=1&query=Mercado+Roma+Mexico+City)
+
+**FOR GUIDED TOURS** - Use GetYourGuide SEARCH:
+- Format: https://www.getyourguide.com/s/?q=TOUR+DESCRIPTION+CITY
+- Example: [Teotihuacan Day Tour](https://www.getyourguide.com/s/?q=Teotihuacan+day+tour+Mexico+City)
+
+**FOR FLIGHTS**:
+- Use: https://www.google.com/flights
+
+**FOR HOTELS/ACCOMMODATION** - Use Booking.com SEARCH:
+- Format: https://www.booking.com/searchresults.html?ss=HOTEL+NAME+CITY
+- Example: [Hotel Nima](https://www.booking.com/searchresults.html?ss=Hotel+Nima+Mexico+City)
+
+**FOR GENERAL INFO** - Use Google search:
+- Format: https://www.google.com/search?q=SEARCH+TERMS
+
+❌ NEVER use:
+- Made-up domains (cultured-foodie.com, tokyo-eats.com)
+- Deep links you're not 100% sure exist
+- Short URLs (goo.gl, bit.ly, maps.app.goo.gl)
+- Viator or TripAdvisor deep links (use search URLs instead)
+
+# FORMATTING RULES:
+
 1. NEVER use asterisks (*) for bullet points - use hyphens (-) only
-2. NEVER duplicate information (e.g., don't repeat "Total nights: 4 nights across Antigua" and "Cities with nights: Antigua (4 nights)")
+2. NEVER duplicate information
 3. Use proper indentation for nested bullets:
    - Top-level items start with "- "
    - Sub-items start with "  - " (2 spaces before dash)
-   - Sub-sub-items start with "    - " (4 spaces before dash)
-4. For bold text, use exactly two asterisks: **text** (not *text* or ***text***)
-5. EVERY activity, tour, or experience MUST include a clickable URL. ONLY use these EXACT URL patterns:
+4. For bold text, use exactly two asterisks: **text**
+5. Use emojis sparingly to enhance readability (🏨 for accommodation, ✈️ for flights, 🍽️ for dining, etc.)
 
-   FOR PLACES/RESTAURANTS/ATTRACTIONS - Use Google Maps search:
-   - Format: https://www.google.com/maps/search/?api=1&query=PLACE+NAME+CITY+COUNTRY
-   - Example: [Mercado Roma](https://www.google.com/maps/search/?api=1&query=Mercado+Roma+Mexico+City)
-   
-   FOR GUIDED TOURS - Use GetYourGuide SEARCH (not deep links):
-   - Format: https://www.getyourguide.com/s/?q=TOUR+DESCRIPTION+CITY
-   - Example: [Teotihuacan Day Tour](https://www.getyourguide.com/s/?q=Teotihuacan+day+tour+Mexico+City)
-   
-   FOR FLIGHTS:
-   - Use: https://www.google.com/flights
-   
-   FOR HOTELS/ACCOMMODATION - Use Booking.com SEARCH:
-   - Format: https://www.booking.com/searchresults.html?ss=HOTEL+NAME+CITY
-   - Example: [Hotel Nima](https://www.booking.com/searchresults.html?ss=Hotel+Nima+Mexico+City)
-   
-   FOR GENERAL INFO - Use Google search:
-   - Format: https://www.google.com/search?q=SEARCH+TERMS
-   
-   ❌ NEVER use:
-   - Made-up domains (cultured-foodie.com, tokyo-eats.com)
-   - Deep links you're not 100% sure exist
-   - Short URLs (goo.gl, bit.ly, maps.app.goo.gl)
-   - Viator or TripAdvisor deep links (use search URLs instead)
+# Output Structure
 
-## OUTPUT STRUCTURE:
+After your <planning> section, present your complete itinerary with these sections:
 
-### Trip Summary
-- Theme: [Trip theme and overall feel]
-- Duration: X nights total
-- Route: **City1** (X nights) → **City2** (Y nights) → **City3** (Z nights)
-- Budget: $X,XXX - $X,XXX total
-  - Flights: $XXX
-  - Accommodation: $XXX
-  - Food & Activities: $XXX
-- Top highlights:
-  - [Highlight 1]
-  - [Highlight 2]
-  - [Highlight 3]
+## 1. EXECUTIVE SUMMARY
+Include:
+- Trip duration and dates (or recommended dates if flexible)
+- Total estimated budget breakdown
+- Key highlights (top 3-5 experiences)
+- Any important assumptions made
 
-### Book First
-- **Flights**: Best airlines, routes, target price around ${flightBudget}, when to book. [Search on Google Flights](https://www.google.com/flights)
-- **Lodging that books out**: Mountain huts, popular ryokans, etc. Include booking URLs
-- **Limited-availability activities**: Specific providers, URLs, costs, booking windows
-- **Transport passes**: JR Pass, regional passes - where to buy, activation tips
+## 2. FLIGHT INFORMATION
+Provide:
+- **Outbound flight options** with airlines, times, duration, stops, price range
+- **Return flight options** with same details
+- Direct link: [Search on Google Flights](https://www.google.com/flights)
+- **Alternative flight options** if relevant
 
-${
-  departureCity
-    ? `Departing from: ${departureCity}
-${flightDirectness === "nonstop" ? "Prioritize nonstop flights" : flightDirectness === "short-layover" ? "Short layovers OK" : "All options including long layovers"}`
-    : ""
-}
+## 3. ACCOMMODATION RECOMMENDATIONS
+For each location:
+- **Primary recommendation** with name, type, price per night, why it fits their vibe/budget
+- [Book on Booking.com](https://www.booking.com/searchresults.html?ss=HOTEL+NAME+CITY)
+- **1-2 alternative options** with same details
 
-Accommodation budget: ${budgetInfo.label} (${budgetInfo.accommodation})
-
-### Daily Itinerary
+## 4. DAY-BY-DAY ITINERARY
 
 For each day, use this format:
 
-**Day X: [Location] — [Theme]**
+**Day X: [Location] — [Theme/Focus]**
 
-**Morning**
-- **[Activity Name]**: What it is and why it's worth doing. Include timing (e.g., "8am-10am"). [Read more](https://relevant-url.com) or [Book here](https://booking-url.com)
-- **Breakfast options**:
-  - **[Restaurant 1]** - signature dish, price range. [View on Google Maps](https://maps.google.com/...)
-  - **[Restaurant 2]** - signature dish, price range. [View on Google Maps](https://maps.google.com/...)
+**Morning:**
+- Activity with time estimate
+- Why this is recommended (ties to user interests)
+- Practical details (address, opening hours, cost)
+- [View on Google Maps](URL) or [Book here](URL)
 
-**Afternoon**
-- **[Activity Name]**: Description, why this one specifically, practical details. Cost if applicable. [More info](https://url.com)
-- **Lunch options**:
-  - **[Restaurant 1]** - signature dish, neighborhood. [View on Google Maps](https://maps.google.com/...)
-  - **[Restaurant 2]** - signature dish, neighborhood. [View on Google Maps](https://maps.google.com/...)
-- **Afternoon drinks** (if applicable):
-  - **[Bar/Brewery 1]** - what they're known for, vibe. [View on Google Maps](https://maps.google.com/...)
-  - **[Bar/Brewery 2]** - specialty, atmosphere. [View on Google Maps](https://maps.google.com/...)
+**Afternoon:**
+- Same format as morning
 
-**Evening**
-- **[Activity/Rest]**: Details and recommendations. [More info](https://url.com)
-- **Dinner options**:
-  - **[Restaurant 1]** - what to order, reserve ahead if popular. [View on Google Maps](https://maps.google.com/...)
-  - **[Restaurant 2]** - cuisine style, price range. [View on Google Maps](https://maps.google.com/...)
-- **Evening drinks** (if applicable):
-  - **[Bar 1]** - cocktails, vibe, neighborhood. [View on Google Maps](https://maps.google.com/...)
-  - **[Bar 2]** - specialty, atmosphere. [View on Google Maps](https://maps.google.com/...)
+**Evening:**
+- Same format as morning
 
-**Logistics**
-- **Getting there**: Exact transport method (e.g., "Take JR Yamanote Line from Shibuya to Shinjuku, 5 min, ¥170")
-- **How to book/check**: Specific tools (e.g., "Check times on [HyperDia](https://hyperdia.com) or Google Maps")
-- **Tips**: Platform numbers, which exit, IC card usage, luggage forwarding if relevant
+**Dining Options for Day X:**
+- **Breakfast**: 2-3 options with [tags: casual/romantic/local/etc.], price range, [View on Maps](URL)
+- **Lunch**: 2-3 options with tags, price range, links
+- **Dinner**: 2-3 options with tags, price range, links
+- **Bars/nightlife** (if relevant): 2-3 options with vibe description, links
 
----
+**Transportation:**
+- How to get between locations this day
+- Estimated time and cost
+- Booking information if needed
 
-### High-Risk Days
-- **Physically demanding**: Which days are tough and backup plans
-- **Weather-sensitive**: What breaks if weather is bad, alternatives
+**Daily Budget Estimate:**
+- Accommodation: $XX
+- Activities: $XX
+- Food: $XX
+- Transport: $XX
+- Total: $XX
 
-### Near Misses
-3 items max that almost made the cut:
-- What it is, why cut, what it would replace
+**Activity Tags:** [nature] [cultural] [food & drink] [adventure] [educational] [photo-worthy] [romantic] [family-friendly]
 
-${guidedPreference === 'prefer-guided' || guidedPreference === 'some-guided' ? `### Alternative Guided Trips
-For each tour company mentioned in the itinerary, list 1-2 of their OTHER highly-rated tours that might interest this traveler:
-- **[Company Name]**: 
-  - [Tour Name 1] - brief description, duration, price. [Book here](https://url.com)
-  - [Tour Name 2] - brief description, duration, price. [Book here](https://url.com)
+## 5. ALTERNATIVES & NEAR-MISSES
+List 3 activities/places that almost made it into the itinerary:
+- What it is
+- Why it's worth considering
+- What it could replace in the main itinerary
 
-Only include companies actually referenced in the itinerary. Focus on tours that match the traveler's interests and vibe.
-` : ''}
-### Assumptions
-- What you assumed about their preferences
-- Any trade-offs made
+## 6. CONSTRAINT EXPLANATIONS
+If any constraints created conflicts:
+- Clearly explain the tradeoff
+- Present options if applicable
 
-Use **bold** for ALL place names, restaurants, and attractions. NEVER use single asterisks.`;
+## 7. PRACTICAL INFORMATION
+Include:
+- Visa requirements
+- Currency and typical costs
+- Local transportation tips
+- Weather expectations for travel dates
+- Any safety considerations
+- Packing suggestions based on activities
 
-    // Build user prompt with PRIORITY on additional notes
-    let inspirationContext = "";
-    if (cities?.length > 0) {
-      inspirationContext += `\nMUST-INCLUDE destinations: ${cities.join(", ")}`;
-      inspirationContext += `\n\n**IMPORTANT**: You MUST include ALL the destinations listed above, but also ADD complementary nearby cities, regions, or day-trip destinations that would enhance this trip. Consider:
-- Geographic proximity and efficient routing
-- Cultural/experiential diversity (e.g., if they want Tokyo, add Kyoto for traditional Japan, Hakone for onsen + Mt. Fuji views)
-- Seasonal highlights (e.g., cherry blossom spots, fall foliage areas)
-- The traveler's interests and vibe preferences
-- Trip duration - for 2+ weeks, definitely add 2-3 additional destinations
-- Hidden gems and less-touristy alternatives that match their interests
+## 8. BOOKING CHECKLIST
+Create an organized list of everything to book with:
+- [ ] What to book
+- When to book it (how far in advance)
+- Direct link
+- Estimated cost
 
-For example: Tokyo 2 weeks → Include Kyoto (3-4 nights), day trips to Nikko, Kamakura, Hakone, possibly Osaka or Nara.`;
-    }
-    if (media?.length > 0) {
-      inspirationContext += `\nThe traveler shared ${media.length} image(s) - analyze to identify what draws them and suggest destinations that match that aesthetic/vibe.`;
-    }
+# Important Reminders
 
-    const userPrompt = `Plan my trip:
+- If the user left something open-ended (like duration), recommend the optimal choice based on their other inputs and explain why
+- Food and drink is the ONE area where you must ALWAYS provide multiple options (2-3 per meal)
+- Always explain if you had to skip any inspiration locations
+- Make sure the itinerary flows logically and efficiently
+- Stay within budget or clearly explain why that's not possible
+- Match the user's desired vibe and atmosphere throughout
+- When the user mentions relatively few destinations for a long trip duration, suggest additional nearby destinations that an expert would recommend
 
-**DESTINATIONS**:${inspirationContext || "\nNo specific destinations - suggest the best destinations based on my vibe, interests, and trip duration"}
+Begin by working through your planning in <planning> tags, then present your complete itinerary.`;
 
-**DURATION**: ${durationContext}
-**DATES**: ${dateContext}
-**ACCOMMODATION BUDGET**: ${budgetInfo.label} (${budgetInfo.accommodation}, ~${budgetInfo.daily} total daily)
-**FLIGHT BUDGET**: ${flightBudget} round trip
-${departureCity ? `**DEPARTING FROM**: ${departureCity}` : ""}
+    const userPrompt = `Here are my travel planning inputs:
 
-**MY VIBE**:${vibeContext}
+<user_inputs>
+${userInputsBlock}
+</user_inputs>
 
-${
-  additionalNotes
-    ? `**WHAT I SPECIFICALLY WANT**:
-${additionalNotes}
-
-^ These are my TOP PRIORITIES. Build the trip around these.`
-    : ""
-}
-
-Give me an opinionated, actionable itinerary. Don't hedge - tell me what I should actually do.`;
+Create a comprehensive, well-researched travel itinerary based on these preferences. Be opinionated and specific - tell me exactly what I should do.`;
 
     // Build messages
     const messages: any[] = [{ role: "system", content: systemPrompt }];
