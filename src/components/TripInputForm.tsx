@@ -171,13 +171,17 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
   // Handle generate with auto-submit of pending city input
   const handleGenerate = () => {
     // Auto-add any text in the city input before generating
-    if (newCity.trim()) {
-      if (!preferences.cities.includes(newCity.trim())) {
-        updatePreferences({ cities: [...preferences.cities, newCity.trim()] });
-      }
+    const pendingCity = newCity.trim();
+    if (pendingCity && !preferences.cities.includes(pendingCity)) {
+      // Update preferences with the new city included, so validation passes
+      onPreferencesChange({ 
+        ...preferences, 
+        cities: [...preferences.cities, pendingCity] 
+      });
       setNewCity("");
     }
-    onGenerate();
+    // Use setTimeout to ensure state update is processed before onGenerate runs
+    setTimeout(() => onGenerate(), 0);
   };
 
   const removeCity = (city: string) => {
