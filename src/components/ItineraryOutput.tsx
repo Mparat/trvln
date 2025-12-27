@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type MouseEvent } from "react";
 import { 
   MapPin, Clock, DollarSign, Utensils, Camera, Star, Plane, Sun, 
   CloudRain, Sparkles, AlertTriangle, ExternalLink, Edit3, Send,
@@ -121,14 +121,20 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
         const label = linkMatch[1];
         const rawHref = linkMatch[2];
 
-        // Fix broken Google Maps short links (Firebase Dynamic Link Not Found)
-        // Fallback to a Google Maps search query using the link label.
-        const href = /(^|\/\/)(maps\.app\.goo\.gl|goo\.gl\/maps)(\/|$)/i.test(rawHref)
-          ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(label)}`
-          : rawHref;
+        const isMapsShort = /(^|\/\/)(maps\.app\.goo\.gl|goo\.gl\/maps)(\/|$)/i.test(rawHref);
+        const isGoogleMaps = /(^|\/\/)(www\.)?google\.com\/maps/i.test(rawHref);
+        const isGoogleFlights = /(^|\/\/)(www\.)?google\.com\/flights/i.test(rawHref);
 
-        // Use window.open to bypass iframe restrictions in Lovable preview
-        const handleClick = (e: React.MouseEvent) => {
+        // Prefer non-Google destinations in the preview environment where google.com may be blocked.
+        // - Maps: use OpenStreetMap search
+        // - Flights: use Kayak
+        const href = isMapsShort || isGoogleMaps
+          ? `https://www.openstreetmap.org/search?query=${encodeURIComponent(label)}`
+          : isGoogleFlights
+            ? 'https://www.kayak.com/flights'
+            : rawHref;
+
+        const handleClick = (e: MouseEvent<HTMLButtonElement>) => {
           e.preventDefault();
           window.open(href, '_blank', 'noopener,noreferrer');
         };
@@ -138,6 +144,7 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit }: ItineraryOutpu
             key={i}
             onClick={handleClick}
             className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1 cursor-pointer bg-transparent border-none p-0 font-inherit text-inherit"
+            type="button"
           >
             {label}
             <ExternalLink className="w-3 h-3" />

@@ -202,9 +202,9 @@ For TRAVEL & TRANSPORT:
 5. EVERY activity, tour, or experience MUST include a clickable URL. Format: [Link Text](https://url.com)
    - For guided tours: link to the tour operator or booking page
    - For activities: link to a travel blog, official site, or article about the activity
-   - For restaurants: link to Google Maps using FULL URLs (NO short links)
-     - ✅ Use: https://www.google.com/maps/search/?api=1&query=PLACE_NAME
-     - ❌ Never use: https://maps.app.goo.gl/... or https://goo.gl/maps/...
+   - For restaurants: link to a map result using FULL URLs (avoid google.com in links)
+     - ✅ Prefer: https://www.openstreetmap.org/search?query=PLACE_NAME
+     - ❌ Avoid: https://www.google.com/maps/... and all maps.app.goo.gl / goo.gl/maps short links
 
 ## OUTPUT STRUCTURE:
 
@@ -222,7 +222,7 @@ For TRAVEL & TRANSPORT:
   - [Highlight 3]
 
 ### Book First
-- **Flights**: Best airlines, routes, target price around ${flightBudget}, when to book. [Search on Google Flights](https://www.google.com/flights)
+- **Flights**: Best airlines, routes, target price around ${flightBudget}, when to book. [Search flights](https://www.kayak.com/flights)
 - **Lodging that books out**: Mountain huts, popular ryokans, etc. Include booking URLs
 - **Limited-availability activities**: Specific providers, URLs, costs, booking windows
 - **Transport passes**: JR Pass, regional passes - where to buy, activation tips
