@@ -200,11 +200,13 @@ For TRAVEL & TRANSPORT:
    - Sub-sub-items start with "    - " (4 spaces before dash)
 4. For bold text, use exactly two asterisks: **text** (not *text* or ***text***)
 5. EVERY activity, tour, or experience MUST include a clickable URL. Format: [Link Text](https://url.com)
-   - For guided tours: link to the tour operator or booking page
-   - For activities: link to a travel blog, official site, or article about the activity
-   - For restaurants: link to a map result using FULL URLs (avoid google.com in links)
-     - ✅ Prefer: https://www.openstreetmap.org/search?query=PLACE_NAME
-     - ❌ Avoid: https://www.google.com/maps/... and all maps.app.goo.gl / goo.gl/maps short links
+   - CRITICAL: Only use URLs from VERIFIED, REAL websites. Never invent or guess URLs.
+   - For restaurants/places: Use Google Maps search: https://www.google.com/maps/search/?api=1&query=PLACE+NAME+CITY
+   - For guided tours: Use GetYourGuide, Viator, or the actual tour operator's real website
+   - For flights: Use https://www.google.com/flights
+   - For activities: Use TripAdvisor, Lonely Planet, or the official website
+   - If you don't know a real URL, use a Google search: https://www.google.com/search?q=SEARCH+TERMS
+   - ❌ NEVER make up domains like "cultured-foodie.com" or "tokyo-tours.com" - these don't exist!
 
 ## OUTPUT STRUCTURE:
 
@@ -222,7 +224,7 @@ For TRAVEL & TRANSPORT:
   - [Highlight 3]
 
 ### Book First
-- **Flights**: Best airlines, routes, target price around ${flightBudget}, when to book. [Search flights](https://www.kayak.com/flights)
+- **Flights**: Best airlines, routes, target price around ${flightBudget}, when to book. [Search on Google Flights](https://www.google.com/flights)
 - **Lodging that books out**: Mountain huts, popular ryokans, etc. Include booking URLs
 - **Limited-availability activities**: Specific providers, URLs, costs, booking windows
 - **Transport passes**: JR Pass, regional passes - where to buy, activation tips
