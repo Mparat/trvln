@@ -124,16 +124,7 @@ const Index = () => {
   }, []);
 
   const handleGenerate = useCallback(async () => {
-    const hasInspiration = preferences.media.length > 0 || preferences.cities.length > 0 || preferences.additionalNotes.trim();
-    
-    if (!hasInspiration) {
-      toast({
-        title: "Add some inspiration",
-        description: "Drop some travel photos, add links, or list cities you want to visit",
-        variant: "destructive",
-      });
-      return;
-    }
+    // Allow generation even without inspiration - AI will suggest destinations based on preferences
 
     setIsGenerating(true);
     setIsSuggestingThemes(true);
