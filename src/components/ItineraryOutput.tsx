@@ -319,10 +319,10 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
         const rawHref = linkMatch[2].trim();
 
         const makeSearchUrl = (query: string) =>
-          `https://duckduckgo.com/?q=${encodeURIComponent(query)}`;
+          `https://www.google.com/search?q=${encodeURIComponent(query)}`;
 
-        const makeOsmUrl = (query: string) =>
-          `https://www.openstreetmap.org/search?query=${encodeURIComponent(query)}`;
+        const makeGoogleMapsUrl = (query: string) =>
+          `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
 
         const normalizeUrl = (href: string): string => {
           // Reject dangerous schemes
@@ -334,15 +334,16 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
           try {
             const url = new URL(withProto);
 
-            // If google is blocked in the preview environment, route map-ish links to OSM search
-            if (/google\./i.test(url.hostname) || /goo\.gl$/i.test(url.hostname)) {
-              return makeOsmUrl(label);
+            // Short URLs like goo.gl - convert to Google Maps search with label
+            if (/goo\.gl$/i.test(url.hostname) || /maps\.app\.goo\.gl$/i.test(url.hostname)) {
+              return makeGoogleMapsUrl(label);
             }
 
             if (url.protocol !== 'http:' && url.protocol !== 'https:') {
               return makeSearchUrl(label);
             }
 
+            // All valid URLs pass through - Google, Booking.com, GetYourGuide, etc.
             return url.toString();
           } catch {
             return makeSearchUrl(label);
