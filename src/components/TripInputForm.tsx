@@ -54,7 +54,7 @@ export interface TripPreferences {
 interface TripInputFormProps {
   preferences: TripPreferences;
   onPreferencesChange: (preferences: TripPreferences) => void;
-  onGenerate: () => void;
+  onGenerate: (pendingCity?: string) => void;
   isGenerating: boolean;
 }
 
@@ -168,20 +168,13 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
     }
   };
 
-  // Handle generate with auto-submit of pending city input
+  // Handle generate - pass pending city text to parent for validation
   const handleGenerate = () => {
-    // Auto-add any text in the city input before generating
     const pendingCity = newCity.trim();
-    if (pendingCity && !preferences.cities.includes(pendingCity)) {
-      // Update preferences with the new city included, so validation passes
-      onPreferencesChange({ 
-        ...preferences, 
-        cities: [...preferences.cities, pendingCity] 
-      });
+    if (pendingCity) {
       setNewCity("");
     }
-    // Use setTimeout to ensure state update is processed before onGenerate runs
-    setTimeout(() => onGenerate(), 0);
+    onGenerate(pendingCity || undefined);
   };
 
   const removeCity = (city: string) => {

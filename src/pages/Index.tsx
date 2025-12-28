@@ -123,8 +123,27 @@ const Index = () => {
     return fullContent;
   }, []);
 
-  const handleGenerate = useCallback(async () => {
-    // Allow generation even without inspiration - AI will suggest destinations based on preferences
+  const handleGenerate = useCallback(async (pendingCity?: string) => {
+    // Include pending city text in the inspiration check
+    const effectiveCities = pendingCity && !preferences.cities.includes(pendingCity)
+      ? [...preferences.cities, pendingCity]
+      : preferences.cities;
+    
+    // Update preferences with pending city if provided
+    if (pendingCity && !preferences.cities.includes(pendingCity)) {
+      setPreferences(prev => ({ ...prev, cities: [...prev.cities, pendingCity] }));
+    }
+    
+    const hasInspiration = preferences.media.length > 0 || effectiveCities.length > 0 || preferences.additionalNotes.trim();
+    
+    if (!hasInspiration) {
+      toast({
+        title: "Add some inspiration",
+        description: "Drop some travel photos, add links, or list cities you want to visit",
+        variant: "destructive",
+      });
+      return;
+    }
 
     setIsGenerating(true);
     setIsSuggestingThemes(true);
