@@ -5,6 +5,48 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Helper function to call Perplexity for grounded web search
+async function searchWithPerplexity(
+  query: string, 
+  apiKey: string
+): Promise<{ content: string; citations: string[] }> {
+  try {
+    console.log("Perplexity search query:", query);
+    
+    const response = await fetch('https://api.perplexity.ai/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'sonar',
+        messages: [
+          { 
+            role: 'system', 
+            content: 'You are a travel research assistant. Provide specific, detailed recommendations with exact names of restaurants, hotels, tours, and activities. Include price ranges when available. Be comprehensive but concise.' 
+          },
+          { role: 'user', content: query }
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      console.error("Perplexity API error:", response.status);
+      return { content: '', citations: [] };
+    }
+
+    const data = await response.json();
+    return {
+      content: data.choices?.[0]?.message?.content || '',
+      citations: data.citations || []
+    };
+  } catch (error) {
+    console.error("Perplexity search error:", error);
+    return { content: '', citations: [] };
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -20,6 +62,8 @@ serve(async (req) => {
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
+    
+    const PERPLEXITY_API_KEY = Deno.env.get("PERPLEXITY_API_KEY");
 
     const {
       media,
@@ -173,6 +217,87 @@ ${departureCity ? `- Departing from: ${departureCity}` : ""}
 ${additionalNotes || "None provided"}
 `;
 
+    // ============================================
+    // PERPLEXITY WEB SEARCH FOR GROUNDED RESEARCH
+    // ============================================
+    let groundedResearchContext = "";
+    
+    if (PERPLEXITY_API_KEY) {
+      console.log("Starting Perplexity grounded research...");
+      
+      const destinationStr = cities?.length > 0 ? cities.join(', ') : 'popular travel destinations';
+      const interestsStr = interests?.length > 0 ? interests.join(', ') : 'general sightseeing';
+      const foodStr = foodDrink?.length > 0 ? foodDrink.join(', ') : 'local cuisine';
+      const themeStr = themeVariant?.name || '';
+      
+      // Build focused search queries based on user preferences
+      const searchQueries = [
+        // Query 1: Activities and things to do (this drives the itinerary structure)
+        `Best things to do in ${destinationStr} for ${interestsStr} travelers. Include specific activity names, tour recommendations, must-visit attractions, hidden gems, and neighborhoods to explore.${themeStr ? ` Focus on ${themeStr} experiences.` : ''} ${budgetInfo.label} budget level.`,
+        
+        // Query 2: Restaurants and food scene (contextual to the destination)
+        `Best ${foodStr} restaurants and food experiences in ${destinationStr}. Include specific restaurant names, neighborhoods known for food, price ranges, and local specialties. ${budgetInfo.label} budget.`,
+        
+        // Query 3: Accommodation and practical logistics
+        `Best ${budgetInfo.label} hotels and accommodation in ${destinationStr}. Include specific hotel names, neighborhoods to stay in, and price ranges. Also include transportation tips and getting around.`
+      ];
+      
+      // Run all searches in parallel for speed
+      const searchPromises = searchQueries.map(query => searchWithPerplexity(query, PERPLEXITY_API_KEY));
+      const results = await Promise.all(searchPromises);
+      
+      console.log("Perplexity research completed. Building grounded context...");
+      
+      // Build the grounded context block
+      const activitiesResearch = results[0];
+      const restaurantsResearch = results[1];
+      const accommodationResearch = results[2];
+      
+      groundedResearchContext = `
+## GROUNDED RESEARCH DATA (From Live Web Search)
+
+**CRITICAL INSTRUCTIONS - READ CAREFULLY:**
+
+You are a reasoning model. The following content is retrieved from live web search and should be treated as FACTUAL GROUNDING, not speculation.
+
+- Do NOT introduce new facts beyond what is provided in this research
+- Do NOT hallucinate restaurant names, tour companies, hotel names, or URLs
+- ONLY recommend places, activities, and restaurants that appear in this research data
+- When you cite a source, use the actual URLs provided in the citations below
+- If something specific isn't in the research, use the fallback URL patterns (Google Maps search, GetYourGuide search, etc.)
+
+---
+
+### 🎯 ACTIVITIES & THINGS TO DO RESEARCH
+${activitiesResearch.content || 'No activity research available - use Google Maps and GetYourGuide search URLs for recommendations.'}
+
+**Source Citations:**
+${activitiesResearch.citations?.length > 0 ? activitiesResearch.citations.map((c, i) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
+
+---
+
+### 🍽️ RESTAURANTS & FOOD RESEARCH
+${restaurantsResearch.content || 'No restaurant research available - use Google Maps search URLs for restaurant recommendations.'}
+
+**Source Citations:**
+${restaurantsResearch.citations?.length > 0 ? restaurantsResearch.citations.map((c, i) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
+
+---
+
+### 🏨 ACCOMMODATION & LOGISTICS RESEARCH
+${accommodationResearch.content || 'No accommodation research available - use Booking.com search URLs for hotel recommendations.'}
+
+**Source Citations:**
+${accommodationResearch.citations?.length > 0 ? accommodationResearch.citations.map((c, i) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
+
+---
+
+**REMEMBER:** Only recommend places that appear in the research above. For any place/restaurant/activity mentioned in the research, create proper URLs using the patterns specified in the system prompt.
+`;
+    } else {
+      console.log("PERPLEXITY_API_KEY not configured - skipping grounded research");
+    }
+
     const systemPrompt = `You are an expert travel planning AI assistant. Your task is to create comprehensive, well-researched travel itineraries based on user preferences, constraints, and desired destinations. You must cite sources for every recommendation you make.
 
 ${themeContext ? themeContext + "\n\n" : ""}
@@ -203,28 +328,25 @@ The user inputs are organized into four main categories:
 - This may clarify, override, or add nuance to the structured inputs above
 - Pay close attention to any specific requests or concerns mentioned here
 
-# Research Requirements
+# GROUNDED RESEARCH (CRITICAL - READ BEFORE PROCEEDING)
 
-Conduct thorough research for each destination and activity. Search for information from these sources:
+You have been provided with LIVE WEB SEARCH RESULTS in the assistant message below. This is your FACTUAL GROUND TRUTH from real travel blogs, guides, and booking sites.
 
-1. Travel blogs and vlogs - Look for recent, detailed experiences from travelers
-2. Official tourism websites - Verify opening hours, prices, and seasonal information
-3. Travel guides (Lonely Planet, Rick Steves, etc.) - Get expert recommendations
-4. Activity booking platforms (Viator, GetYourGuide, Airbnb Experiences) - Find specific tours and activities with pricing
-5. Google Maps - Verify locations, distances, and travel times between points
-6. Google Flights - Get accurate flight information, prices, and booking links
-7. Transportation websites - Verify bus, train, or ferry schedules from official sources
-8. Local forums and Reddit - Find insider tips and recent traveler experiences
-9. Restaurant review sites - Identify highly-rated dining options that match the user's vibe
+**STRICT RULES - YOU MUST FOLLOW THESE:**
 
-**Citation Format**
+1. **ONLY recommend activities, tours, restaurants, and hotels that appear in the grounded research data**
+2. **Use the URLs and citations provided in the research** - Do NOT make up URLs
+3. **Do NOT introduce new facts** beyond what is provided in the research
+4. **Do NOT hallucinate establishment names** that don't appear in the research
+5. **When citing sources**, use the actual URLs from the research citations
+6. **For restaurants near activities**, use Google Maps search URLs for the neighborhood:
+   - Format: https://www.google.com/maps/search/?api=1&query=restaurants+near+NEIGHBORHOOD+CITY
 
-For every recommendation, cite your source using these formats:
-- \`[Source: Blog Name - "Article Title" - URL]\` for blogs/articles
-- \`[Source: Platform Name - URL]\` for booking platforms
-- \`[Source: Official Website - URL]\` for official sources
-- \`[Source: Google Flights - Date searched]\` for flight info
-- \`[Source: Google Maps]\` for distances/times
+**If something specific isn't in the research, use these SEARCH URL patterns as fallback:**
+- Places: https://www.google.com/maps/search/?api=1&query=PLACE+NAME+CITY
+- Tours: https://www.getyourguide.com/s/?q=TOUR+DESCRIPTION+CITY
+- Hotels: https://www.booking.com/searchresults.html?ss=HOTEL+NAME+CITY
+- Flights: https://www.google.com/flights
 
 # Planning Your Itinerary (LLM THINKING - Use <itinerary_planning> tags)
 
@@ -538,6 +660,12 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
 
     // Build messages
     const messages: any[] = [{ role: "system", content: systemPrompt }];
+
+    // Inject grounded research context as assistant message (if available)
+    if (groundedResearchContext) {
+      messages.push({ role: "assistant", content: groundedResearchContext });
+      console.log("Injected grounded research context into messages");
+    }
 
     // Handle media (images/videos)
     const hasMedia = media && media.length > 0;
