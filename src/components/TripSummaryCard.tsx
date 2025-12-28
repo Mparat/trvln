@@ -7,11 +7,10 @@ interface TripSummaryCardProps {
   departureCity?: string;
   startDate?: Date;
   endDate?: Date;
+  durationDays?: number;
 }
 
-function extractSummaryData(itinerary: string) {
-  const lines = itinerary.split('\n');
-  
+function extractSummaryData(itinerary: string, providedDuration?: number) {
   // Extract cities mentioned
   const cityMatches = itinerary.match(/\*\*([A-Z][a-z]+(?:\s[A-Z][a-z]+)*)\*\*/g) || [];
   const cities = [...new Set(cityMatches.map(m => m.replace(/\*\*/g, '')))].slice(0, 5);
@@ -20,9 +19,20 @@ function extractSummaryData(itinerary: string) {
   const budgetMatch = itinerary.match(/\$[\d,]+(?:\s*[-–]\s*\$[\d,]+)?(?:\s*(?:per day|\/day|daily))?/i);
   const budget = budgetMatch ? budgetMatch[0] : null;
   
-  // Count days
-  const dayMatches = itinerary.match(/Day\s+\d+/gi) || [];
-  const totalDays = dayMatches.length;
+  // Count days from itinerary - look for "Day X:" patterns
+  const dayMatches = itinerary.match(/\*\*Day\s+(\d+)/gi) || [];
+  const dayNumbers = dayMatches.map(m => {
+    const num = m.match(/\d+/);
+    return num ? parseInt(num[0], 10) : 0;
+  });
+  const maxDayFromItinerary = dayNumbers.length > 0 ? Math.max(...dayNumbers) : 0;
+  
+  // Use the higher of: provided duration, days from itinerary, or count of day matches
+  const totalDays = providedDuration 
+    ? providedDuration 
+    : maxDayFromItinerary > 0 
+      ? maxDayFromItinerary 
+      : dayMatches.length;
   
   // Extract highlights (look for key activities)
   const highlights: string[] = [];
@@ -49,8 +59,8 @@ function extractSummaryData(itinerary: string) {
   };
 }
 
-export function TripSummaryCard({ itinerary, departureCity, startDate, endDate }: TripSummaryCardProps) {
-  const summary = extractSummaryData(itinerary);
+export function TripSummaryCard({ itinerary, departureCity, startDate, endDate, durationDays }: TripSummaryCardProps) {
+  const summary = extractSummaryData(itinerary, durationDays);
   
   if (!itinerary || summary.totalDays === 0) return null;
 

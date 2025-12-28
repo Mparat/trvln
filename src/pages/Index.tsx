@@ -305,6 +305,7 @@ const Index = () => {
                   departureCity={preferences.departureCity}
                   startDate={preferences.startDate}
                   endDate={preferences.endDate}
+                  durationDays={preferences.durationDays}
                 />
               )}
 
