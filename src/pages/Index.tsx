@@ -35,6 +35,23 @@ export type ItineraryVariant = {
   content: string;
 };
 
+// Strip the <itinerary_planning> thinking section from LLM output
+const stripPlanningSection = (content: string): string => {
+  // Remove everything from start up to and including </itinerary_planning>
+  const closingTag = '</itinerary_planning>';
+  const closingIndex = content.indexOf(closingTag);
+  if (closingIndex !== -1) {
+    return content.slice(closingIndex + closingTag.length).trimStart();
+  }
+  // If we haven't seen the closing tag yet, check if we're still in planning
+  const openingTag = '<itinerary_planning>';
+  if (content.includes(openingTag)) {
+    // Still streaming planning section, return empty or minimal indicator
+    return '';
+  }
+  return content;
+};
+
 const Index = () => {
   const [preferences, setPreferences] = useState<TripPreferences>(defaultPreferences);
   const [itineraries, setItineraries] = useState<ItineraryVariant[]>([]);
@@ -165,8 +182,10 @@ const Index = () => {
             preferences,
             theme,
             (updatedContent) => {
+              // Strip the planning section before displaying
+              const displayContent = stripPlanningSection(updatedContent);
               setItineraries(prev => 
-                prev.map(it => it.id === theme.id ? { ...it, content: updatedContent } : it)
+                prev.map(it => it.id === theme.id ? { ...it, content: displayContent } : it)
               );
             }
           );
