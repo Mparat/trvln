@@ -150,10 +150,9 @@ This itinerary MUST embody the "${themeVariant.name}" theme throughout.
     console.log("Cities from preferences:", cities);
     console.log("Inspiration context:", inspirationContext);
 
-    // Build user inputs block for the prompt
     const userInputsBlock = `
 **INSPIRATION (must-visit destinations)**: ${inspirationContext || "No specific destinations - suggest based on preferences"}
-**CRITICAL: You MUST plan the itinerary for these exact destinations: ${cities?.length > 0 ? cities.join(", ") : "none specified - you may suggest destinations"}. Do NOT substitute with different cities.**
+**Note: The destinations listed above MUST be included in the itinerary. You may also suggest additional nearby destinations if appropriate for the trip duration and interests.**
 
 **LOGISTICS**:
 - Budget (Accommodation): ${budgetInfo.label} (${budgetInfo.accommodation}, ~${budgetInfo.daily} total daily)
@@ -183,10 +182,9 @@ ${themeContext ? themeContext + "\n\n" : ""}
 The user inputs are organized into four main categories:
 
 **1. Inspiration** - The destinations the user wants to visit
-- **CRITICAL: You MUST use ONLY the destinations specified by the user. Do NOT substitute with different cities or make up destinations.**
-- Your itinerary must include all user-specified destinations unless logistically impossible
-- If you must skip any destination, clearly explain why
-- If no destinations are specified, THEN you may suggest destinations based on preferences
+- Your itinerary MUST include all user-specified destinations
+- You may also suggest additional nearby destinations if appropriate for the trip duration
+- If you must skip any user-specified destination, clearly explain why
 
 **2. Logistics** - Practical constraints
 - Budget: These constraints are firm. Stay within them or explain what tradeoffs are necessary
