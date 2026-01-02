@@ -9,10 +9,28 @@ interface AddNearMissRequest {
   nearMissContent: string; // The Near Miss item to add
   fullItinerary: string; // Current itinerary for context
   tripPreferences: {
+    // Inspiration
+    media?: { type: string; url: string; name?: string }[];
     cities?: string[];
-    atmosphere?: string[];
-    interests?: string[];
+    // Logistics
     budgetAccommodation?: number;
+    budgetFlight?: number;
+    dateFlexibility?: string;
+    startDate?: string;
+    endDate?: string;
+    targetMonth?: string;
+    durationFlexibility?: string;
+    durationDays?: number;
+    departureCity?: string;
+    flightDirectness?: string;
+    // Vibe
+    atmosphere?: string[];
+    adventureLevel?: string;
+    guidedPreference?: string;
+    foodDrink?: string[];
+    interests?: string[];
+    // Notes
+    additionalNotes?: string;
   };
 }
 
@@ -50,16 +68,30 @@ RULES:
    - Tours: https://www.getyourguide.com/s/?q=TOUR+CITY
 4. The formattedItem should start with "- **Alternative:** " to clearly mark it as an option`;
 
+    // Build budget label
+    const getBudgetLabel = (value?: number) => {
+      if (!value) return "Moderate";
+      if (value <= 25) return "Budget";
+      if (value <= 50) return "Moderate";
+      if (value <= 75) return "Comfortable";
+      return "Luxury";
+    };
+
     const userPrompt = `NEAR MISS ITEM TO ADD:
 ${nearMissContent}
 
 CURRENT ITINERARY:
 ${fullItinerary}
 
-TRIP PREFERENCES:
+FULL TRIP PREFERENCES:
 - Destinations: ${tripPreferences.cities?.join(', ') || 'Not specified'}
-- Interests: ${tripPreferences.interests?.join(', ') || 'General'}
+- Budget: ${getBudgetLabel(tripPreferences.budgetAccommodation)}
 - Atmosphere: ${tripPreferences.atmosphere?.join(', ') || 'Balanced'}
+- Adventure level: ${tripPreferences.adventureLevel || 'Active'}
+- Interests: ${tripPreferences.interests?.join(', ') || 'General'}
+- Food preferences: ${tripPreferences.foodDrink?.join(', ') || 'Local cuisine'}
+- Guided preference: ${tripPreferences.guidedPreference || 'Some guided'}
+${tripPreferences.additionalNotes ? `- Additional notes: ${tripPreferences.additionalNotes}` : ''}
 
 Analyze where this Near Miss fits best and return the JSON placement info:`;
 
