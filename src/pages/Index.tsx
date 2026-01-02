@@ -146,12 +146,18 @@ const Index = () => {
       ? [...preferences.cities, pendingCity]
       : preferences.cities;
     
-    // Update preferences with pending city if provided
+    // Build the effective preferences with pending city included
+    const effectivePreferences: TripPreferences = {
+      ...preferences,
+      cities: effectiveCities,
+    };
+    
+    // Update state with pending city if provided (for UI display)
     if (pendingCity && !preferences.cities.includes(pendingCity)) {
-      setPreferences(prev => ({ ...prev, cities: [...prev.cities, pendingCity] }));
+      setPreferences(effectivePreferences);
     }
     
-    const hasInspiration = preferences.media.length > 0 || effectiveCities.length > 0 || preferences.additionalNotes.trim();
+    const hasInspiration = effectivePreferences.media.length > 0 || effectiveCities.length > 0 || effectivePreferences.additionalNotes.trim();
     
     if (!hasInspiration) {
       toast({
@@ -168,18 +174,18 @@ const Index = () => {
     setActiveVariant(0);
 
     try {
-      // First, get dynamic themes based on user inputs
-      const themes = await suggestThemes(preferences);
+      // First, get dynamic themes based on user inputs (using effectivePreferences!)
+      const themes = await suggestThemes(effectivePreferences);
       
       setIsSuggestingThemes(false);
       setItineraries(themes.map(t => ({ ...t, content: "" })));
       setLoadingVariants(Object.fromEntries(themes.map(t => [t.id, true])));
 
-      // Generate all 3 variants in parallel
+      // Generate all 3 variants in parallel (using effectivePreferences!)
       const promises = themes.map(async (theme) => {
         try {
           const content = await generateSingleItinerary(
-            preferences,
+            effectivePreferences,
             theme,
             (updatedContent) => {
               // Strip the planning section before displaying
