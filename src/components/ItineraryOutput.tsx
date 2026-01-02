@@ -337,40 +337,17 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
 
         const href = normalizeUrl(rawHref);
 
-        const handleClick = (e: React.MouseEvent) => {
-          e.preventDefault();
-          e.stopPropagation();
-          
-          // Try to open via window.top to escape iframe sandbox (for Google CSP issues)
-          // Fall back to regular window.open with try-catch for cross-origin restrictions
-          try {
-            if (window.top && window.top !== window) {
-              window.top.open(href, '_blank', 'noopener,noreferrer');
-            } else {
-              window.open(href, '_blank', 'noopener,noreferrer');
-            }
-          } catch {
-            // Cross-origin restriction - use anchor element click as fallback
-            const anchor = document.createElement('a');
-            anchor.href = href;
-            anchor.target = '_blank';
-            anchor.rel = 'noopener noreferrer';
-            document.body.appendChild(anchor);
-            anchor.click();
-            document.body.removeChild(anchor);
-          }
-        };
-
         return (
-          <button
+          <a
             key={i}
-            type="button"
-            onClick={handleClick}
-            className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1 cursor-pointer bg-transparent border-none p-0 m-0 font-inherit text-[length:inherit]"
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1"
           >
             {label}
             <ExternalLink className="w-3 h-3" />
-          </button>
+          </a>
         );
       }
       return part;
