@@ -96,9 +96,16 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
     }
   }, [itinerary, syncWithItinerary]);
 
-  // Clean up asterisks
+  // Clean up markdown formatting characters
   const cleanLine = (line: string): string => {
     let cleaned = line;
+    // Skip lines that are only code fences or horizontal rules
+    if (/^```+\s*$/.test(cleaned.trim()) || /^---+\s*$/.test(cleaned.trim())) {
+      return '';
+    }
+    // Remove inline code fences and horizontal rules
+    cleaned = cleaned.replace(/```/g, '');
+    cleaned = cleaned.replace(/---/g, '');
     cleaned = cleaned.replace(/^\s*\*\s+/, '- ');
     cleaned = cleaned.replace(/\[([^\]]+)\]\(([^)]+)\)/g, 'LINKSTART$1LINKMID$2LINKEND');
     cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, 'BOLDSTART$1BOLDEND');
