@@ -96,6 +96,169 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
     }
   }, [itinerary, syncWithItinerary]);
 
+  // Clean up asterisks
+  const cleanLine = (line: string): string => {
+    let cleaned = line;
+    cleaned = cleaned.replace(/^\s*\*\s+/, '- ');
+    cleaned = cleaned.replace(/\[([^\]]+)\]\(([^)]+)\)/g, 'LINKSTART$1LINKMID$2LINKEND');
+    cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, 'BOLDSTART$1BOLDEND');
+    cleaned = cleaned.replace(/\*/g, '');
+    cleaned = cleaned.replace(/BOLDSTART/g, '**').replace(/BOLDEND/g, '**');
+    cleaned = cleaned.replace(/LINKSTART/g, '[').replace(/LINKMID/g, '](').replace(/LINKEND/g, ')');
+    return cleaned;
+  };
+
+  // Main section headers for collapsible sections
+  const mainSectionHeaders = [
+    'EXECUTIVE SUMMARY',
+    'KEY BOOKINGS & BUDGET',
+    'DAY-BY-DAY ITINERARY',
+    'ALTERNATIVES & ADDITIONAL OPTIONS'
+  ];
+
+  const isMainSectionHeader = (content: string): string | null => {
+    const trimmed = content.trim().replace(/^#+\s*/, '').replace(/\*\*/g, '');
+    for (const header of mainSectionHeaders) {
+      if (trimmed.toUpperCase().includes(header)) {
+        return header;
+      }
+    }
+    return null;
+  };
+
+  // Check if a line is a section header
+  const isSectionHeader = (content: string): boolean => {
+    const trimmed = content.trim().replace(/^#+\s*/, '');
+    return /^(Day\s+\d+|Flights?|Flight Details|Getting There|Travel Info|Return flight|Outbound flight|Budget|Cost|Estimated Budget|Accommodation|Where to Stay|Hotels?|Best Time|When to Visit|Trip Summary|Overview|Near Misses|Almost Included|Alternatives|Alternative Guided Trips|Constraints|Assumptions|Trade-?offs|Notes|Important)/i.test(trimmed);
+  };
+
+  // Check if a line is a near miss section
+  const isNearMissHeader = (content: string): boolean => {
+    const trimmed = content.trim().replace(/^#+\s*/, '');
+    return /^(Near Misses|Almost Included|Alternatives|Swap Options)/i.test(trimmed);
+  };
+
+  // Check if entering a new major section (resets near miss tracking)
+  const isNewMajorSection = (content: string): boolean => {
+    const trimmed = content.trim().replace(/^#+\s*/, '');
+    return /^(Day\s+\d+|Flights?|Budget|Accommodation|Trip Summary)/i.test(trimmed);
+  };
+
+  // Parse inline content
+  const parseInlineContent = (content: string) => {
+    return content.split(/(\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g).map((part, i) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return (
+          <strong key={i} className="font-semibold text-foreground">
+            {part.slice(2, -2)}
+          </strong>
+        );
+      }
+
+      const linkMatch = part.match(/\[([^\]]+)\]\(([^)]+)\)/);
+      if (linkMatch) {
+        const label = linkMatch[1];
+        const rawHref = linkMatch[2].trim();
+
+        const makeSearchUrl = (query: string) =>
+          `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+
+        const makeGoogleMapsUrl = (query: string) =>
+          `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+
+        const normalizeUrl = (href: string): string => {
+          if (/^(javascript|data):/i.test(href)) return makeSearchUrl(label);
+
+          const withProto = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href) ? href : `https://${href}`;
+
+          try {
+            const url = new URL(withProto);
+
+            if (/goo\.gl$/i.test(url.hostname) || /maps\.app\.goo\.gl$/i.test(url.hostname)) {
+              return makeGoogleMapsUrl(label);
+            }
+
+            if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+              return makeSearchUrl(label);
+            }
+
+            return url.toString();
+          } catch {
+            return makeSearchUrl(label);
+          }
+        };
+
+        const href = normalizeUrl(rawHref);
+
+        const handleClick = (e: React.MouseEvent) => {
+          e.preventDefault();
+          e.stopPropagation();
+          
+          // Use postMessage to tell parent frame to open URL externally
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage(
+              { type: 'OPEN_EXTERNAL_URL', url: href },
+              '*'
+            );
+          } else {
+            window.open(href, '_blank', 'noopener,noreferrer');
+          }
+        };
+
+        return (
+          <button
+            key={i}
+            type="button"
+            onClick={handleClick}
+            className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1 cursor-pointer bg-transparent border-none p-0 m-0 font-inherit text-[length:inherit]"
+          >
+            {label}
+            <ExternalLink className="w-3 h-3" />
+          </button>
+        );
+      }
+      return part;
+    });
+  };
+
+  // Group items by main sections - MUST be before early returns
+  const groupedSections = useMemo(() => {
+    const sections: { header: string; items: typeof items }[] = [];
+    let currentSection: { header: string; items: typeof items } | null = null;
+    let preItems: typeof items = [];
+
+    items.forEach((item) => {
+      const cleanedLine = cleanLine(item.content);
+      const trimmedLine = cleanedLine.trim();
+      
+      if (!trimmedLine) return;
+
+      const mainHeader = isMainSectionHeader(trimmedLine);
+      if (mainHeader) {
+        if (currentSection) {
+          sections.push(currentSection);
+        } else if (preItems.length > 0) {
+          sections.push({ header: '', items: preItems });
+          preItems = [];
+        }
+        currentSection = { header: mainHeader, items: [] };
+      } else if (currentSection) {
+        currentSection.items.push(item);
+      } else {
+        preItems.push(item);
+      }
+    });
+
+    if (currentSection) {
+      sections.push(currentSection);
+    }
+    if (preItems.length > 0) {
+      sections.unshift({ header: '', items: preItems });
+    }
+
+    return sections;
+  }, [items]);
+
   const handleSubmitEdit = () => {
     if (editRequest.trim() && onEdit) {
       onEdit(editRequest);
@@ -285,175 +448,9 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
 
   if (!itinerary) return null;
 
-  // Clean up asterisks
-  const cleanLine = (line: string): string => {
-    let cleaned = line;
-    cleaned = cleaned.replace(/^\s*\*\s+/, '- ');
-    cleaned = cleaned.replace(/\[([^\]]+)\]\(([^)]+)\)/g, 'LINKSTART$1LINKMID$2LINKEND');
-    cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, 'BOLDSTART$1BOLDEND');
-    cleaned = cleaned.replace(/\*/g, '');
-    cleaned = cleaned.replace(/BOLDSTART/g, '**').replace(/BOLDEND/g, '**');
-    cleaned = cleaned.replace(/LINKSTART/g, '[').replace(/LINKMID/g, '](').replace(/LINKEND/g, ')');
-    return cleaned;
-  };
-
-  // Parse inline content
-  const parseInlineContent = (content: string) => {
-    return content.split(/(\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g).map((part, i) => {
-      if (part.startsWith('**') && part.endsWith('**')) {
-        return (
-          <strong key={i} className="font-semibold text-foreground">
-            {part.slice(2, -2)}
-          </strong>
-        );
-      }
-
-      const linkMatch = part.match(/\[([^\]]+)\]\(([^)]+)\)/);
-      if (linkMatch) {
-        const label = linkMatch[1];
-        const rawHref = linkMatch[2].trim();
-
-        const makeSearchUrl = (query: string) =>
-          `https://www.google.com/search?q=${encodeURIComponent(query)}`;
-
-        const makeGoogleMapsUrl = (query: string) =>
-          `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
-
-        const normalizeUrl = (href: string): string => {
-          if (/^(javascript|data):/i.test(href)) return makeSearchUrl(label);
-
-          const withProto = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href) ? href : `https://${href}`;
-
-          try {
-            const url = new URL(withProto);
-
-            if (/goo\.gl$/i.test(url.hostname) || /maps\.app\.goo\.gl$/i.test(url.hostname)) {
-              return makeGoogleMapsUrl(label);
-            }
-
-            if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-              return makeSearchUrl(label);
-            }
-
-            return url.toString();
-          } catch {
-            return makeSearchUrl(label);
-          }
-        };
-
-        const href = normalizeUrl(rawHref);
-
-        const handleClick = (e: React.MouseEvent) => {
-          e.preventDefault();
-          e.stopPropagation();
-          
-          // Use postMessage to tell parent frame to open URL externally
-          // This bypasses iframe sandbox restrictions for Google CSP
-          if (window.parent && window.parent !== window) {
-            window.parent.postMessage(
-              { type: 'OPEN_EXTERNAL_URL', url: href },
-              '*'
-            );
-          } else {
-            // Fallback for non-iframe context
-            window.open(href, '_blank', 'noopener,noreferrer');
-          }
-        };
-
-        return (
-          <button
-            key={i}
-            type="button"
-            onClick={handleClick}
-            className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1 cursor-pointer bg-transparent border-none p-0 m-0 font-inherit text-[length:inherit]"
-          >
-            {label}
-            <ExternalLink className="w-3 h-3" />
-          </button>
-        );
-      }
-      return part;
-    });
-  };
-
-  // Check if a line is a section header
-  const isSectionHeader = (content: string): boolean => {
-    const trimmed = content.trim().replace(/^#+\s*/, '');
-    return /^(Day\s+\d+|Flights?|Flight Details|Getting There|Travel Info|Return flight|Outbound flight|Budget|Cost|Estimated Budget|Accommodation|Where to Stay|Hotels?|Best Time|When to Visit|Trip Summary|Overview|Near Misses|Almost Included|Alternatives|Alternative Guided Trips|Constraints|Assumptions|Trade-?offs|Notes|Important)/i.test(trimmed);
-  };
-
-  // Check if a line is a near miss section
-  const isNearMissHeader = (content: string): boolean => {
-    const trimmed = content.trim().replace(/^#+\s*/, '');
-    return /^(Near Misses|Almost Included|Alternatives|Swap Options)/i.test(trimmed);
-  };
-
-  // Check if entering a new major section (resets near miss tracking)
-  const isNewMajorSection = (content: string): boolean => {
-    const trimmed = content.trim().replace(/^#+\s*/, '');
-    return /^(Day\s+\d+|Flights?|Budget|Accommodation|Trip Summary)/i.test(trimmed);
-  };
-
-  // Main section headers for collapsible sections
-  const mainSectionHeaders = [
-    'EXECUTIVE SUMMARY',
-    'KEY BOOKINGS & BUDGET',
-    'DAY-BY-DAY ITINERARY',
-    'ALTERNATIVES & ADDITIONAL OPTIONS'
-  ];
-
-  const isMainSectionHeader = (content: string): string | null => {
-    const trimmed = content.trim().replace(/^#+\s*/, '').replace(/\*\*/g, '');
-    for (const header of mainSectionHeaders) {
-      if (trimmed.toUpperCase().includes(header)) {
-        return header;
-      }
-    }
-    return null;
-  };
-
-
   const toggleSection = (section: string) => {
     setOpenSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
-
-  // Group items by main sections
-  const groupedSections = useMemo(() => {
-    const sections: { header: string; items: typeof items }[] = [];
-    let currentSection: { header: string; items: typeof items } | null = null;
-    let preItems: typeof items = [];
-
-    items.forEach((item) => {
-      const cleanedLine = cleanLine(item.content);
-      const trimmedLine = cleanedLine.trim();
-      
-      if (!trimmedLine) return;
-
-      const mainHeader = isMainSectionHeader(trimmedLine);
-      if (mainHeader) {
-        if (currentSection) {
-          sections.push(currentSection);
-        } else if (preItems.length > 0) {
-          sections.push({ header: '', items: preItems });
-          preItems = [];
-        }
-        currentSection = { header: mainHeader, items: [] };
-      } else if (currentSection) {
-        currentSection.items.push(item);
-      } else {
-        preItems.push(item);
-      }
-    });
-
-    if (currentSection) {
-      sections.push(currentSection);
-    }
-    if (preItems.length > 0) {
-      sections.unshift({ header: '', items: preItems });
-    }
-
-    return sections;
-  }, [items]);
 
   // Render a single item
   const renderItem = (item: typeof items[0], currentInNearMiss: boolean) => {
