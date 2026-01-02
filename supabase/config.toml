@@ -1,16 +1,16 @@
 project_id = "hcqiyuaynvwqwvsjpfzl"
 
 [functions.generate-itinerary]
-verify_jwt = true
+verify_jwt = false
 
 [functions.suggest-themes]
-verify_jwt = true
+verify_jwt = false
 
 [functions.validate-links]
-verify_jwt = true
+verify_jwt = false
 
 [functions.update-itinerary-item]
-verify_jwt = true
+verify_jwt = false
 
 [functions.add-near-miss]
-verify_jwt = true
+verify_jwt = false
