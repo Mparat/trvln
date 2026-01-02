@@ -181,6 +181,9 @@ const Index = () => {
       setLoadingVariants(Object.fromEntries(themes.map(t => [t.id, true])));
 
       // Generate all 3 variants in parallel (using effectivePreferences!)
+      // Use a ref-like pattern to avoid stale state in concurrent updates
+      const contentMap: Record<string, string> = {};
+      
       const promises = themes.map(async (theme) => {
         try {
           const content = await generateSingleItinerary(
@@ -189,9 +192,17 @@ const Index = () => {
             (updatedContent) => {
               // Strip the planning section before displaying
               const displayContent = stripPlanningSection(updatedContent);
-              setItineraries(prev => 
-                prev.map(it => it.id === theme.id ? { ...it, content: displayContent } : it)
-              );
+              contentMap[theme.id] = displayContent;
+              
+              // Use functional update to ensure we're working with latest state
+              setItineraries(prev => {
+                const newState = prev.map(it => 
+                  contentMap[it.id] !== undefined 
+                    ? { ...it, content: contentMap[it.id] } 
+                    : it
+                );
+                return newState;
+              });
             }
           );
           setLoadingVariants(prev => ({ ...prev, [theme.id]: false }));
