@@ -341,14 +341,23 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
           e.preventDefault();
           e.stopPropagation();
           
-          // Google links must be opened via window.top to escape iframe/sandbox
-          // Google CSP blocks rendering inside iframes (ERR_BLOCKED_BY_RESPONSE)
-          const isGoogleDomain = /\.google\.(com|[a-z]{2,3})($|\/)/i.test(href);
-          
-          if (isGoogleDomain && window.top) {
-            window.top.open(href, '_blank', 'noopener,noreferrer');
-          } else {
-            window.open(href, '_blank', 'noopener,noreferrer');
+          // Try to open via window.top to escape iframe sandbox (for Google CSP issues)
+          // Fall back to regular window.open with try-catch for cross-origin restrictions
+          try {
+            if (window.top && window.top !== window) {
+              window.top.open(href, '_blank', 'noopener,noreferrer');
+            } else {
+              window.open(href, '_blank', 'noopener,noreferrer');
+            }
+          } catch {
+            // Cross-origin restriction - use anchor element click as fallback
+            const anchor = document.createElement('a');
+            anchor.href = href;
+            anchor.target = '_blank';
+            anchor.rel = 'noopener noreferrer';
+            document.body.appendChild(anchor);
+            anchor.click();
+            document.body.removeChild(anchor);
           }
         };
 
