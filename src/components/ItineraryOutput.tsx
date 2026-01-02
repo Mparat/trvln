@@ -190,31 +190,17 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
 
         const href = normalizeUrl(rawHref);
 
-        const handleClick = (e: React.MouseEvent) => {
-          e.preventDefault();
-          e.stopPropagation();
-          
-          // Use postMessage to tell parent frame to open URL externally
-          if (window.parent && window.parent !== window) {
-            window.parent.postMessage(
-              { type: 'OPEN_EXTERNAL_URL', url: href },
-              '*'
-            );
-          } else {
-            window.open(href, '_blank', 'noopener,noreferrer');
-          }
-        };
-
         return (
-          <button
+          <a
             key={i}
-            type="button"
-            onClick={handleClick}
-            className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1 cursor-pointer bg-transparent border-none p-0 m-0 font-inherit text-[length:inherit]"
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1"
           >
             {label}
             <ExternalLink className="w-3 h-3" />
-          </button>
+          </a>
         );
       }
       return part;
