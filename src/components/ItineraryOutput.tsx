@@ -340,7 +340,16 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
         const handleClick = (e: React.MouseEvent) => {
           e.preventDefault();
           e.stopPropagation();
-          window.open(href, '_blank', 'noopener,noreferrer');
+          
+          // Google links must be opened via window.top to escape iframe/sandbox
+          // Google CSP blocks rendering inside iframes (ERR_BLOCKED_BY_RESPONSE)
+          const isGoogleDomain = /\.google\.(com|[a-z]{2,3})($|\/)/i.test(href);
+          
+          if (isGoogleDomain && window.top) {
+            window.top.open(href, '_blank', 'noopener,noreferrer');
+          } else {
+            window.open(href, '_blank', 'noopener,noreferrer');
+          }
         };
 
         return (
