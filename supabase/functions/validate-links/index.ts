@@ -1,21 +1,51 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.89.0";
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-interface LinkToValidate {
-  label: string;
-  url: string;
-  context: string; // e.g., "restaurant in Mexico City", "guided tour Teotihuacan"
-}
+// Input validation schemas
+const LinkSchema = z.object({
+  label: z.string().min(1).max(500),
+  url: z.string().max(2000),
+  context: z.string().max(500),
+});
+
+const RequestSchema = z.object({
+  links: z.array(LinkSchema).max(20),
+});
 
 interface ValidatedLink {
   label: string;
   originalUrl: string;
   validatedUrl: string;
-  source: string; // "google_maps" | "getyourguide" | "viator" | "official" | "original"
+  source: string;
+}
+
+// Helper to verify auth
+async function verifyAuth(req: Request): Promise<{ user: any; error: Response | null }> {
+  const supabaseClient = createClient(
+    Deno.env.get('SUPABASE_URL') ?? '',
+    Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+    { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
+  );
+
+  const { data: { user }, error } = await supabaseClient.auth.getUser();
+  
+  if (error || !user) {
+    return {
+      user: null,
+      error: new Response(
+        JSON.stringify({ error: 'Unauthorized. Please sign in to continue.' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    };
+  }
+  
+  return { user, error: null };
 }
 
 serve(async (req) => {
@@ -24,7 +54,32 @@ serve(async (req) => {
   }
 
   try {
-    const { links } = await req.json() as { links: LinkToValidate[] };
+    // Verify authentication
+    const { user, error: authError } = await verifyAuth(req);
+    if (authError) {
+      return authError;
+    }
+    console.log("Authenticated user:", user.id);
+
+    // Parse and validate input
+    const body = await req.json();
+    const validationResult = RequestSchema.safeParse(body);
+    
+    if (!validationResult.success) {
+      console.error("Validation error:", validationResult.error.errors);
+      return new Response(
+        JSON.stringify({ 
+          error: 'Invalid input', 
+          details: validationResult.error.errors.map(e => ({
+            field: e.path.join('.'),
+            message: e.message
+          }))
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const { links } = validationResult.data;
     
     if (!links || links.length === 0) {
       return new Response(
