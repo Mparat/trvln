@@ -8,6 +8,7 @@ interface Location {
   lat: number;
   lng: number;
   order: number;
+  type: 'city' | 'landmark' | 'place';
 }
 
 interface ItineraryMapProps {
@@ -100,102 +101,149 @@ export function ItineraryMap({ itinerary }: ItineraryMapProps) {
   const [locations, setLocations] = useState<Location[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Extract city names from itinerary
-  const extractedCities = useMemo(() => {
-    const cities: { name: string; order: number }[] = [];
-    const seenCities = new Set<string>();
+  // Extract all key locations from itinerary (cities, landmarks, places)
+  const extractedLocations = useMemo(() => {
+    const places: { name: string; order: number; type: 'city' | 'landmark' | 'place' }[] = [];
+    const seenPlaces = new Set<string>();
     const lines = itinerary.split('\n');
     let order = 1;
+    let currentCity = '';
 
-    // Priority 1: Look for route patterns like "Tokyo (3) → Kyoto (4)"
-    const routeMatch = itinerary.match(/([A-Z][a-zA-Z\s]+)\s*\(\d+\)\s*→/g);
-    if (routeMatch) {
-      for (const match of routeMatch) {
-        const cityMatch = match.match(/([A-Z][a-zA-Z\s]+)\s*\(\d+\)/);
-        if (cityMatch) {
-          const cityName = cityMatch[1].trim().toLowerCase();
-          if (cityCoordinates[cityName] && !seenCities.has(cityName)) {
-            seenCities.add(cityName);
-            cities.push({ name: cityMatch[1].trim(), order: order++ });
-          }
-        }
-      }
-      // Also get the last city in the route
-      const lastCityMatch = itinerary.match(/→\s*\*?\*?([A-Z][a-zA-Z\s]+)\*?\*?\s*\(\d+\)(?!\s*→)/);
-      if (lastCityMatch) {
-        const cityName = lastCityMatch[1].trim().toLowerCase();
-        if (cityCoordinates[cityName] && !seenCities.has(cityName)) {
-          seenCities.add(cityName);
-          cities.push({ name: lastCityMatch[1].trim(), order: order++ });
-        }
-      }
-    }
-
-    // Priority 2: Look for Day headers with cities
+    // First pass: Extract cities from Day headers
     for (const line of lines) {
-      // "Day 1: Tokyo" or "Day 1 — Tokyo"
       const dayMatch = line.match(/Day\s+\d+[:\—–-]\s*\*?\*?([A-Z][a-zA-Z\s]+)\*?\*?/i);
       if (dayMatch) {
         const cityName = dayMatch[1].trim().toLowerCase().replace(/\s*—.*$/, '').replace(/\s*-.*$/, '');
-        if (cityCoordinates[cityName] && !seenCities.has(cityName)) {
-          seenCities.add(cityName);
-          cities.push({ name: cityName.charAt(0).toUpperCase() + cityName.slice(1), order: order++ });
+        if (cityCoordinates[cityName] && !seenPlaces.has(cityName)) {
+          seenPlaces.add(cityName);
+          currentCity = cityName;
+          places.push({ 
+            name: cityName.charAt(0).toUpperCase() + cityName.slice(1), 
+            order: order++,
+            type: 'city'
+          });
         }
       }
     }
 
-    // Priority 3: Look for city mentions in Trip Summary route format
-    const knownCityNames = Object.keys(cityCoordinates);
-    for (const city of knownCityNames) {
-      // Look for patterns like "**Tokyo** (3)" or "Tokyo (3 nights)"
-      const regex = new RegExp(`\\*?\\*?${city}\\*?\\*?\\s*\\(\\d+`, 'i');
-      if (regex.test(itinerary) && !seenCities.has(city)) {
-        seenCities.add(city);
-        cities.push({ name: city.charAt(0).toUpperCase() + city.slice(1), order: order++ });
+    // Second pass: Extract landmarks and places from bullet points
+    // Look for bold text which usually indicates specific places
+    for (const line of lines) {
+      // Extract bold place names like **Fushimi Inari Shrine** or **Senso-ji Temple**
+      const boldMatches = line.match(/\*\*([^*]+)\*\*/g);
+      if (boldMatches) {
+        for (const match of boldMatches) {
+          const placeName = match.replace(/\*\*/g, '').trim();
+          const placeKey = placeName.toLowerCase();
+          
+          // Skip if already seen or if it's a time/generic word
+          if (seenPlaces.has(placeKey)) continue;
+          if (/^(morning|afternoon|evening|night|day \d+|getting there|meals|logistics|budget|notes)/i.test(placeName)) continue;
+          if (placeName.length < 4 || placeName.length > 60) continue;
+          
+          // Check if it looks like a place name (contains place keywords or is capitalized properly)
+          const isLikelyPlace = /temple|shrine|palace|castle|museum|park|garden|market|tower|bridge|station|district|square|beach|mountain|falls|waterfall|cathedral|church|mosque|gate|street|road|avenue|restaurant|cafe|bar|hotel|resort/i.test(placeName) ||
+            (placeName.split(' ').length >= 2 && /^[A-Z]/.test(placeName));
+          
+          if (isLikelyPlace) {
+            seenPlaces.add(placeKey);
+            places.push({
+              name: placeName,
+              order: order++,
+              type: 'landmark'
+            });
+          }
+        }
+      }
+
+      // Also extract from markdown links [Place Name](url)
+      const linkMatches = line.match(/\[([^\]]+)\]\([^)]+\)/g);
+      if (linkMatches) {
+        for (const match of linkMatches) {
+          const linkTextMatch = match.match(/\[([^\]]+)\]/);
+          if (linkTextMatch) {
+            const placeName = linkTextMatch[1].trim();
+            const placeKey = placeName.toLowerCase();
+            
+            if (seenPlaces.has(placeKey)) continue;
+            if (placeName.length < 4 || placeName.length > 60) continue;
+            if (/^(book|click|here|link|website|more|view)/i.test(placeName)) continue;
+            
+            seenPlaces.add(placeKey);
+            places.push({
+              name: placeName,
+              order: order++,
+              type: 'place'
+            });
+          }
+        }
       }
     }
 
-    return cities.slice(0, 10);
+    // Also check for known cities in route format
+    const knownCityNames = Object.keys(cityCoordinates);
+    for (const city of knownCityNames) {
+      const regex = new RegExp(`\\*?\\*?${city}\\*?\\*?\\s*\\(\\d+`, 'i');
+      if (regex.test(itinerary) && !seenPlaces.has(city)) {
+        seenPlaces.add(city);
+        places.push({ 
+          name: city.charAt(0).toUpperCase() + city.slice(1), 
+          order: order++,
+          type: 'city'
+        });
+      }
+    }
+
+    // Limit to reasonable number of locations
+    return places.slice(0, 25);
   }, [itinerary]);
 
-  // Geocode cities
+  // Geocode locations
   useEffect(() => {
-    const geocodeCities = async () => {
+    const geocodeLocations = async () => {
       setIsLoading(true);
       const geocoded: Location[] = [];
+      const geocodeQueue: typeof extractedLocations = [];
 
-      // Add destination cities
-      for (const city of extractedCities) {
-        const cityLower = city.name.toLowerCase();
-        const coords = cityCoordinates[cityLower];
+      // First add known cities directly
+      for (const place of extractedLocations) {
+        const placeLower = place.name.toLowerCase();
+        const coords = cityCoordinates[placeLower];
         
         if (coords) {
           geocoded.push({
-            name: city.name,
+            name: place.name,
             lat: coords.lat,
             lng: coords.lng,
-            order: city.order,
+            order: place.order,
+            type: place.type
           });
         } else {
-          // Geocode unknown cities
-          try {
-            const response = await fetch(
-              `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(city.name)}&limit=1`,
-              { headers: { 'User-Agent': 'WanderlustAI/1.0' } }
-            );
-            const data = await response.json();
-            if (data && data[0]) {
-              geocoded.push({
-                name: city.name,
-                lat: parseFloat(data[0].lat),
-                lng: parseFloat(data[0].lon),
-                order: city.order,
-              });
-            }
-            await new Promise(r => setTimeout(r, 300)); // Rate limit
-          } catch (error) {
-            console.warn(`Failed to geocode: ${city.name}`);
+          geocodeQueue.push(place);
+        }
+      }
+
+      // Then geocode unknown places (limit to avoid rate limiting)
+      const toGeocode = geocodeQueue.slice(0, 15);
+      for (const place of toGeocode) {
+        try {
+          const response = await fetch(
+            `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(place.name)}&limit=1`,
+            { headers: { 'User-Agent': 'WanderlustAI/1.0' } }
+          );
+          const data = await response.json();
+          if (data && data[0]) {
+            geocoded.push({
+              name: place.name,
+              lat: parseFloat(data[0].lat),
+              lng: parseFloat(data[0].lon),
+              order: place.order,
+              type: place.type
+            });
           }
+          await new Promise(r => setTimeout(r, 250)); // Rate limit
+        } catch (error) {
+          console.warn(`Failed to geocode: ${place.name}`);
         }
       }
 
@@ -205,8 +253,13 @@ export function ItineraryMap({ itinerary }: ItineraryMapProps) {
       setIsLoading(false);
     };
 
-    geocodeCities();
-  }, [extractedCities]);
+    if (extractedLocations.length > 0) {
+      geocodeLocations();
+    } else {
+      setLocations([]);
+      setIsLoading(false);
+    }
+  }, [extractedLocations]);
 
   // Initialize and update map
   useEffect(() => {
@@ -230,36 +283,40 @@ export function ItineraryMap({ itinerary }: ItineraryMapProps) {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     }).addTo(map);
 
-    // Create custom marker icon
-    const createMarkerIcon = (order: number, name: string) => {
+    // Create custom marker icon based on type
+    const createMarkerIcon = (order: number, name: string, type: 'city' | 'landmark' | 'place') => {
+      const bgColor = type === 'city' ? '#C45D35' : type === 'landmark' ? '#6366f1' : '#10b981';
+      const size = type === 'city' ? 32 : 24;
+      const fontSize = type === 'city' ? 14 : 11;
+      
       return L.divIcon({
         className: 'custom-marker',
         html: `
           <div style="display: flex; flex-direction: column; align-items: center; transform: translateX(-50%);">
             <div style="
-              background: #C45D35;
-              width: 32px;
-              height: 32px;
+              background: ${bgColor};
+              width: ${size}px;
+              height: ${size}px;
               border-radius: 50%;
               display: flex;
               align-items: center;
               justify-content: center;
               color: white;
               font-weight: bold;
-              font-size: 14px;
-              border: 3px solid white;
+              font-size: ${fontSize}px;
+              border: 2px solid white;
               box-shadow: 0 2px 6px rgba(0,0,0,0.4);
             ">${order}</div>
             <div style="
               background: white;
-              padding: 3px 8px;
+              padding: 2px 6px;
               border-radius: 4px;
-              font-size: 12px;
-              font-weight: 600;
+              font-size: ${type === 'city' ? 12 : 10}px;
+              font-weight: ${type === 'city' ? 600 : 500};
               color: #1a1a1a;
               white-space: nowrap;
               box-shadow: 0 1px 4px rgba(0,0,0,0.2);
-              margin-top: 4px;
+              margin-top: 3px;
               max-width: 140px;
               overflow: hidden;
               text-overflow: ellipsis;
@@ -275,25 +332,26 @@ export function ItineraryMap({ itinerary }: ItineraryMapProps) {
     const bounds = L.latLngBounds([]);
     locations.forEach((location) => {
       const marker = L.marker([location.lat, location.lng], {
-        icon: createMarkerIcon(location.order, location.name),
+        icon: createMarkerIcon(location.order, location.name, location.type),
       }).addTo(map);
 
+      const typeLabel = location.type === 'city' ? 'City' : location.type === 'landmark' ? 'Landmark' : 'Place';
       marker.bindPopup(`
         <div style="font-weight: 600;">${location.name}</div>
-        <div style="font-size: 12px; color: #666;">Stop ${location.order}</div>
+        <div style="font-size: 12px; color: #666;">Stop ${location.order} • ${typeLabel}</div>
       `);
 
       bounds.extend([location.lat, location.lng]);
     });
 
-    // Add route line
+    // Add route line connecting all points
     if (locations.length > 1) {
       const latLngs: L.LatLngExpression[] = locations.map(loc => [loc.lat, loc.lng] as L.LatLngTuple);
       L.polyline(latLngs, {
         color: '#C45D35',
-        weight: 3,
-        opacity: 0.7,
-        dashArray: '10, 10',
+        weight: 2,
+        opacity: 0.6,
+        dashArray: '8, 8',
       }).addTo(map);
     }
 
@@ -311,12 +369,12 @@ export function ItineraryMap({ itinerary }: ItineraryMapProps) {
     };
   }, [locations]);
 
-  if (isLoading && extractedCities.length > 0) {
+  if (isLoading && extractedLocations.length > 0) {
     return (
       <div className="h-[400px] rounded-xl bg-muted flex items-center justify-center">
         <div className="text-center space-y-2">
           <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-sm text-muted-foreground">Loading map locations...</p>
+          <p className="text-sm text-muted-foreground">Finding {extractedLocations.length} locations...</p>
         </div>
       </div>
     );
@@ -327,7 +385,7 @@ export function ItineraryMap({ itinerary }: ItineraryMapProps) {
       <div className="h-[300px] rounded-xl bg-muted flex items-center justify-center">
         <div className="text-center space-y-2">
           <MapPin className="w-8 h-8 text-muted-foreground mx-auto" />
-          <p className="text-sm text-muted-foreground">No cities found to map</p>
+          <p className="text-sm text-muted-foreground">No locations found to map</p>
         </div>
       </div>
     );
