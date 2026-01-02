@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { 
   MapPin, Clock, DollarSign, Utensils, Camera, Star, Plane, Sun, 
   CloudRain, Sparkles, AlertTriangle, ExternalLink, Edit3, Send,
   Mountain, Building, Trees, Tent, Heart, Zap, PartyPopper,
-  Lightbulb, X, Plus, Loader2
+  Lightbulb, X, Plus, Loader2, ChevronDown
 } from "lucide-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -376,11 +377,227 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
     return /^(Day\s+\d+|Flights?|Budget|Accommodation|Trip Summary)/i.test(trimmed);
   };
 
-  // Render items directly
-  const renderItems = () => {
+  // Main section headers for collapsible sections
+  const mainSectionHeaders = [
+    'EXECUTIVE SUMMARY',
+    'KEY BOOKINGS & BUDGET',
+    'DAY-BY-DAY ITINERARY',
+    'ALTERNATIVES & ADDITIONAL OPTIONS'
+  ];
+
+  const isMainSectionHeader = (content: string): string | null => {
+    const trimmed = content.trim().replace(/^#+\s*/, '').replace(/\*\*/g, '');
+    for (const header of mainSectionHeaders) {
+      if (trimmed.toUpperCase().includes(header)) {
+        return header;
+      }
+    }
+    return null;
+  };
+
+  // State for collapsible sections
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {};
+    mainSectionHeaders.forEach(header => {
+      initial[header] = true;
+    });
+    return initial;
+  });
+
+  const toggleSection = (section: string) => {
+    setOpenSections(prev => ({ ...prev, [section]: !prev[section] }));
+  };
+
+  // Group items by main sections
+  const groupedSections = useMemo(() => {
+    const sections: { header: string; items: typeof items }[] = [];
+    let currentSection: { header: string; items: typeof items } | null = null;
+    let preItems: typeof items = [];
+
+    items.forEach((item) => {
+      const cleanedLine = cleanLine(item.content);
+      const trimmedLine = cleanedLine.trim();
+      
+      if (!trimmedLine) return;
+
+      const mainHeader = isMainSectionHeader(trimmedLine);
+      if (mainHeader) {
+        if (currentSection) {
+          sections.push(currentSection);
+        } else if (preItems.length > 0) {
+          sections.push({ header: '', items: preItems });
+          preItems = [];
+        }
+        currentSection = { header: mainHeader, items: [] };
+      } else if (currentSection) {
+        currentSection.items.push(item);
+      } else {
+        preItems.push(item);
+      }
+    });
+
+    if (currentSection) {
+      sections.push(currentSection);
+    }
+    if (preItems.length > 0) {
+      sections.unshift({ header: '', items: preItems });
+    }
+
+    return sections;
+  }, [items]);
+
+  // Render a single item
+  const renderItem = (item: typeof items[0], currentInNearMiss: boolean) => {
+    const cleanedLine = cleanLine(item.content);
+    const trimmedLine = cleanedLine.trim();
+    
+    if (!trimmedLine) return null;
+
+    // Skip main section headers (they're rendered as collapsible triggers)
+    if (isMainSectionHeader(trimmedLine)) return null;
+    
+    const isNearMissItem = currentInNearMiss && item.type === 'bullet';
+    
+    // Header items (## Day 1, ## Flights, etc.)
+    if (item.type === 'day-header' || item.type === 'section-header' || isSectionHeader(trimmedLine)) {
+      const dayMatch = trimmedLine.match(/Day\s+(\d+)/i);
+      const dayNumber = dayMatch ? parseInt(dayMatch[1]) : null;
+      
+      return (
+        <div key={item.id} className="mt-8 mb-4 first:mt-0">
+          <div className="flex items-center gap-3">
+            {dayNumber && (
+              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                <span className="text-lg font-bold text-primary">{dayNumber}</span>
+              </div>
+            )}
+            <h3 className="text-xl font-display font-semibold text-foreground">
+              {parseInlineContent(trimmedLine.replace(/^#+\s*/, ''))}
+            </h3>
+          </div>
+        </div>
+      );
+    }
+    
+    // Subheader items (Morning, Afternoon, etc.)
+    const timeMatch = trimmedLine.match(/^\*?\*?(Morning|Afternoon|Evening|Night|Meals|Logistics|Getting there|How to book)\*?\*?:?$/i);
+    const boldHeaderMatch = trimmedLine.match(/^\*\*([^*]+)\*\*:?$/);
+    const hashHeaderMatch = trimmedLine.match(/^###?\s+(.+)/);
+    
+    if (timeMatch || boldHeaderMatch || hashHeaderMatch) {
+      const title = timeMatch?.[1] || boldHeaderMatch?.[1] || hashHeaderMatch?.[1] || trimmedLine;
+      return (
+        <div key={item.id} className="mt-4 mb-2">
+          <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+            {title.replace(/\*\*/g, '').replace(/:$/, '')}
+          </h4>
+        </div>
+      );
+    }
+    
+    // Bullet items
+    if (trimmedLine.startsWith('-') || trimmedLine.startsWith('•')) {
+      const content = trimmedLine.replace(/^[-•]\s*/, '');
+      const activityType = detectActivityType(content);
+      const indentLevel = item.indentLevel;
+      
+      const hasFood = /restaurant|eat|food|breakfast|lunch|dinner|café|cafe|meal|dine|cuisine/i.test(content);
+      const hasPhoto = /photo|view|scenic|visit|see|explore|landmark|monument|museum/i.test(content);
+      const hasTip = /tip|recommend|don't miss|must|should|pro tip|insider/i.test(content);
+      const hasFlight = /flight|airport|airline|depart|arrive|layover/i.test(content);
+      const hasWeather = /weather|rain|sun|temperature|climate|season/i.test(content);
+      const hasDrink = /bar|brewery|cocktail|beer|wine|drinks?|pub/i.test(content);
+      
+      const Icon = hasFlight ? Plane : hasFood ? Utensils : hasDrink ? PartyPopper : hasPhoto ? Camera : hasTip ? Star : hasWeather ? CloudRain : null;
+      const iconColor = hasFlight ? 'text-sky-500' : hasFood ? 'text-orange-500' : hasDrink ? 'text-violet-500' : hasPhoto ? 'text-blue-500' : hasTip ? 'text-amber-500' : hasWeather ? 'text-cyan-500' : '';
+      
+      const parsedContent = parseInlineContent(content);
+      const marginLeft = 0.5 + (indentLevel * 1);
+      
+      return (
+        <div 
+          key={item.id}
+          ref={(el) => { itemRefs.current[item.id] = el; }}
+          className={cn(
+            "flex items-start gap-3 py-2 group hover:bg-muted/30 px-3 rounded-lg transition-all relative",
+            item.isUpdating && "opacity-60",
+            isNearMissItem && "bg-amber-500/5 border-l-2 border-amber-500/30"
+          )}
+          style={{ marginLeft: `${marginLeft}rem` }}
+        >
+          {Icon ? (
+            <Icon className={cn("w-4 h-4 mt-1 shrink-0", iconColor)} />
+          ) : (
+            <div className={cn(
+              "rounded-full mt-2 shrink-0",
+              indentLevel === 0 ? "w-2 h-2 bg-primary/60" : "w-1.5 h-1.5 bg-muted-foreground/40"
+            )} />
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="text-foreground/90 leading-relaxed">{parsedContent}</p>
+            {activityType && indentLevel === 0 && (
+              <div className="mt-1">
+                <ActivityTag type={activityType} />
+              </div>
+            )}
+            {item.comment && !item.isUpdating && (
+              <div className="mt-2 text-xs text-muted-foreground bg-muted/50 px-2 py-1 rounded">
+                💬 {item.comment}
+              </div>
+            )}
+          </div>
+          
+          {isNearMissItem && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="shrink-0 h-7 px-2 opacity-0 group-hover:opacity-100 transition-opacity bg-amber-500/10 hover:bg-amber-500/20 text-amber-700"
+              onClick={() => handleAddNearMiss(item)}
+              disabled={addingNearMiss === item.id}
+            >
+              {addingNearMiss === item.id ? (
+                <>
+                  <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                  Adding...
+                </>
+              ) : (
+                <>
+                  <Plus className="w-3 h-3 mr-1" />
+                  Add to trip
+                </>
+              )}
+            </Button>
+          )}
+
+          {item.type === 'bullet' && !isNearMissItem && (
+            <div className="shrink-0 self-center">
+              <ItemFeedbackControls
+                item={item}
+                canUndo={canUndo(item.id)}
+                onVote={(vote) => setVote(item.id, vote)}
+                onComment={(comment) => setComment(item.id, comment)}
+                onSubmitFeedback={(overrides) => handleSubmitFeedback(item.id, overrides)}
+                onUndo={() => undoItem(item.id)}
+              />
+            </div>
+          )}
+        </div>
+      );
+    }
+    
+    // Regular paragraph text
+    return (
+      <p key={item.id} className="text-foreground/80 leading-relaxed py-1 ml-2">
+        {parseInlineContent(trimmedLine.replace(/^#+\s*/, ''))}
+      </p>
+    );
+  };
+
+  // Render items for a section
+  const renderSectionItems = (sectionItems: typeof items) => {
     let currentInNearMiss = false;
     
-    return items.map((item) => {
+    return sectionItems.map((item) => {
       const cleanedLine = cleanLine(item.content);
       const trimmedLine = cleanedLine.trim();
       
@@ -393,141 +610,7 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
         currentInNearMiss = false;
       }
       
-      const isNearMissItem = currentInNearMiss && item.type === 'bullet';
-      
-      // Header items (## Day 1, ## Flights, etc.)
-      if (item.type === 'day-header' || item.type === 'section-header' || isSectionHeader(trimmedLine)) {
-        const dayMatch = trimmedLine.match(/Day\s+(\d+)/i);
-        const dayNumber = dayMatch ? parseInt(dayMatch[1]) : null;
-        
-        return (
-          <div key={item.id} className="mt-8 mb-4 first:mt-0">
-            <div className="flex items-center gap-3">
-              {dayNumber && (
-                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                  <span className="text-lg font-bold text-primary">{dayNumber}</span>
-                </div>
-              )}
-              <h3 className="text-xl font-display font-semibold text-foreground">
-                {parseInlineContent(trimmedLine.replace(/^#+\s*/, ''))}
-              </h3>
-            </div>
-          </div>
-        );
-      }
-      
-      // Subheader items (Morning, Afternoon, etc.)
-      const timeMatch = trimmedLine.match(/^\*?\*?(Morning|Afternoon|Evening|Night|Meals|Logistics|Getting there|How to book)\*?\*?:?$/i);
-      const boldHeaderMatch = trimmedLine.match(/^\*\*([^*]+)\*\*:?$/);
-      const hashHeaderMatch = trimmedLine.match(/^###?\s+(.+)/);
-      
-      if (timeMatch || boldHeaderMatch || hashHeaderMatch) {
-        const title = timeMatch?.[1] || boldHeaderMatch?.[1] || hashHeaderMatch?.[1] || trimmedLine;
-        return (
-          <div key={item.id} className="mt-4 mb-2">
-            <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-              {title.replace(/\*\*/g, '').replace(/:$/, '')}
-            </h4>
-          </div>
-        );
-      }
-      
-      // Bullet items
-      if (trimmedLine.startsWith('-') || trimmedLine.startsWith('•')) {
-        const content = trimmedLine.replace(/^[-•]\s*/, '');
-        const activityType = detectActivityType(content);
-        const indentLevel = item.indentLevel;
-        
-        const hasFood = /restaurant|eat|food|breakfast|lunch|dinner|café|cafe|meal|dine|cuisine/i.test(content);
-        const hasPhoto = /photo|view|scenic|visit|see|explore|landmark|monument|museum/i.test(content);
-        const hasTip = /tip|recommend|don't miss|must|should|pro tip|insider/i.test(content);
-        const hasFlight = /flight|airport|airline|depart|arrive|layover/i.test(content);
-        const hasWeather = /weather|rain|sun|temperature|climate|season/i.test(content);
-        const hasDrink = /bar|brewery|cocktail|beer|wine|drinks?|pub/i.test(content);
-        
-        const Icon = hasFlight ? Plane : hasFood ? Utensils : hasDrink ? PartyPopper : hasPhoto ? Camera : hasTip ? Star : hasWeather ? CloudRain : null;
-        const iconColor = hasFlight ? 'text-sky-500' : hasFood ? 'text-orange-500' : hasDrink ? 'text-violet-500' : hasPhoto ? 'text-blue-500' : hasTip ? 'text-amber-500' : hasWeather ? 'text-cyan-500' : '';
-        
-        const parsedContent = parseInlineContent(content);
-        const marginLeft = 0.5 + (indentLevel * 1);
-        
-        return (
-          <div 
-            key={item.id}
-            ref={(el) => { itemRefs.current[item.id] = el; }}
-            className={cn(
-              "flex items-start gap-3 py-2 group hover:bg-muted/30 px-3 rounded-lg transition-all relative",
-              item.isUpdating && "opacity-60",
-              isNearMissItem && "bg-amber-500/5 border-l-2 border-amber-500/30"
-            )}
-            style={{ marginLeft: `${marginLeft}rem` }}
-          >
-            {Icon ? (
-              <Icon className={cn("w-4 h-4 mt-1 shrink-0", iconColor)} />
-            ) : (
-              <div className={cn(
-                "rounded-full mt-2 shrink-0",
-                indentLevel === 0 ? "w-2 h-2 bg-primary/60" : "w-1.5 h-1.5 bg-muted-foreground/40"
-              )} />
-            )}
-            <div className="flex-1 min-w-0">
-              <p className="text-foreground/90 leading-relaxed">{parsedContent}</p>
-              {activityType && indentLevel === 0 && (
-                <div className="mt-1">
-                  <ActivityTag type={activityType} />
-                </div>
-              )}
-              {item.comment && !item.isUpdating && (
-                <div className="mt-2 text-xs text-muted-foreground bg-muted/50 px-2 py-1 rounded">
-                  💬 {item.comment}
-                </div>
-              )}
-            </div>
-            
-            {isNearMissItem && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="shrink-0 h-7 px-2 opacity-0 group-hover:opacity-100 transition-opacity bg-amber-500/10 hover:bg-amber-500/20 text-amber-700"
-                onClick={() => handleAddNearMiss(item)}
-                disabled={addingNearMiss === item.id}
-              >
-                {addingNearMiss === item.id ? (
-                  <>
-                    <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                    Adding...
-                  </>
-                ) : (
-                  <>
-                    <Plus className="w-3 h-3 mr-1" />
-                    Add to trip
-                  </>
-                )}
-              </Button>
-            )}
-
-            {item.type === 'bullet' && !isNearMissItem && (
-              <div className="shrink-0 self-center">
-                <ItemFeedbackControls
-                  item={item}
-                  canUndo={canUndo(item.id)}
-                  onVote={(vote) => setVote(item.id, vote)}
-                  onComment={(comment) => setComment(item.id, comment)}
-                  onSubmitFeedback={(overrides) => handleSubmitFeedback(item.id, overrides)}
-                  onUndo={() => undoItem(item.id)}
-                />
-              </div>
-            )}
-          </div>
-        );
-      }
-      
-      // Regular paragraph text
-      return (
-        <p key={item.id} className="text-foreground/80 leading-relaxed py-1 ml-2">
-          {parseInlineContent(trimmedLine.replace(/^#+\s*/, ''))}
-        </p>
-      );
+      return renderItem(item, currentInNearMiss);
     });
   };
 
@@ -579,9 +662,45 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
         </Card>
       )}
 
-      {/* Flat list of items */}
-      <div className="space-y-1">
-        {renderItems()}
+      {/* Collapsible sections */}
+      <div className="space-y-4">
+        {groupedSections.map((section, index) => {
+          if (!section.header) {
+            // Pre-content items (before any main section)
+            return (
+              <div key={`pre-${index}`} className="space-y-1">
+                {renderSectionItems(section.items)}
+              </div>
+            );
+          }
+
+          return (
+            <Collapsible
+              key={section.header}
+              open={openSections[section.header]}
+              onOpenChange={() => toggleSection(section.header)}
+            >
+              <CollapsibleTrigger className="w-full">
+                <div className="flex items-center justify-between py-3 px-4 bg-muted/50 rounded-lg hover:bg-muted/70 transition-colors cursor-pointer">
+                  <h2 className="text-lg font-display font-bold text-foreground tracking-wide">
+                    {section.header}
+                  </h2>
+                  <ChevronDown 
+                    className={cn(
+                      "w-5 h-5 text-muted-foreground transition-transform duration-200",
+                      openSections[section.header] && "rotate-180"
+                    )}
+                  />
+                </div>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="pt-2">
+                <div className="space-y-1">
+                  {renderSectionItems(section.items)}
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          );
+        })}
       </div>
     </div>
   );
