@@ -3,7 +3,6 @@ import { Compass, Sparkles, MapPin, Plane } from "lucide-react";
 import { TripInputForm, TripPreferences } from "@/components/TripInputForm";
 import { ItineraryOutput } from "@/components/ItineraryOutput";
 import { TripSummaryCard } from "@/components/TripSummaryCard";
-import { ItineraryMap } from "@/components/ItineraryMap";
 import { ItinerarySwitcher } from "@/components/ItinerarySwitcher";
 import { toast } from "@/hooks/use-toast";
 
@@ -315,16 +314,6 @@ const Index = () => {
                 />
               )}
 
-              {/* Map */}
-              {currentItinerary?.content && !loadingVariants[currentItinerary.id] && (
-                <div className="bg-card rounded-2xl shadow-medium p-6 md:p-8">
-                  <h3 className="font-display text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
-                    <MapPin className="w-5 h-5 text-primary" />
-                    Your Journey Map
-                  </h3>
-                  <ItineraryMap itinerary={currentItinerary.content} />
-                </div>
-              )}
 
               {/* Detailed Itinerary */}
               <div className="bg-card rounded-2xl shadow-medium p-6 md:p-8">
