@@ -1,9 +1,72 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.89.0";
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+// Input validation schemas
+const PreferencesSchema = z.object({
+  media: z.array(z.object({
+    type: z.string().max(50),
+    url: z.string().max(500),
+    name: z.string().max(200).optional(),
+    preview: z.string().max(10000).optional(),
+  })).max(10).default([]),
+  cities: z.array(z.string().max(100)).max(20).default([]),
+  budgetAccommodation: z.number().min(0).max(100).default(50),
+  budgetFlight: z.number().min(0).max(100).default(50),
+  dateFlexibility: z.string().max(50).default('anytime'),
+  startDate: z.string().max(50).optional(),
+  endDate: z.string().max(50).optional(),
+  targetMonth: z.string().max(50).default(''),
+  durationFlexibility: z.string().max(50).default('1-week'),
+  durationDays: z.number().min(1).max(90).default(7),
+  departureCity: z.string().max(100).default(''),
+  flightDirectness: z.string().max(50).default('short-layover'),
+  atmosphere: z.array(z.string().max(50)).max(10).default([]),
+  adventureLevel: z.string().max(50).default('active'),
+  guidedPreference: z.string().max(50).default('some-guided'),
+  foodDrink: z.array(z.string().max(50)).max(10).default([]),
+  interests: z.array(z.string().max(50)).max(20).default([]),
+  additionalNotes: z.string().max(5000).default(''),
+});
+
+const ThemeVariantSchema = z.object({
+  id: z.string().max(100),
+  name: z.string().max(200),
+  emoji: z.string().max(10),
+}).optional();
+
+const RequestSchema = z.object({
+  preferences: PreferencesSchema,
+  themeVariant: ThemeVariantSchema,
+});
+
+// Helper to verify auth
+async function verifyAuth(req: Request): Promise<{ user: any; error: Response | null }> {
+  const supabaseClient = createClient(
+    Deno.env.get('SUPABASE_URL') ?? '',
+    Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+    { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
+  );
+
+  const { data: { user }, error } = await supabaseClient.auth.getUser();
+  
+  if (error || !user) {
+    return {
+      user: null,
+      error: new Response(
+        JSON.stringify({ error: 'Unauthorized. Please sign in to continue.' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    };
+  }
+  
+  return { user, error: null };
+}
 
 // Helper function to call Perplexity for grounded web search
 async function searchWithPerplexity(
@@ -53,7 +116,32 @@ serve(async (req) => {
   }
 
   try {
-    const { preferences, themeVariant } = await req.json();
+    // Verify authentication
+    const { user, error: authError } = await verifyAuth(req);
+    if (authError) {
+      return authError;
+    }
+    console.log("Authenticated user:", user.id);
+
+    // Parse and validate input
+    const body = await req.json();
+    const validationResult = RequestSchema.safeParse(body);
+    
+    if (!validationResult.success) {
+      console.error("Validation error:", validationResult.error.errors);
+      return new Response(
+        JSON.stringify({ 
+          error: 'Invalid input', 
+          details: validationResult.error.errors.map(e => ({
+            field: e.path.join('.'),
+            message: e.message
+          }))
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const { preferences, themeVariant } = validationResult.data;
 
     console.log("Received preferences:", JSON.stringify(preferences, null, 2));
     console.log("Theme variant:", themeVariant || "default");

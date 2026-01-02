@@ -4,6 +4,9 @@ import { TripInputForm, TripPreferences } from "@/components/TripInputForm";
 import { ItineraryOutput } from "@/components/ItineraryOutput";
 import { TripSummaryCard } from "@/components/TripSummaryCard";
 import { ItinerarySwitcher } from "@/components/ItinerarySwitcher";
+import { UserMenu } from "@/components/UserMenu";
+import { AuthModal } from "@/components/AuthModal";
+import { useAuth } from "@/components/AuthProvider";
 import { toast } from "@/hooks/use-toast";
 
 const defaultPreferences: TripPreferences = {
@@ -52,6 +55,8 @@ const stripPlanningSection = (content: string): string => {
 };
 
 const Index = () => {
+  const { session, user } = useAuth();
+  const [authModalOpen, setAuthModalOpen] = useState(false);
   const [preferences, setPreferences] = useState<TripPreferences>(defaultPreferences);
   const [itineraries, setItineraries] = useState<ItineraryVariant[]>([]);
   const [activeVariant, setActiveVariant] = useState(0);
@@ -59,23 +64,38 @@ const Index = () => {
   const [loadingVariants, setLoadingVariants] = useState<Record<string, boolean>>({});
   const [isSuggestingThemes, setIsSuggestingThemes] = useState(false);
 
+  // Get auth token for API calls
+  const getAuthHeaders = useCallback(() => {
+    if (session?.access_token) {
+      return {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      };
+    }
+    return {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+    };
+  }, [session]);
+
   const suggestThemes = useCallback(async (prefs: TripPreferences): Promise<{ id: string; name: string; emoji: string }[]> => {
     const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/suggest-themes`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-      },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ preferences: prefs }),
     });
 
     if (!response.ok) {
-      throw new Error("Failed to suggest themes");
+      const errorData = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        throw new Error("Please sign in to generate itineraries");
+      }
+      throw new Error(errorData.error || "Failed to suggest themes");
     }
 
     const data = await response.json();
     return data.themes;
-  }, []);
+  }, [getAuthHeaders]);
 
   const generateSingleItinerary = useCallback(async (
     prefs: TripPreferences,
@@ -84,10 +104,7 @@ const Index = () => {
   ) => {
     const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-itinerary`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-      },
+      headers: getAuthHeaders(),
       body: JSON.stringify({ preferences: prefs, themeVariant }),
     });
 
@@ -137,9 +154,19 @@ const Index = () => {
     }
 
     return fullContent;
-  }, []);
+  }, [getAuthHeaders]);
 
   const handleGenerate = useCallback(async (pendingCity?: string) => {
+    // Check if user is authenticated
+    if (!user) {
+      setAuthModalOpen(true);
+      toast({
+        title: "Sign in required",
+        description: "Please sign in to generate personalized itineraries",
+        variant: "destructive",
+      });
+      return;
+    }
     // Include pending city text in the inspiration check
     const effectiveCities = pendingCity && !preferences.cities.includes(pendingCity)
       ? [...preferences.cities, pendingCity]
@@ -231,7 +258,7 @@ const Index = () => {
       setIsGenerating(false);
       setIsSuggestingThemes(false);
     }
-  }, [preferences, suggestThemes, generateSingleItinerary]);
+  }, [user, preferences, suggestThemes, generateSingleItinerary]);
 
   const handleEdit = useCallback(async (editRequest: string) => {
     setPreferences(prev => ({
@@ -251,8 +278,16 @@ const Index = () => {
 
   return (
     <div className="min-h-screen gradient-hero">
+      {/* Auth Modal */}
+      <AuthModal open={authModalOpen} onOpenChange={setAuthModalOpen} />
+
       {/* Hero Section */}
       <header className="relative overflow-hidden">
+        {/* User Menu - Fixed Top Right */}
+        <div className="absolute top-4 right-4 z-10">
+          <UserMenu />
+        </div>
+
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
           <div className="absolute top-20 left-10 w-72 h-72 bg-primary/5 rounded-full blur-3xl animate-float" />
           <div className="absolute bottom-10 right-20 w-96 h-96 bg-olive/5 rounded-full blur-3xl animate-float" style={{ animationDelay: '-3s' }} />

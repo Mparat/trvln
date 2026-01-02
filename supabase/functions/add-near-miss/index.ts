@@ -1,37 +1,65 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.89.0";
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-interface AddNearMissRequest {
-  nearMissContent: string; // The Near Miss item to add
-  fullItinerary: string; // Current itinerary for context
-  tripPreferences: {
-    // Inspiration
-    media?: { type: string; url: string; name?: string }[];
-    cities?: string[];
-    // Logistics
-    budgetAccommodation?: number;
-    budgetFlight?: number;
-    dateFlexibility?: string;
-    startDate?: string;
-    endDate?: string;
-    targetMonth?: string;
-    durationFlexibility?: string;
-    durationDays?: number;
-    departureCity?: string;
-    flightDirectness?: string;
-    // Vibe
-    atmosphere?: string[];
-    adventureLevel?: string;
-    guidedPreference?: string;
-    foodDrink?: string[];
-    interests?: string[];
-    // Notes
-    additionalNotes?: string;
-  };
+// Input validation schemas
+const TripPreferencesSchema = z.object({
+  media: z.array(z.object({
+    type: z.string().max(50),
+    url: z.string().max(500),
+    name: z.string().max(200).optional(),
+  })).max(10).optional(),
+  cities: z.array(z.string().max(100)).max(20).optional(),
+  budgetAccommodation: z.number().min(0).max(100).optional(),
+  budgetFlight: z.number().min(0).max(100).optional(),
+  dateFlexibility: z.string().max(50).optional(),
+  startDate: z.string().max(50).optional(),
+  endDate: z.string().max(50).optional(),
+  targetMonth: z.string().max(50).optional(),
+  durationFlexibility: z.string().max(50).optional(),
+  durationDays: z.number().min(1).max(90).optional(),
+  departureCity: z.string().max(100).optional(),
+  flightDirectness: z.string().max(50).optional(),
+  atmosphere: z.array(z.string().max(50)).max(10).optional(),
+  adventureLevel: z.string().max(50).optional(),
+  guidedPreference: z.string().max(50).optional(),
+  foodDrink: z.array(z.string().max(50)).max(10).optional(),
+  interests: z.array(z.string().max(50)).max(20).optional(),
+  additionalNotes: z.string().max(5000).optional(),
+});
+
+const RequestSchema = z.object({
+  nearMissContent: z.string().min(1).max(2000),
+  fullItinerary: z.string().max(100000),
+  tripPreferences: TripPreferencesSchema,
+});
+
+// Helper to verify auth
+async function verifyAuth(req: Request): Promise<{ user: any; error: Response | null }> {
+  const supabaseClient = createClient(
+    Deno.env.get('SUPABASE_URL') ?? '',
+    Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+    { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
+  );
+
+  const { data: { user }, error } = await supabaseClient.auth.getUser();
+  
+  if (error || !user) {
+    return {
+      user: null,
+      error: new Response(
+        JSON.stringify({ error: 'Unauthorized. Please sign in to continue.' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    };
+  }
+  
+  return { user, error: null };
 }
 
 serve(async (req) => {
@@ -40,8 +68,32 @@ serve(async (req) => {
   }
 
   try {
-    const { nearMissContent, fullItinerary, tripPreferences } = await req.json() as AddNearMissRequest;
+    // Verify authentication
+    const { user, error: authError } = await verifyAuth(req);
+    if (authError) {
+      return authError;
+    }
+    console.log("Authenticated user:", user.id);
 
+    // Parse and validate input
+    const body = await req.json();
+    const validationResult = RequestSchema.safeParse(body);
+    
+    if (!validationResult.success) {
+      console.error("Validation error:", validationResult.error.errors);
+      return new Response(
+        JSON.stringify({ 
+          error: 'Invalid input', 
+          details: validationResult.error.errors.map(e => ({
+            field: e.path.join('.'),
+            message: e.message
+          }))
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const { nearMissContent, fullItinerary, tripPreferences } = validationResult.data;
     console.log('Add Near Miss request:', { nearMissContent });
 
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
