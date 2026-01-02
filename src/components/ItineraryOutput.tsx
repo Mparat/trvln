@@ -66,6 +66,12 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
   const [editRequest, setEditRequest] = useState("");
   const [addingNearMiss, setAddingNearMiss] = useState<string | null>(null);
   const [inNearMissSection, setInNearMissSection] = useState(false);
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+    'EXECUTIVE SUMMARY': true,
+    'KEY BOOKINGS & BUDGET': true,
+    'DAY-BY-DAY ITINERARY': true,
+    'ALTERNATIVES & ADDITIONAL OPTIONS': true,
+  });
   const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const {
@@ -406,14 +412,6 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
     return null;
   };
 
-  // State for collapsible sections
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
-    const initial: Record<string, boolean> = {};
-    mainSectionHeaders.forEach(header => {
-      initial[header] = true;
-    });
-    return initial;
-  });
 
   const toggleSection = (section: string) => {
     setOpenSections(prev => ({ ...prev, [section]: !prev[section] }));
