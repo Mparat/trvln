@@ -14,10 +14,28 @@ interface UpdateRequest {
   };
   fullItinerary: string; // for context
   tripPreferences: {
+    // Inspiration
+    media?: { type: string; url: string; name?: string }[];
     cities?: string[];
-    atmosphere?: string[];
-    interests?: string[];
+    // Logistics
     budgetAccommodation?: number;
+    budgetFlight?: number;
+    dateFlexibility?: string;
+    startDate?: string;
+    endDate?: string;
+    targetMonth?: string;
+    durationFlexibility?: string;
+    durationDays?: number;
+    departureCity?: string;
+    flightDirectness?: string;
+    // Vibe
+    atmosphere?: string[];
+    adventureLevel?: string;
+    guidedPreference?: string;
+    foodDrink?: string[];
+    interests?: string[];
+    // Notes
+    additionalNotes?: string;
   };
 }
 
@@ -72,13 +90,27 @@ RULES:
 4. Match the style and detail level of the original
 5. Keep it contextually appropriate for: ${itemContext}`;
 
+    // Build budget label
+    const getBudgetLabel = (value?: number) => {
+      if (!value) return "Moderate";
+      if (value <= 25) return "Budget";
+      if (value <= 50) return "Moderate";
+      if (value <= 75) return "Comfortable";
+      return "Luxury";
+    };
+
     const userPrompt = `CURRENT ITEM:
 ${itemContent}
 
-TRIP CONTEXT:
+FULL TRIP CONTEXT:
 - Destinations: ${tripPreferences.cities?.join(', ') || 'Not specified'}
-- Interests: ${tripPreferences.interests?.join(', ') || 'General'}
+- Budget: ${getBudgetLabel(tripPreferences.budgetAccommodation)}
 - Atmosphere: ${tripPreferences.atmosphere?.join(', ') || 'Balanced'}
+- Adventure level: ${tripPreferences.adventureLevel || 'Active'}
+- Interests: ${tripPreferences.interests?.join(', ') || 'General'}
+- Food preferences: ${tripPreferences.foodDrink?.join(', ') || 'Local cuisine'}
+- Guided preference: ${tripPreferences.guidedPreference || 'Some guided'}
+${tripPreferences.additionalNotes ? `- Additional notes: ${tripPreferences.additionalNotes}` : ''}
 
 FEEDBACK:
 ${instruction}

@@ -21,25 +21,78 @@ serve(async (req) => {
     }
 
     const {
+      media,
       cities,
+      budgetAccommodation,
+      budgetFlight,
+      dateFlexibility,
+      startDate,
+      endDate,
+      targetMonth,
+      durationFlexibility,
+      durationDays,
+      departureCity,
+      flightDirectness,
       atmosphere,
       adventureLevel,
+      guidedPreference,
       foodDrink,
       interests,
       additionalNotes,
-      durationFlexibility,
-      durationDays,
     } = preferences;
 
-    // Build context for theme suggestion
+    // Build budget labels
+    const getBudgetLabel = (value: number) => {
+      if (value <= 25) return "Budget";
+      if (value <= 50) return "Moderate";
+      if (value <= 75) return "Comfortable";
+      return "Luxury";
+    };
+
+    // Build duration context
+    let durationContext = "";
+    switch (durationFlexibility) {
+      case "weekend": durationContext = "2-3 days"; break;
+      case "long-weekend": durationContext = "4-5 days"; break;
+      case "1-week": durationContext = "7 days"; break;
+      case "2-weeks": durationContext = "14 days"; break;
+      case "strict": durationContext = `${durationDays} days`; break;
+      default: durationContext = `approximately ${durationDays} days`;
+    }
+
+    // Build date context
+    let dateContext = "";
+    if (dateFlexibility === "strict" && startDate && endDate) {
+      dateContext = `Fixed dates: ${startDate} to ${endDate}`;
+    } else if (dateFlexibility === "month" && targetMonth) {
+      dateContext = `Target month: ${targetMonth}`;
+    } else {
+      dateContext = "Flexible dates";
+    }
+
+    // Build context for theme suggestion with ALL user inputs
     const context = `
-Destinations: ${cities?.length > 0 ? cities.join(", ") : "Not specified"}
+## INSPIRATION (Must-visit destinations)
+Destinations: ${cities?.length > 0 ? cities.join(", ") : "Not specified - suggest destinations"}
+Media/screenshots uploaded: ${media?.length > 0 ? `${media.length} inspiration images/videos` : "None"}
+
+## LOGISTICS
+Budget (Accommodation): ${getBudgetLabel(budgetAccommodation || 50)}
+Budget (Flights): ${getBudgetLabel(budgetFlight || 50)}
+Duration: ${durationContext}
+Dates: ${dateContext}
+${departureCity ? `Departing from: ${departureCity}` : ""}
+Flight preference: ${flightDirectness === "nonstop" ? "Nonstop preferred" : flightDirectness === "short-layover" ? "Short layovers OK" : "Flexible"}
+
+## VIBE
 Atmosphere: ${atmosphere?.length > 0 ? atmosphere.join(", ") : "Not specified"}
 Adventure level: ${adventureLevel || "Not specified"}
+Guided preference: ${guidedPreference || "some-guided"}
 Food & drink preferences: ${foodDrink?.length > 0 ? foodDrink.join(", ") : "Not specified"}
 Interests (ranked): ${interests?.length > 0 ? interests.join(" > ") : "Not specified"}
-Duration: ${durationFlexibility === "2-weeks" ? "2 weeks" : durationFlexibility === "1-week" ? "1 week" : `${durationDays} days`}
-Additional notes: ${additionalNotes || "None"}
+
+## ADDITIONAL NOTES
+${additionalNotes || "None provided"}
 `.trim();
 
     const systemPrompt = `You are a travel expert. Based on the traveler's inputs, suggest 3 DISTINCT itinerary themes that would appeal to them.
