@@ -440,9 +440,14 @@ Review your planning and determine the final structure for your itinerary. Remem
 
 # URL FORMATTING RULES (CRITICAL):
 
-EVERY activity, tour, restaurant, or experience MUST include a clickable URL. ONLY use these EXACT URL patterns:
+EVERY activity, tour, restaurant, cafe, bar, or experience MUST include a clickable URL. ONLY use these EXACT URL patterns:
 
-**FOR PLACES/RESTAURANTS/ATTRACTIONS** - Use Google Maps search:
+**FOR RESTAURANTS/CAFES/BARS/DINING** - ALWAYS use Google Maps search (this is MANDATORY):
+- Format: https://www.google.com/maps/search/?api=1&query=RESTAURANT+NAME+CITY+COUNTRY
+- Example: [Quintonil](https://www.google.com/maps/search/?api=1&query=Quintonil+Mexico+City)
+- Example: [Cafe de Tacuba](https://www.google.com/maps/search/?api=1&query=Cafe+de+Tacuba+Mexico+City)
+
+**FOR PLACES/ATTRACTIONS** - Use Google Maps search:
 - Format: https://www.google.com/maps/search/?api=1&query=PLACE+NAME+CITY+COUNTRY
 - Example: [Mercado Roma](https://www.google.com/maps/search/?api=1&query=Mercado+Roma+Mexico+City)
 
@@ -565,22 +570,22 @@ For each day, use this structure:
 
 **Dining Options for Day X:**
 
-You must provide 2-3 options for each meal type:
+You must provide 2-3 options for each meal type. EVERY restaurant/cafe/bar MUST include a Google Maps link:
 
 - **Breakfast:**
-  - [Option 1 Name] - [tags: casual/romantic/local/etc.] - Price range: $X-XX - [Source citation]
-  - [Option 2 Name] - [tags] - Price range: $X-XX - [Source citation]
-  - [Option 3 Name if applicable] - [tags] - Price range: $X-XX - [Source citation]
+  - [Restaurant Name](https://www.google.com/maps/search/?api=1&query=Restaurant+Name+City) - [tags: casual/romantic/local/etc.] - Price range: $X-XX
+  - [Option 2](Google Maps link) - [tags] - Price range: $X-XX
+  - [Option 3 if applicable](Google Maps link) - [tags] - Price range: $X-XX
 
 - **Lunch:**
-  - Use same format (2-3 options)
+  - Use same format with Google Maps links (2-3 options)
 
 - **Dinner:**
-  - Use same format (2-3 options)
+  - Use same format with Google Maps links (2-3 options)
 
 - **Bars/Nightlife** (if relevant to user's preferences):
-  - [Option 1] - Vibe description - [Source citation]
-  - [Option 2] - Vibe description - [Source citation]
+  - [Bar/Club Name](Google Maps link) - Vibe description
+  - [Option 2](Google Maps link) - Vibe description
 
 **Transportation:**
 - How to get between locations this day
