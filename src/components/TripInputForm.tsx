@@ -448,7 +448,6 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
                     { value: '1-week', label: '1 week' },
                     { value: '2-weeks', label: '2 weeks' },
                     { value: 'strict', label: 'Exact days' },
-                    { value: 'flexible-days', label: '± few days' },
                     { value: 'flexible', label: 'Flexible' },
                   ].map(opt => (
                     <div key={opt.value}>
