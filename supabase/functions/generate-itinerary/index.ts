@@ -442,10 +442,13 @@ Review your planning and determine the final structure for your itinerary. Remem
 
 EVERY activity, tour, restaurant, cafe, bar, or experience MUST include a clickable URL. ONLY use these EXACT URL patterns:
 
-**FOR RESTAURANTS/CAFES/BARS/DINING** - ALWAYS use Google Maps search (this is MANDATORY):
-- Format: https://www.google.com/maps/search/?api=1&query=RESTAURANT+NAME+CITY+COUNTRY
-- Example: [Quintonil](https://www.google.com/maps/search/?api=1&query=Quintonil+Mexico+City)
-- Example: [Cafe de Tacuba](https://www.google.com/maps/search/?api=1&query=Cafe+de+Tacuba+Mexico+City)
+**FOR RESTAURANTS/CAFES/BARS/DINING** - ALWAYS use SPECIFIC restaurant names with Google Maps:
+- ❌ NEVER use generic searches like "restaurants near X" or "cafes in Y neighborhood"
+- ✅ ALWAYS name the SPECIFIC restaurant/cafe/bar (e.g., "Narisawa", "Gonpachi Nishi-Azabu", "Bar High Five")
+- Format: https://www.google.com/maps/search/?api=1&query=SPECIFIC+RESTAURANT+NAME+CITY
+- Example: [Narisawa](https://www.google.com/maps/search/?api=1&query=Narisawa+Tokyo)
+- Example: [Ichiran Shibuya](https://www.google.com/maps/search/?api=1&query=Ichiran+Shibuya+Tokyo)
+- Example: [Bar High Five](https://www.google.com/maps/search/?api=1&query=Bar+High+Five+Ginza+Tokyo)
 
 **FOR PLACES/ATTRACTIONS** - Use Google Maps search:
 - Format: https://www.google.com/maps/search/?api=1&query=PLACE+NAME+CITY+COUNTRY
@@ -570,22 +573,23 @@ For each day, use this structure:
 
 **Dining Options for Day X:**
 
-You must provide 2-3 options for each meal type. EVERY restaurant/cafe/bar MUST include a Google Maps link:
+CRITICAL: You must provide EXACTLY 2 SPECIFIC restaurant recommendations for each meal. NEVER use generic searches like "restaurants near X" or "cafes in Y". Always name the actual restaurant.
 
-- **Breakfast:**
-  - [Restaurant Name](https://www.google.com/maps/search/?api=1&query=Restaurant+Name+City) - [tags: casual/romantic/local/etc.] - Price range: $X-XX
-  - [Option 2](Google Maps link) - [tags] - Price range: $X-XX
-  - [Option 3 if applicable](Google Maps link) - [tags] - Price range: $X-XX
+- **Breakfast:** (exactly 2 specific restaurants)
+  - [Actual Restaurant Name](https://www.google.com/maps/search/?api=1&query=Restaurant+Name+City) - [tags: casual/romantic/local/etc.] - Price range: $X-XX
+  - [Second Specific Restaurant](https://www.google.com/maps/search/?api=1&query=Restaurant+Name+City) - [tags] - Price range: $X-XX
 
-- **Lunch:**
-  - Use same format with Google Maps links (2-3 options)
+- **Lunch:** (exactly 2 specific restaurants)
+  - [Actual Restaurant Name](Google Maps link) - [tags] - Price range: $X-XX
+  - [Second Specific Restaurant](Google Maps link) - [tags] - Price range: $X-XX
 
-- **Dinner:**
-  - Use same format with Google Maps links (2-3 options)
+- **Dinner:** (exactly 2 specific restaurants)
+  - [Actual Restaurant Name](Google Maps link) - [tags] - Price range: $X-XX
+  - [Second Specific Restaurant](Google Maps link) - [tags] - Price range: $X-XX
 
-- **Bars/Nightlife** (if relevant to user's preferences):
-  - [Bar/Club Name](Google Maps link) - Vibe description
-  - [Option 2](Google Maps link) - Vibe description
+- **Bars/Nightlife** (if relevant, exactly 2 specific venues):
+  - [Specific Bar Name](Google Maps link) - Vibe description
+  - [Second Specific Bar](Google Maps link) - Vibe description
 
 **Transportation:**
 - How to get between locations this day
