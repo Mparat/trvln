@@ -150,13 +150,31 @@ export default function SharedItinerary() {
     'ALTERNATIVES & ADDITIONAL OPTIONS': true,
   });
 
+  const [isLoading, setIsLoading] = useState(true);
+
   useEffect(() => {
     const id = searchParams.get("id");
     if (id) {
-      const stored = localStorage.getItem(`itinerary-${id}`);
-      if (stored) {
-        setItinerary(stored);
-      }
+      // Small delay to ensure localStorage is ready
+      const checkStorage = () => {
+        const stored = localStorage.getItem(`itinerary-${id}`);
+        if (stored) {
+          setItinerary(stored);
+          setIsLoading(false);
+        } else {
+          // Retry once after a brief delay
+          setTimeout(() => {
+            const retryStored = localStorage.getItem(`itinerary-${id}`);
+            if (retryStored) {
+              setItinerary(retryStored);
+            }
+            setIsLoading(false);
+          }, 100);
+        }
+      };
+      checkStorage();
+    } else {
+      setIsLoading(false);
     }
   }, [searchParams]);
 
@@ -305,6 +323,17 @@ export default function SharedItinerary() {
       return renderItem(item, inNearMiss);
     });
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-10 h-10 rounded-full border-4 border-primary/30 border-t-primary animate-spin mx-auto mb-4" />
+          <p className="text-muted-foreground">Loading itinerary...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!itinerary) {
     return (
