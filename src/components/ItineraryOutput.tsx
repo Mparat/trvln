@@ -3,7 +3,7 @@ import {
   MapPin, Clock, DollarSign, Utensils, Camera, Star, Plane, Sun, 
   CloudRain, Sparkles, AlertTriangle, ExternalLink, Edit3, Send,
   Mountain, Building, Trees, Tent, Heart, Zap, PartyPopper,
-  Lightbulb, X, Plus, Loader2, ChevronDown, Share2
+  Lightbulb, X, Plus, Loader2, ChevronDown, Share2, ExternalLink as OpenIcon
 } from "lucide-react";
 import { jsPDF } from "jspdf";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -892,15 +892,30 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
       {/* Header with Export button */}
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-display font-bold text-foreground">Your Itinerary</h2>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleExportPDF}
-          className="gap-2"
-        >
-          <Share2 className="w-4 h-4" />
-          Export PDF
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const encodedData = btoa(encodeURIComponent(itineraryText));
+              const url = `${window.location.origin}/itinerary?data=${encodedData}`;
+              window.open(url, '_blank');
+            }}
+            className="gap-2"
+          >
+            <OpenIcon className="w-4 h-4" />
+            Open
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportPDF}
+            className="gap-2"
+          >
+            <Share2 className="w-4 h-4" />
+            Export PDF
+          </Button>
+        </div>
       </div>
       {/* Edit functionality */}
       {onEdit && (
