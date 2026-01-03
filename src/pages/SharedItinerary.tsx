@@ -151,13 +151,11 @@ export default function SharedItinerary() {
   });
 
   useEffect(() => {
-    const data = searchParams.get("data");
-    if (data) {
-      try {
-        const decoded = decodeURIComponent(atob(data));
-        setItinerary(decoded);
-      } catch (e) {
-        console.error("Failed to decode itinerary data");
+    const id = searchParams.get("id");
+    if (id) {
+      const stored = localStorage.getItem(`itinerary-${id}`);
+      if (stored) {
+        setItinerary(stored);
       }
     }
   }, [searchParams]);
