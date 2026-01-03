@@ -428,61 +428,266 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
     const maxLineWidth = pageWidth - margin * 2;
     let yPosition = margin;
 
-    const addText = (text: string, fontSize: number, isBold = false, indent = 0) => {
-      doc.setFontSize(fontSize);
-      doc.setFont("helvetica", isBold ? "bold" : "normal");
+    // Color palette (RGB values)
+    const colors = {
+      primary: [59, 130, 246] as [number, number, number],     // Blue
+      foreground: [30, 30, 30] as [number, number, number],    // Dark gray
+      muted: [100, 100, 100] as [number, number, number],      // Medium gray
+      accent: [168, 85, 247] as [number, number, number],      // Purple
+      success: [34, 197, 94] as [number, number, number],      // Green
+      warning: [245, 158, 11] as [number, number, number],     // Amber
+    };
+
+    const checkPageBreak = (neededSpace: number) => {
+      if (yPosition + neededSpace > pageHeight - margin) {
+        doc.addPage();
+        yPosition = margin;
+      }
+    };
+
+    // Extract links from text and return clean text + link positions
+    const extractLinks = (text: string): { cleanText: string; links: { text: string; url: string; start: number; end: number }[] } => {
+      const links: { text: string; url: string; start: number; end: number }[] = [];
+      let cleanText = text;
+      const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+      let match;
+      let offset = 0;
+
+      while ((match = linkRegex.exec(text)) !== null) {
+        const fullMatch = match[0];
+        const linkText = match[1];
+        const url = match[2];
+        const start = match.index - offset;
+        const end = start + linkText.length;
+        
+        links.push({ text: linkText, url, start, end });
+        cleanText = cleanText.replace(fullMatch, linkText);
+        offset += fullMatch.length - linkText.length;
+      }
+
+      return { cleanText, links };
+    };
+
+    // Add text with formatting and clickable links
+    const addFormattedText = (
+      text: string, 
+      fontSize: number, 
+      options: { 
+        isBold?: boolean; 
+        indent?: number; 
+        color?: [number, number, number];
+        bulletChar?: string;
+      } = {}
+    ) => {
+      const { isBold = false, indent = 0, color = colors.foreground, bulletChar } = options;
       
-      const cleanText = text
-        .replace(/\*\*([^*]+)\*\*/g, '$1')
-        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      // Clean text while preserving link structure for now
+      let processedText = text
         .replace(/^#+\s*/, '')
-        .replace(/^-\s*/, '• ')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
         .trim();
       
-      if (!cleanText) return;
+      if (!processedText) return;
+
+      // Add bullet if specified
+      if (bulletChar) {
+        processedText = `${bulletChar} ${processedText}`;
+      }
+
+      // Extract links
+      const { cleanText, links } = extractLinks(processedText);
+      
+      doc.setFontSize(fontSize);
+      doc.setTextColor(...color);
       
       const lines = doc.splitTextToSize(cleanText, maxLineWidth - indent);
       
-      for (const line of lines) {
-        if (yPosition > pageHeight - margin) {
-          doc.addPage();
-          yPosition = margin;
+      for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+        const line = lines[lineIdx];
+        checkPageBreak(fontSize * 0.5);
+        
+        // Find links in this line
+        let charOffset = 0;
+        for (let i = 0; i < lineIdx; i++) {
+          charOffset += lines[i].length + 1; // +1 for space/newline
         }
-        doc.text(line, margin + indent, yPosition);
+        
+        const lineLinks = links.filter(l => 
+          l.start >= charOffset && l.start < charOffset + line.length
+        );
+
+        if (lineLinks.length > 0) {
+          // Render text with links
+          let xPos = margin + indent;
+          let currentPos = 0;
+          
+          for (const link of lineLinks) {
+            const localStart = link.start - charOffset;
+            const localEnd = Math.min(link.end - charOffset, line.length);
+            
+            // Text before link
+            if (localStart > currentPos) {
+              const beforeText = line.substring(currentPos, localStart);
+              doc.setFont("helvetica", isBold ? "bold" : "normal");
+              doc.setTextColor(...color);
+              doc.text(beforeText, xPos, yPosition);
+              xPos += doc.getTextWidth(beforeText);
+            }
+            
+            // Link text (blue and underlined)
+            const linkText = line.substring(localStart, localEnd);
+            doc.setFont("helvetica", isBold ? "bold" : "normal");
+            doc.setTextColor(...colors.primary);
+            doc.text(linkText, xPos, yPosition);
+            
+            // Add clickable link annotation
+            const linkWidth = doc.getTextWidth(linkText);
+            doc.link(xPos, yPosition - fontSize * 0.3, linkWidth, fontSize * 0.4, { url: link.url });
+            
+            xPos += linkWidth;
+            currentPos = localEnd;
+          }
+          
+          // Remaining text after last link
+          if (currentPos < line.length) {
+            const afterText = line.substring(currentPos);
+            doc.setFont("helvetica", isBold ? "bold" : "normal");
+            doc.setTextColor(...color);
+            doc.text(afterText, xPos, yPosition);
+          }
+        } else {
+          // No links, render normally
+          doc.setFont("helvetica", isBold ? "bold" : "normal");
+          doc.text(line, margin + indent, yPosition);
+        }
+        
         yPosition += fontSize * 0.5;
       }
       yPosition += 2;
     };
 
-    addText("Travel Itinerary", 20, true);
-    yPosition += 5;
+    // Add section divider line
+    const addDivider = () => {
+      checkPageBreak(8);
+      doc.setDrawColor(200, 200, 200);
+      doc.setLineWidth(0.5);
+      doc.line(margin, yPosition, pageWidth - margin, yPosition);
+      yPosition += 6;
+    };
 
+    // Title
+    doc.setFillColor(240, 245, 255);
+    doc.rect(0, 0, pageWidth, 35, 'F');
+    yPosition = 25;
+    doc.setFontSize(24);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...colors.primary);
+    doc.text("Travel Itinerary", margin, yPosition);
+    yPosition += 15;
+
+    // Date generated
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...colors.muted);
+    doc.text(`Generated on ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}`, margin, yPosition);
+    yPosition += 10;
+
+    addDivider();
+
+    // Process ALL items from the itinerary
     items.forEach((item) => {
       const cleanedLine = cleanLine(item.content).trim();
       if (!cleanedLine) return;
 
-      if (isMainSectionHeader(cleanedLine)) {
-        yPosition += 5;
-        addText(cleanedLine.replace(/^#+\s*/, ''), 14, true);
-        yPosition += 3;
+      const mainSection = isMainSectionHeader(cleanedLine);
+      if (mainSection) {
+        // Main section header with background
+        checkPageBreak(15);
+        yPosition += 8;
+        doc.setFillColor(245, 247, 250);
+        doc.roundedRect(margin - 5, yPosition - 6, pageWidth - margin * 2 + 10, 12, 2, 2, 'F');
+        doc.setFontSize(14);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(...colors.foreground);
+        doc.text(mainSection, margin, yPosition + 2);
+        yPosition += 12;
       } else if (item.type === 'day-header' || item.type === 'section-header' || isSectionHeader(cleanedLine)) {
-        yPosition += 3;
-        addText(cleanedLine.replace(/^#+\s*/, ''), 12, true);
-      } else if (cleanedLine.match(/^(Morning|Afternoon|Evening|Night|Breakfast|Lunch|Dinner)/i)) {
-        yPosition += 2;
-        addText(cleanedLine.replace(/^#+\s*/, ''), 11, true, 5);
-      } else if (item.type === 'bullet') {
-        addText(cleanedLine, 10, false, 10);
+        // Day/Section headers
+        checkPageBreak(12);
+        yPosition += 6;
+        
+        const dayMatch = cleanedLine.match(/Day\s+(\d+)/i);
+        if (dayMatch) {
+          // Day header with circle number
+          const dayNum = dayMatch[1];
+          doc.setFillColor(...colors.primary);
+          doc.circle(margin + 5, yPosition - 2, 5, 'F');
+          doc.setFontSize(10);
+          doc.setFont("helvetica", "bold");
+          doc.setTextColor(255, 255, 255);
+          doc.text(dayNum, margin + 5, yPosition, { align: 'center' });
+          
+          doc.setFontSize(13);
+          doc.setTextColor(...colors.foreground);
+          doc.text(cleanedLine.replace(/^#+\s*/, ''), margin + 15, yPosition);
+        } else {
+          addFormattedText(cleanedLine, 12, { isBold: true, color: colors.foreground });
+        }
+        yPosition += 4;
+      } else if (cleanedLine.match(/^\*?\*?(Morning|Afternoon|Evening|Night|Meals|Logistics|Getting there|How to book)\*?\*?:?$/i)) {
+        // Time-of-day subheaders
+        checkPageBreak(10);
+        yPosition += 4;
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(...colors.muted);
+        const timeText = cleanedLine.replace(/\*\*/g, '').replace(/:$/, '').toUpperCase();
+        doc.text(timeText, margin + 8, yPosition);
+        yPosition += 4;
+      } else if (cleanedLine.startsWith('-') || cleanedLine.startsWith('•')) {
+        // Bullet points
+        const content = cleanedLine.replace(/^[-•]\s*/, '');
+        const indentLevel = item.indentLevel || 0;
+        const bulletIndent = 10 + (indentLevel * 8);
+        
+        // Determine icon/bullet style based on content
+        const hasFlight = /flight|airport|airline|depart|arrive/i.test(content);
+        const hasFood = /restaurant|eat|food|breakfast|lunch|dinner|café|cafe|meal/i.test(content);
+        const hasPhoto = /photo|view|scenic|visit|see|explore/i.test(content);
+        const hasTip = /tip|recommend|don't miss|must|should|pro tip/i.test(content);
+        
+        let bulletColor = colors.foreground;
+        if (hasFlight) bulletColor = [14, 165, 233]; // Sky blue
+        else if (hasFood) bulletColor = [249, 115, 22]; // Orange
+        else if (hasPhoto) bulletColor = [59, 130, 246]; // Blue
+        else if (hasTip) bulletColor = [245, 158, 11]; // Amber
+
+        addFormattedText(content, 10, { 
+          indent: bulletIndent, 
+          bulletChar: '•',
+          color: bulletColor as [number, number, number]
+        });
       } else {
-        addText(cleanedLine, 10, false, 5);
+        // Regular paragraph text
+        addFormattedText(cleanedLine, 10, { indent: 8, color: colors.muted });
       }
     });
+
+    // Footer on last page
+    const pageCount = doc.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(...colors.muted);
+      doc.text(`Page ${i} of ${pageCount}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
+    }
 
     doc.save("travel-itinerary.pdf");
     
     toast({
       title: "PDF Exported",
-      description: "Your itinerary has been downloaded.",
+      description: "Your full itinerary has been downloaded with clickable links.",
     });
   }, [items]);
 
