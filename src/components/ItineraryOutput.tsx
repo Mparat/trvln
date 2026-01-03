@@ -419,6 +419,73 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
     }
   }, [itineraryText, tripPreferences, findItemsInSection, insertItemAfter]);
 
+  // Export itinerary to PDF - must be before early returns
+  const handleExportPDF = useCallback(() => {
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 20;
+    const maxLineWidth = pageWidth - margin * 2;
+    let yPosition = margin;
+
+    const addText = (text: string, fontSize: number, isBold = false, indent = 0) => {
+      doc.setFontSize(fontSize);
+      doc.setFont("helvetica", isBold ? "bold" : "normal");
+      
+      const cleanText = text
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .replace(/^#+\s*/, '')
+        .replace(/^-\s*/, '• ')
+        .trim();
+      
+      if (!cleanText) return;
+      
+      const lines = doc.splitTextToSize(cleanText, maxLineWidth - indent);
+      
+      for (const line of lines) {
+        if (yPosition > pageHeight - margin) {
+          doc.addPage();
+          yPosition = margin;
+        }
+        doc.text(line, margin + indent, yPosition);
+        yPosition += fontSize * 0.5;
+      }
+      yPosition += 2;
+    };
+
+    addText("Travel Itinerary", 20, true);
+    yPosition += 5;
+
+    items.forEach((item) => {
+      const cleanedLine = cleanLine(item.content).trim();
+      if (!cleanedLine) return;
+
+      if (isMainSectionHeader(cleanedLine)) {
+        yPosition += 5;
+        addText(cleanedLine.replace(/^#+\s*/, ''), 14, true);
+        yPosition += 3;
+      } else if (item.type === 'day-header' || item.type === 'section-header' || isSectionHeader(cleanedLine)) {
+        yPosition += 3;
+        addText(cleanedLine.replace(/^#+\s*/, ''), 12, true);
+      } else if (cleanedLine.match(/^(Morning|Afternoon|Evening|Night|Breakfast|Lunch|Dinner)/i)) {
+        yPosition += 2;
+        addText(cleanedLine.replace(/^#+\s*/, ''), 11, true, 5);
+      } else if (item.type === 'bullet') {
+        addText(cleanedLine, 10, false, 10);
+      } else {
+        addText(cleanedLine, 10, false, 5);
+      }
+    });
+
+    doc.save("travel-itinerary.pdf");
+    
+    toast({
+      title: "PDF Exported",
+      description: "Your itinerary has been downloaded.",
+    });
+  }, [items]);
+
   if (isLoading) {
     return (
       <div className="space-y-6 animate-pulse">
@@ -614,75 +681,6 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
     });
   };
 
-  // Export itinerary to PDF
-  const handleExportPDF = useCallback(() => {
-    const doc = new jsPDF();
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
-    const margin = 20;
-    const maxLineWidth = pageWidth - margin * 2;
-    let yPosition = margin;
-
-    const addText = (text: string, fontSize: number, isBold = false, indent = 0) => {
-      doc.setFontSize(fontSize);
-      doc.setFont("helvetica", isBold ? "bold" : "normal");
-      
-      // Clean markdown formatting for PDF
-      const cleanText = text
-        .replace(/\*\*([^*]+)\*\*/g, '$1')
-        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-        .replace(/^#+\s*/, '')
-        .replace(/^-\s*/, '• ')
-        .trim();
-      
-      if (!cleanText) return;
-      
-      const lines = doc.splitTextToSize(cleanText, maxLineWidth - indent);
-      
-      for (const line of lines) {
-        if (yPosition > pageHeight - margin) {
-          doc.addPage();
-          yPosition = margin;
-        }
-        doc.text(line, margin + indent, yPosition);
-        yPosition += fontSize * 0.5;
-      }
-      yPosition += 2;
-    };
-
-    // Title
-    addText("Travel Itinerary", 20, true);
-    yPosition += 5;
-
-    // Process each item
-    items.forEach((item) => {
-      const cleanedLine = cleanLine(item.content).trim();
-      if (!cleanedLine) return;
-
-      if (isMainSectionHeader(cleanedLine)) {
-        yPosition += 5;
-        addText(cleanedLine.replace(/^#+\s*/, ''), 14, true);
-        yPosition += 3;
-      } else if (item.type === 'day-header' || item.type === 'section-header' || isSectionHeader(cleanedLine)) {
-        yPosition += 3;
-        addText(cleanedLine.replace(/^#+\s*/, ''), 12, true);
-      } else if (cleanedLine.match(/^(Morning|Afternoon|Evening|Night|Breakfast|Lunch|Dinner)/i)) {
-        yPosition += 2;
-        addText(cleanedLine.replace(/^#+\s*/, ''), 11, true, 5);
-      } else if (item.type === 'bullet') {
-        addText(cleanedLine, 10, false, 10);
-      } else {
-        addText(cleanedLine, 10, false, 5);
-      }
-    });
-
-    doc.save("travel-itinerary.pdf");
-    
-    toast({
-      title: "PDF Exported",
-      description: "Your itinerary has been downloaded.",
-    });
-  }, [items]);
 
   return (
     <div className="space-y-6">
