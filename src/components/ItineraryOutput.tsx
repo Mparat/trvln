@@ -897,8 +897,9 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
             variant="outline"
             size="sm"
             onClick={() => {
-              const encodedData = btoa(encodeURIComponent(itineraryText));
-              const url = `${window.location.origin}/itinerary?data=${encodedData}`;
+              const id = crypto.randomUUID();
+              localStorage.setItem(`itinerary-${id}`, itineraryText);
+              const url = `${window.location.origin}/itinerary?id=${id}`;
               window.open(url, '_blank');
             }}
             className="gap-2"
