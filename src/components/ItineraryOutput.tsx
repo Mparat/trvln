@@ -782,7 +782,8 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
       const indentLevel = item.indentLevel;
       
       const parsedContent = parseInlineContent(content);
-      const marginLeft = 0.5 + (indentLevel * 1);
+      // Increased multiplier for better visual hierarchy (1.25rem per level)
+      const marginLeft = 0.5 + (indentLevel * 1.25);
       
       return (
         <div 

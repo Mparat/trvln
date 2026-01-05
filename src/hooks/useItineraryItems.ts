@@ -31,30 +31,57 @@ export const parseItineraryToItems = (itinerary: string): ItineraryItem[] => {
   const items: ItineraryItem[] = [];
   let currentDayContext = '';
   let currentSectionContext = '';
+  
+  // Track section depth for context-aware indentation
+  // 0 = top-level (## headers), 1 = sub-section (### headers), 2 = time period (#### headers)
+  let currentSectionDepth = 0;
 
   lines.forEach((line, index) => {
     const trimmedLine = line.trim();
     if (!trimmedLine) return;
 
-    // Detect indentation level
-    const indentMatch = line.match(/^(\s*)/);
-    const indentLevel = indentMatch ? Math.floor(indentMatch[1].length / 2) : 0;
-
-    // Determine item type
-    let type: ItineraryItem['type'] = 'text';
+    // Detect markdown header level (## = depth 0, ### = depth 1, #### = depth 2)
+    const headerMatch = trimmedLine.match(/^(#{2,4})\s+/);
     
-    if (trimmedLine.match(/^(Day\s+\d+|##\s*Day)/i)) {
+    // Detect bullet indentation from leading spaces in original line
+    const indentMatch = line.match(/^(\s*)/);
+    const rawSpaceIndent = indentMatch ? Math.floor(indentMatch[1].length / 2) : 0;
+
+    // Determine item type and calculate context-aware indent level
+    let type: ItineraryItem['type'] = 'text';
+    let indentLevel = rawSpaceIndent;
+    
+    if (trimmedLine.match(/^(#{2,4}\s*)?(Day\s+\d+)/i)) {
       type = 'day-header';
       currentDayContext = trimmedLine;
       currentSectionContext = '';
-    } else if (trimmedLine.match(/^(##\s*)?(Trip Summary|Book First|Near Misses|Alternative Guided|Assumptions|High-Risk|Flights?|Accommodation|Budget)/i)) {
-      type = 'special-section';
-      currentSectionContext = trimmedLine;
-    } else if (trimmedLine.match(/^\*?\*?(Morning|Afternoon|Evening|Night|Meals|Logistics)\*?\*?:?$/i)) {
+      currentSectionDepth = 0;
+      indentLevel = 0;
+    } else if (headerMatch) {
+      // Markdown headers set section depth based on # count
+      const headerLevel = headerMatch[1].length; // 2, 3, or 4
+      currentSectionDepth = headerLevel - 2; // ## = 0, ### = 1, #### = 2
+      
+      if (trimmedLine.match(/^(#{2,4}\s*)?(Trip Summary|Book First|Near Misses|Alternative Guided|Assumptions|High-Risk|Flights?|Flight Details|Getting There|Accommodation|Where to Stay|Budget|Complete Budget)/i)) {
+        type = 'special-section';
+        currentSectionContext = trimmedLine;
+      } else if (trimmedLine.match(/^(#{2,4}\s*)?(Morning|Afternoon|Evening|Night|Meals|Logistics|Dinner Options|Lunch Options|Breakfast Options)/i)) {
+        type = 'section-header';
+        currentSectionContext = trimmedLine;
+      } else {
+        type = 'section-header';
+        currentSectionContext = trimmedLine;
+      }
+      indentLevel = 0; // Headers themselves aren't indented
+    } else if (trimmedLine.match(/^\*?\*?(Morning|Afternoon|Evening|Night|Meals|Logistics|Getting there|How to book)\*?\*?:?$/i)) {
       type = 'section-header';
       currentSectionContext = trimmedLine;
+      currentSectionDepth = 2; // Time periods are like #### level
+      indentLevel = 0;
     } else if (trimmedLine.startsWith('-') || trimmedLine.startsWith('•')) {
       type = 'bullet';
+      // Bullets inherit depth from current section + any additional raw indentation
+      indentLevel = currentSectionDepth + rawSpaceIndent;
     }
 
     const context = [currentDayContext, currentSectionContext].filter(Boolean).join(' > ');
