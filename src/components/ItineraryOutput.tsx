@@ -730,26 +730,32 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
     
     const isNearMissItem = currentInNearMiss && item.type === 'bullet';
     
-    // Header items (## Day 1, ## Flights, etc.)
-    if (item.type === 'day-header' || item.type === 'section-header' || isSectionHeader(trimmedLine)) {
-      const dayMatch = trimmedLine.match(/Day\s+(\d+)/i);
-      const dayNumber = dayMatch ? parseInt(dayMatch[1]) : null;
-      
+    // Day headers only (## Day 1, Day 2, etc.) - big font
+    const dayMatch = trimmedLine.match(/Day\s+(\d+)/i);
+    const dayNumber = dayMatch ? parseInt(dayMatch[1]) : null;
+    
+    if (dayNumber && (item.type === 'day-header' || trimmedLine.match(/^(#+\s*)?Day\s+\d+/i))) {
       return (
         <div key={item.id} className="mt-8 mb-4 first:mt-0 pl-2">
           <div className="flex items-center gap-3">
-            {dayNumber && (
-              <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
-                <span className="text-2xl font-bold text-primary">{dayNumber}</span>
-              </div>
-            )}
-            <h3 className={cn(
-              "font-display font-bold text-foreground",
-              dayNumber ? "text-3xl" : "text-2xl"
-            )}>
+            <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
+              <span className="text-2xl font-bold text-primary">{dayNumber}</span>
+            </div>
+            <h3 className="font-display font-bold text-foreground text-3xl">
               {parseInlineContent(trimmedLine.replace(/^#+\s*/, ''))}
             </h3>
           </div>
+        </div>
+      );
+    }
+    
+    // Section headers (Flights, Budget, etc.) - medium font
+    if (item.type === 'section-header' || isSectionHeader(trimmedLine)) {
+      return (
+        <div key={item.id} className="mt-6 mb-3 pl-2">
+          <h4 className="text-lg font-semibold text-foreground">
+            {parseInlineContent(trimmedLine.replace(/^#+\s*/, ''))}
+          </h4>
         </div>
       );
     }
@@ -840,11 +846,17 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
       );
     }
     
-    // Regular paragraph text
+    // Regular paragraph text - render as bulleted item for consistency
     return (
-      <p key={item.id} className="text-foreground/80 leading-relaxed py-1 pl-3">
-        {parseInlineContent(trimmedLine.replace(/^#+\s*/, ''))}
-      </p>
+      <div 
+        key={item.id}
+        className="flex items-start gap-3 py-2 px-3 pl-5"
+      >
+        <div className="w-2 h-2 rounded-full mt-2 shrink-0 bg-primary/60" />
+        <p className="text-foreground/90 leading-relaxed">
+          {parseInlineContent(trimmedLine.replace(/^#+\s*/, ''))}
+        </p>
+      </div>
     );
   };
 
