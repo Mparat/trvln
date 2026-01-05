@@ -896,20 +896,6 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
           <Button
             variant="outline"
             size="sm"
-            onClick={() => {
-              const id = crypto.randomUUID();
-              localStorage.setItem(`itinerary-${id}`, itineraryText);
-              const url = `${window.location.origin}/itinerary?id=${id}`;
-              window.open(url, '_blank');
-            }}
-            className="gap-2"
-          >
-            <OpenIcon className="w-4 h-4" />
-            Open
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
             onClick={handleExportPDF}
             className="gap-2"
           >
