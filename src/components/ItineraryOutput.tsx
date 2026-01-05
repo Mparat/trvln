@@ -18,6 +18,7 @@ interface ItineraryOutputProps {
   itinerary: string;
   isLoading: boolean;
   onEdit?: (editRequest: string) => void;
+  themeTitle?: string;
   tripPreferences?: {
     cities?: string[];
     atmosphere?: string[];
@@ -27,7 +28,12 @@ interface ItineraryOutputProps {
 }
 
 
-export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences }: ItineraryOutputProps) {
+// Strip emojis for PDF export (jsPDF's Helvetica doesn't support Unicode emojis)
+const stripEmojis = (text: string): string => {
+  return text.replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{1F000}-\u{1FFFF}]/gu, '').replace(/\s+/g, ' ').trim();
+};
+
+export function ItineraryOutput({ itinerary, isLoading, onEdit, themeTitle, tripPreferences }: ItineraryOutputProps) {
   const [editMode, setEditMode] = useState(false);
   const [editRequest, setEditRequest] = useState("");
   const [addingNearMiss, setAddingNearMiss] = useState<string | null>(null);
@@ -428,14 +434,12 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
     const maxLineWidth = pageWidth - margin * 2;
     let yPosition = margin;
 
-    // Color palette (RGB values)
+    // Color palette (RGB values) - matches web view styling
     const colors = {
       primary: [59, 130, 246] as [number, number, number],     // Blue
-      foreground: [30, 30, 30] as [number, number, number],    // Dark gray
-      muted: [100, 100, 100] as [number, number, number],      // Medium gray
-      accent: [168, 85, 247] as [number, number, number],      // Purple
-      success: [34, 197, 94] as [number, number, number],      // Green
-      warning: [245, 158, 11] as [number, number, number],     // Amber
+      foreground: [15, 23, 42] as [number, number, number],    // Slate-900 (darker text)
+      muted: [71, 85, 105] as [number, number, number],        // Slate-600
+      accent: [249, 115, 22] as [number, number, number],      // Orange
     };
 
     const checkPageBreak = (neededSpace: number) => {
@@ -481,8 +485,8 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
     ) => {
       const { isBold = false, indent = 0, color = colors.foreground, bulletChar } = options;
       
-      // Clean text while preserving link structure for now
-      let processedText = text
+      // Strip emojis and clean text
+      let processedText = stripEmojis(text)
         .replace(/^#+\s*/, '')
         .replace(/\*\*([^*]+)\*\*/g, '$1')
         .trim();
@@ -575,14 +579,15 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
       yPosition += 6;
     };
 
-    // Title
+    // Title - use theme title if available
+    const pdfTitle = themeTitle ? stripEmojis(themeTitle) : "Travel Itinerary";
     doc.setFillColor(240, 245, 255);
     doc.rect(0, 0, pageWidth, 35, 'F');
     yPosition = 25;
-    doc.setFontSize(24);
+    doc.setFontSize(22);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(...colors.primary);
-    doc.text("Travel Itinerary", margin, yPosition);
+    doc.text(pdfTitle, margin, yPosition);
     yPosition += 15;
 
     // Date generated
@@ -645,27 +650,15 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
         doc.text(timeText, margin + 8, yPosition);
         yPosition += 4;
       } else if (cleanedLine.startsWith('-') || cleanedLine.startsWith('•')) {
-        // Bullet points
+        // Bullet points - consistent foreground color (no category-based coloring)
         const content = cleanedLine.replace(/^[-•]\s*/, '');
         const indentLevel = item.indentLevel || 0;
         const bulletIndent = 10 + (indentLevel * 8);
-        
-        // Determine icon/bullet style based on content
-        const hasFlight = /flight|airport|airline|depart|arrive/i.test(content);
-        const hasFood = /restaurant|eat|food|breakfast|lunch|dinner|café|cafe|meal/i.test(content);
-        const hasPhoto = /photo|view|scenic|visit|see|explore/i.test(content);
-        const hasTip = /tip|recommend|don't miss|must|should|pro tip/i.test(content);
-        
-        let bulletColor = colors.foreground;
-        if (hasFlight) bulletColor = [14, 165, 233]; // Sky blue
-        else if (hasFood) bulletColor = [249, 115, 22]; // Orange
-        else if (hasPhoto) bulletColor = [59, 130, 246]; // Blue
-        else if (hasTip) bulletColor = [245, 158, 11]; // Amber
 
         addFormattedText(content, 10, { 
           indent: bulletIndent, 
           bulletChar: '•',
-          color: bulletColor as [number, number, number]
+          color: colors.foreground
         });
       } else {
         // Regular paragraph text
@@ -683,7 +676,9 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
       doc.text(`Page ${i} of ${pageCount}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
     }
 
-    doc.save("travel-itinerary.pdf");
+    // Save with theme-based filename
+    const safeFilename = pdfTitle.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '-').toLowerCase();
+    doc.save(`${safeFilename || 'travel-itinerary'}.pdf`);
     
     toast({
       title: "PDF Exported",

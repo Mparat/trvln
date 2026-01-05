@@ -347,6 +347,7 @@ const Index = () => {
                   itinerary={currentItinerary?.content || ""} 
                   isLoading={isGenerating && !currentItinerary?.content}
                   onEdit={handleEdit}
+                  themeTitle={currentItinerary ? `${currentItinerary.emoji} ${currentItinerary.name}` : undefined}
                   tripPreferences={preferences}
                 />
               </div>
