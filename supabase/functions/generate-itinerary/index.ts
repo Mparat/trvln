@@ -887,28 +887,114 @@ EVERY activity, tour, restaurant, cafe, bar, or experience MUST include a clicka
 - Short URLs (goo.gl, bit.ly, maps.app.goo.gl)
 - Viator or TripAdvisor deep links (use search URLs instead)
 
-## Formatting Requirements
+## Formatting Requirements (CRITICAL - FOLLOW EXACTLY)
 
-Follow these formatting guidelines:
+### Header Hierarchy (use these EXACT patterns):
+- **## SECTION TITLE** - Main sections (EXECUTIVE SUMMARY, KEY BOOKINGS, etc.) - ALL CAPS
+- **## Day X: Location - Theme** - Day headers, always "Day" + number + colon + location
+- **### Sub-section Title** - Sub-sections within main sections (Flights, Accommodation, Budget Breakdown)
+- **#### Time Period** - Time-of-day headers within days (Morning, Afternoon, Evening)
 
-- Use clear headers with proper hierarchy (##, ###, etc.)
-- Use bullet points and numbered lists for easy scanning
-- **Bold** key information (prices, times, names of places)
-- Use emojis to enhance readability:
-  - ✈️ for flights
-  - 🏨 for accommodation
-  - 🍽️ for dining
-  - 🚌 for transportation
-  - 💰 for budget items
-- Include activity tags in brackets: [nature] [cultural] [adventure] [food & drink] [educational] [photo-worthy] [romantic] [family-friendly]
-- Organize information hierarchically so users can skim for overview or dive deep into details
-- Use consistent formatting for similar items (all restaurants follow same format, all activities follow same format, etc.)
-- NEVER use asterisks (*) for bullet points - use hyphens (-) only
-- NEVER duplicate information
-- Use proper indentation for nested bullets:
-   - Top-level items start with "- "
-   - Sub-items start with "  - " (2 spaces before dash)
-- For bold text, use exactly two asterisks: **text**
+### Bullet Point Rules (MANDATORY):
+- ALL content that is not a header MUST be a bullet point using "-" (hyphen)
+- Top-level bullets: "- Content here" (no leading spaces)
+- Nested bullets level 1: "  - Content here" (exactly 2 spaces before hyphen)
+- Nested bullets level 2: "    - Content here" (exactly 4 spaces before hyphen)
+- NEVER use "*" for bullets - ONLY use "-"
+- NEVER write loose paragraph text - ALWAYS use bullets
+- Every piece of information must be a bullet point
+
+### Content Structure Examples:
+
+**CORRECT - Day Structure:**
+\`\`\`
+## Day 1: Tokyo - Arrival & Traditional Culture
+
+#### Morning
+- 🏯 **Senso-ji Temple** (9:00 AM - 11:00 AM) [cultural] [photo-worthy]
+  - Why: Perfect introduction to Tokyo's traditional side
+  - Details: 2-3-1 Asakusa, Taito City. Open 6 AM-5 PM. Free entry
+  - [Senso-ji Temple](https://www.google.com/maps/search/?api=1&query=Senso-ji+Temple+Tokyo)
+
+#### Afternoon
+- 🎨 **TeamLab Borderless** (1:00 PM - 4:00 PM) [cultural] [photo-worthy]
+  - Why: Immersive digital art experience
+  - Details: Book in advance. ~$30 entry
+  - [TeamLab Borderless](https://www.google.com/maps/search/?api=1&query=TeamLab+Borderless+Tokyo)
+\`\`\`
+
+**CORRECT - Budget Breakdown:**
+\`\`\`
+### Complete Budget Breakdown
+- **Flights:** $850 round trip
+  - Outbound: Delta, $425
+  - Return: United, $425
+- **Accommodation:** $1,200 total
+  - Tokyo (4 nights): $200/night = $800
+  - Kyoto (2 nights): $200/night = $400
+- **Activities:** $350
+- **Food & Dining:** $500 (~$70/day)
+- **Total: $2,900**
+\`\`\`
+
+**CORRECT - Restaurant Options:**
+\`\`\`
+#### Dinner Options
+- **Narisawa** - [fine dining, innovative] - $$$$ - [Google Maps](URL)
+  - Michelin 2-star, reservation required months in advance
+- **Gonpachi Nishi-Azabu** - [izakaya, atmospheric] - $$$ - [Google Maps](URL)
+  - Famous "Kill Bill" restaurant, great for groups
+- **Ichiran Ramen** - [ramen, quick] - $$ - [Google Maps](URL)
+  - Perfect for a quick, delicious meal
+\`\`\`
+
+**WRONG - Do NOT do these:**
+\`\`\`
+❌ Loose paragraph without bullet:
+The temple is beautiful and worth visiting in the morning.
+
+✅ CORRECT:
+- The temple is beautiful and worth visiting in the morning
+
+❌ Using asterisks for bullets:
+* Visit the temple
+
+✅ CORRECT:
+- Visit the temple
+
+❌ Inconsistent nesting (3 or 5 spaces):
+- Main item
+   - Nested with 3 spaces
+     - Another with 5 spaces
+
+✅ CORRECT (2 or 4 spaces only):
+- Main item
+  - Nested with 2 spaces
+    - Another with 4 spaces
+\`\`\`
+
+### Emoji Usage:
+- ✈️ for flights/travel
+- 🏨 for accommodation
+- 🍽️ for dining sections
+- 🚌 for transportation
+- 💰 for budget/costs
+- 🏯🎨🌳🏖️ etc. for specific activities (at start of activity name only)
+
+### Bold Text Rules:
+- **Bold** important names: restaurant names, hotel names, activity names
+- **Bold** prices and totals
+- **Bold** time slots within activities
+- Do NOT bold entire sentences or paragraphs
+
+### Activity Tags:
+- Include in brackets after activity name: [nature] [cultural] [adventure] [food & drink] [educational] [photo-worthy] [romantic] [family-friendly]
+
+### CRITICAL REMINDER:
+- Every single piece of content must be a bullet point with "-"
+- The ONLY non-bulleted content should be headers (##, ###, ####)
+- If you find yourself writing a paragraph, convert it to bullet points
+- Sub-details should be nested bullets under their parent item
 
 ## Important Guidelines
 
