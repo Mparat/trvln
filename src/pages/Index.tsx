@@ -267,8 +267,7 @@ const Index = () => {
           </div>
           
           <h1 className="text-4xl md:text-6xl lg:text-7xl font-display font-bold text-center text-foreground leading-tight text-balance max-w-4xl mx-auto">
-            Go Out<br />
-            <span className="text-primary">With Me</span>
+            The Best Plans
           </h1>
           
           <p className="mt-6 text-lg md:text-xl text-muted-foreground text-center max-w-2xl mx-auto text-balance">
