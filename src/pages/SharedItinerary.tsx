@@ -1,66 +1,8 @@
 import { useEffect, useState, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { 
-  MapPin, Clock, DollarSign, Utensils, Camera, Star, Plane, Sun, 
-  CloudRain, Sparkles, AlertTriangle, ExternalLink,
-  Mountain, Building, Trees, Tent, Heart, Zap, PartyPopper,
-  Lightbulb, ChevronDown
-} from "lucide-react";
+import { Sparkles, ExternalLink, ChevronDown } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-
-// Activity type detection and tagging
-const activityTypes = {
-  nature: { label: 'Nature', icon: Mountain, color: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20' },
-  culture: { label: 'Culture', icon: Building, color: 'bg-purple-500/10 text-purple-700 border-purple-500/20' },
-  food: { label: 'Food', icon: Utensils, color: 'bg-orange-500/10 text-orange-700 border-orange-500/20' },
-  adventure: { label: 'Adventure', icon: Zap, color: 'bg-red-500/10 text-red-700 border-red-500/20' },
-  photo: { label: 'Photo Op', icon: Camera, color: 'bg-blue-500/10 text-blue-700 border-blue-500/20' },
-  relaxation: { label: 'Relaxation', icon: Heart, color: 'bg-pink-500/10 text-pink-700 border-pink-500/20' },
-  nightlife: { label: 'Nightlife', icon: PartyPopper, color: 'bg-violet-500/10 text-violet-700 border-violet-500/20' },
-};
-
-function detectActivityType(content: string): keyof typeof activityTypes | null {
-  const lower = content.toLowerCase();
-  if (/hike|trail|mountain|waterfall|beach|ocean|lake|forest|park|garden|nature|scenic|view/i.test(lower)) return 'nature';
-  if (/temple|shrine|museum|palace|castle|historic|ancient|monument|art|gallery|cathedral/i.test(lower)) return 'culture';
-  if (/restaurant|eat|food|breakfast|lunch|dinner|café|cafe|meal|dine|cuisine|bar|bistro|market/i.test(lower)) return 'food';
-  if (/adventure|climb|kayak|surf|dive|zip|bungee|raft|extreme|sport/i.test(lower)) return 'adventure';
-  if (/photo|instagram|view|scenic|sunset|sunrise|landmark|iconic/i.test(lower)) return 'photo';
-  if (/spa|massage|relax|beach|pool|resort|rest/i.test(lower)) return 'relaxation';
-  if (/club|party|nightlife|bar|dancing|drink/i.test(lower)) return 'nightlife';
-  return null;
-}
-
-function ActivityTag({ type }: { type: keyof typeof activityTypes }) {
-  const config = activityTypes[type];
-  const Icon = config.icon;
-  return (
-    <Badge variant="outline" className={cn("gap-1 text-xs", config.color)}>
-      <Icon className="w-3 h-3" />
-      {config.label}
-    </Badge>
-  );
-}
-
-// Icon mapping for bullet points
-function getIconForContent(content: string) {
-  const lower = content.toLowerCase();
-  if (lower.includes('flight') || lower.includes('airport') || lower.includes('airline')) return Plane;
-  if (lower.includes('hotel') || lower.includes('stay') || lower.includes('accommodation') || lower.includes('check-in') || lower.includes('check in')) return Building;
-  if (lower.includes('restaurant') || lower.includes('eat') || lower.includes('food') || lower.includes('breakfast') || lower.includes('lunch') || lower.includes('dinner') || lower.includes('café') || lower.includes('cafe')) return Utensils;
-  if (lower.includes('photo') || lower.includes('camera') || lower.includes('instagram') || lower.includes('view') || lower.includes('scenic')) return Camera;
-  if (lower.includes('hike') || lower.includes('trail') || lower.includes('mountain') || lower.includes('nature')) return Mountain;
-  if (lower.includes('tip') || lower.includes('note') || lower.includes('recommend')) return Lightbulb;
-  if (lower.includes('budget') || lower.includes('cost') || lower.includes('price') || lower.includes('$') || lower.includes('€') || lower.includes('¥')) return DollarSign;
-  if (lower.includes('time') || lower.includes('hour') || lower.includes('duration') || lower.includes('am') || lower.includes('pm')) return Clock;
-  if (lower.includes('weather') || lower.includes('rain')) return CloudRain;
-  if (lower.includes('sun') || lower.includes('sunny') || lower.includes('warm')) return Sun;
-  if (lower.includes('warning') || lower.includes('caution') || lower.includes('avoid')) return AlertTriangle;
-  if (lower.includes('must') || lower.includes('highlight') || lower.includes('best') || lower.includes('top')) return Star;
-  return MapPin;
-}
 
 const cleanLine = (line: string): string => {
   let cleaned = line;
@@ -250,28 +192,18 @@ export default function SharedItinerary() {
     if (isMainSectionHeader(trimmedLine)) return null;
     
     if (item.type === 'day-header' || item.type === 'section-header' || isSectionHeader(trimmedLine)) {
-      const dayMatch = trimmedLine.match(/Day\s+(\d+)/i);
-      const dayNumber = dayMatch ? parseInt(dayMatch[1]) : null;
-      
       return (
-        <div key={item.id} className="mt-8 mb-4 first:mt-0">
-          <div className="flex items-center gap-3">
-            {dayNumber && (
-              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                <span className="text-lg font-bold text-primary">{dayNumber}</span>
-              </div>
-            )}
-            <h3 className="text-xl font-display font-semibold text-foreground">
-              {parseInlineContent(trimmedLine.replace(/^#+\s*/, ''))}
-            </h3>
-          </div>
+        <div key={item.id} className="mt-6 mb-3 first:mt-0">
+          <h3 className="text-lg font-semibold text-foreground">
+            {parseInlineContent(trimmedLine.replace(/^#+\s*/, ''))}
+          </h3>
         </div>
       );
     }
     
     if (item.type === 'subheader' || isSubHeader(trimmedLine)) {
       return (
-        <div key={item.id} className="mt-6 mb-2">
+        <div key={item.id} className="mt-5 mb-2">
           <span className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
             {parseInlineContent(trimmedLine.replace(/^\*\*|\*\*$/g, ''))}
           </span>
@@ -281,26 +213,13 @@ export default function SharedItinerary() {
     
     if (item.type === 'bullet') {
       const bulletContent = trimmedLine.replace(/^[-•*]\s*/, '');
-      const activityType = detectActivityType(bulletContent);
-      const Icon = getIconForContent(bulletContent);
       
       return (
-        <div key={item.id} className="group relative py-2 pl-6 border-l-2 border-muted hover:border-primary/50 transition-colors">
-          <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 w-6 h-6 rounded-full bg-background border-2 border-muted group-hover:border-primary/50 flex items-center justify-center transition-colors">
-            <Icon className="w-3 h-3 text-muted-foreground group-hover:text-primary transition-colors" />
-          </div>
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex-1">
-              <p className="text-foreground leading-relaxed">
-                {parseInlineContent(bulletContent)}
-              </p>
-              {activityType && (
-                <div className="mt-2">
-                  <ActivityTag type={activityType} />
-                </div>
-              )}
-            </div>
-          </div>
+        <div key={item.id} className="flex items-start gap-2 py-1.5 pl-2">
+          <span className="text-muted-foreground mt-0.5">•</span>
+          <p className="text-foreground leading-relaxed">
+            {parseInlineContent(bulletContent)}
+          </p>
         </div>
       );
     }
