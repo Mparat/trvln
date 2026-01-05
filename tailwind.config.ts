@@ -13,29 +13,50 @@ export default {
   		}
   	},
   	extend: {
-		fontFamily: {
-			display: [
-				'-apple-system',
-				'BlinkMacSystemFont',
-				'SF Pro Display',
-				'Inter',
-				'sans-serif'
-			],
-			body: [
-				'-apple-system',
-				'BlinkMacSystemFont',
-				'SF Pro Text',
-				'Inter',
-				'sans-serif'
-			],
-			sans: [
-				'-apple-system',
-				'BlinkMacSystemFont',
-				'SF Pro Text',
-				'Inter',
-				'sans-serif'
-			],
-		},
+  		fontFamily: {
+  			display: [
+  				'-apple-system',
+  				'BlinkMacSystemFont',
+  				'SF Pro Display',
+  				'Inter',
+  				'sans-serif'
+  			],
+  			body: [
+  				'-apple-system',
+  				'BlinkMacSystemFont',
+  				'SF Pro Text',
+  				'Inter',
+  				'sans-serif'
+  			],
+  			sans: [
+  				'Inter',
+  				'ui-sans-serif',
+  				'system-ui',
+  				'sans-serif',
+  				'Apple Color Emoji',
+  				'Segoe UI Emoji',
+  				'Segoe UI Symbol',
+  				'Noto Color Emoji'
+  			],
+  			serif: [
+  				'ui-serif',
+  				'Georgia',
+  				'Cambria',
+  				'Times New Roman',
+  				'Times',
+  				'serif'
+  			],
+  			mono: [
+  				'ui-monospace',
+  				'SFMono-Regular',
+  				'Menlo',
+  				'Monaco',
+  				'Consolas',
+  				'Liberation Mono',
+  				'Courier New',
+  				'monospace'
+  			]
+  		},
   		colors: {
   			border: 'hsl(var(--border))',
   			input: 'hsl(var(--input))',
