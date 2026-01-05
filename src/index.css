@@ -16,7 +16,7 @@
     --popover: 214 31% 91%;
     --popover-foreground: 222 47% 11%;
 
-    --primary: 200 98% 39%;
+    --primary: 191 98% 39%;
     --primary-foreground: 204 100% 97%;
 
     --secondary: 215 24% 26%;
@@ -33,7 +33,7 @@
 
     --border: 212 26% 83%;
     --input: 212 26% 83%;
-    --ring: 200 98% 39%;
+    --ring: 196 98% 39%;
 
     --radius: 0.5rem;
 
@@ -76,7 +76,7 @@
     --chart-4: 215 16% 46%;
     --chart-5: 215 19% 34%;
     --sidebar: 210 40% 98%;
-    --font-sans: Inter, ui-sans-serif, system-ui, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji;
+    --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', sans-serif;
     --font-serif: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', sans-serif;
     --font-mono: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', sans-serif;
     --shadow-2xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
