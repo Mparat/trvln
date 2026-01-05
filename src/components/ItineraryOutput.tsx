@@ -736,16 +736,16 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
       const dayNumber = dayMatch ? parseInt(dayMatch[1]) : null;
       
       return (
-        <div key={item.id} className="mt-8 mb-4 first:mt-0">
+        <div key={item.id} className="mt-8 mb-4 first:mt-0 pl-2">
           <div className="flex items-center gap-3">
             {dayNumber && (
-              <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
-                <span className="text-xl font-bold text-primary">{dayNumber}</span>
+              <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
+                <span className="text-2xl font-bold text-primary">{dayNumber}</span>
               </div>
             )}
             <h3 className={cn(
               "font-display font-bold text-foreground",
-              dayNumber ? "text-2xl" : "text-xl font-semibold"
+              dayNumber ? "text-3xl" : "text-2xl"
             )}>
               {parseInlineContent(trimmedLine.replace(/^#+\s*/, ''))}
             </h3>
@@ -762,8 +762,8 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
     if (timeMatch || boldHeaderMatch || hashHeaderMatch) {
       const title = timeMatch?.[1] || boldHeaderMatch?.[1] || hashHeaderMatch?.[1] || trimmedLine;
       return (
-        <div key={item.id} className="mt-4 mb-2">
-          <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+        <div key={item.id} className="mt-6 mb-3 pl-2">
+          <h4 className="text-base font-semibold text-foreground/80">
             {title.replace(/\*\*/g, '').replace(/:$/, '')}
           </h4>
         </div>
@@ -842,7 +842,7 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
     
     // Regular paragraph text
     return (
-      <p key={item.id} className="text-foreground/80 leading-relaxed py-1 pl-5">
+      <p key={item.id} className="text-foreground/80 leading-relaxed py-1 pl-3">
         {parseInlineContent(trimmedLine.replace(/^#+\s*/, ''))}
       </p>
     );
