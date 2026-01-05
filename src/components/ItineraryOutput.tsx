@@ -1,9 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { 
-  MapPin, Clock, DollarSign, Utensils, Camera, Star, Plane, Sun, 
-  CloudRain, Sparkles, AlertTriangle, ExternalLink, Edit3, Send,
-  Mountain, Building, Trees, Tent, Heart, Zap, PartyPopper,
-  Lightbulb, X, Plus, Loader2, ChevronDown, Share2, ExternalLink as OpenIcon
+  Clock, DollarSign, Sparkles, ExternalLink, Edit3, Send,
+  X, Plus, Loader2, ChevronDown, Share2
 } from "lucide-react";
 import { jsPDF } from "jspdf";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -28,39 +26,6 @@ interface ItineraryOutputProps {
   };
 }
 
-// Activity type detection and tagging
-const activityTypes = {
-  nature: { label: 'Nature', icon: Mountain, color: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20' },
-  culture: { label: 'Culture', icon: Building, color: 'bg-purple-500/10 text-purple-700 border-purple-500/20' },
-  food: { label: 'Food', icon: Utensils, color: 'bg-orange-500/10 text-orange-700 border-orange-500/20' },
-  adventure: { label: 'Adventure', icon: Zap, color: 'bg-red-500/10 text-red-700 border-red-500/20' },
-  photo: { label: 'Photo Op', icon: Camera, color: 'bg-blue-500/10 text-blue-700 border-blue-500/20' },
-  relaxation: { label: 'Relaxation', icon: Heart, color: 'bg-pink-500/10 text-pink-700 border-pink-500/20' },
-  nightlife: { label: 'Nightlife', icon: PartyPopper, color: 'bg-violet-500/10 text-violet-700 border-violet-500/20' },
-};
-
-function detectActivityType(content: string): keyof typeof activityTypes | null {
-  const lower = content.toLowerCase();
-  if (/hike|trail|mountain|waterfall|beach|ocean|lake|forest|park|garden|nature|scenic|view/i.test(lower)) return 'nature';
-  if (/temple|shrine|museum|palace|castle|historic|ancient|monument|art|gallery|cathedral/i.test(lower)) return 'culture';
-  if (/restaurant|eat|food|breakfast|lunch|dinner|café|cafe|meal|dine|cuisine|bar|bistro|market/i.test(lower)) return 'food';
-  if (/adventure|climb|kayak|surf|dive|zip|bungee|raft|extreme|sport/i.test(lower)) return 'adventure';
-  if (/photo|instagram|view|scenic|sunset|sunrise|landmark|iconic/i.test(lower)) return 'photo';
-  if (/spa|massage|relax|beach|pool|resort|rest/i.test(lower)) return 'relaxation';
-  if (/club|party|nightlife|bar|dancing|drink/i.test(lower)) return 'nightlife';
-  return null;
-}
-
-function ActivityTag({ type }: { type: keyof typeof activityTypes }) {
-  const config = activityTypes[type];
-  const Icon = config.icon;
-  return (
-    <Badge variant="outline" className={cn("gap-1 text-xs", config.color)}>
-      <Icon className="w-3 h-3" />
-      {config.label}
-    </Badge>
-  );
-}
 
 export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences }: ItineraryOutputProps) {
   const [editMode, setEditMode] = useState(false);
@@ -152,9 +117,44 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
     return /^(Day\s+\d+|Flights?|Budget|Accommodation|Trip Summary)/i.test(trimmed);
   };
 
-  // Parse inline content
+  // Parse inline content with support for markdown links and raw URLs
   const parseInlineContent = (content: string) => {
-    return content.split(/(\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g).map((part, i) => {
+    const makeSearchUrl = (query: string) =>
+      `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+
+    const makeGoogleMapsUrl = (query: string) =>
+      `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+
+    const normalizeUrl = (href: string, label?: string): string => {
+      if (/^(javascript|data):/i.test(href)) return makeSearchUrl(label || href);
+
+      const withProto = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href) ? href : `https://${href}`;
+
+      try {
+        const url = new URL(withProto);
+
+        if (/goo\.gl$/i.test(url.hostname) || /maps\.app\.goo\.gl$/i.test(url.hostname)) {
+          return makeGoogleMapsUrl(label || href);
+        }
+
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+          return makeSearchUrl(label || href);
+        }
+
+        return url.toString();
+      } catch {
+        return makeSearchUrl(label || href);
+      }
+    };
+
+    // First, split by markdown links and raw URLs
+    // Pattern matches: markdown links [text](url), or raw URLs (https://... or http://...)
+    const combinedPattern = /(\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*|https?:\/\/[^\s\])\]]+)/g;
+    
+    return content.split(combinedPattern).map((part, i) => {
+      if (!part) return null;
+      
+      // Bold text
       if (part.startsWith('**') && part.endsWith('**')) {
         return (
           <strong key={i} className="font-semibold text-foreground">
@@ -163,40 +163,12 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
         );
       }
 
+      // Markdown link [text](url)
       const linkMatch = part.match(/\[([^\]]+)\]\(([^)]+)\)/);
       if (linkMatch) {
         const label = linkMatch[1];
         const rawHref = linkMatch[2].trim();
-
-        const makeSearchUrl = (query: string) =>
-          `https://www.google.com/search?q=${encodeURIComponent(query)}`;
-
-        const makeGoogleMapsUrl = (query: string) =>
-          `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
-
-        const normalizeUrl = (href: string): string => {
-          if (/^(javascript|data):/i.test(href)) return makeSearchUrl(label);
-
-          const withProto = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href) ? href : `https://${href}`;
-
-          try {
-            const url = new URL(withProto);
-
-            if (/goo\.gl$/i.test(url.hostname) || /maps\.app\.goo\.gl$/i.test(url.hostname)) {
-              return makeGoogleMapsUrl(label);
-            }
-
-            if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-              return makeSearchUrl(label);
-            }
-
-            return url.toString();
-          } catch {
-            return makeSearchUrl(label);
-          }
-        };
-
-        const href = normalizeUrl(rawHref);
+        const href = normalizeUrl(rawHref, label);
 
         return (
           <a
@@ -211,6 +183,27 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
           </a>
         );
       }
+
+      // Raw URL (https://... or http://...)
+      if (/^https?:\/\//i.test(part)) {
+        const href = normalizeUrl(part);
+        // Truncate display URL if too long
+        const displayUrl = part.length > 50 ? part.slice(0, 47) + '...' : part;
+        
+        return (
+          <a
+            key={i}
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary underline underline-offset-2 hover:text-primary/80 inline-flex items-center gap-1"
+          >
+            {displayUrl}
+            <ExternalLink className="w-3 h-3" />
+          </a>
+        );
+      }
+
       return part;
     });
   };
@@ -220,6 +213,7 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
     const sections: { header: string; items: typeof items }[] = [];
     let currentSection: { header: string; items: typeof items } | null = null;
     let preItems: typeof items = [];
+    const seenHeaders = new Set<string>();
 
     items.forEach((item) => {
       const cleanedLine = cleanLine(item.content);
@@ -229,6 +223,12 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
 
       const mainHeader = isMainSectionHeader(trimmedLine);
       if (mainHeader) {
+        // Skip duplicate headers
+        if (seenHeaders.has(mainHeader)) {
+          return;
+        }
+        seenHeaders.add(mainHeader);
+        
         if (currentSection) {
           sections.push(currentSection);
         } else if (preItems.length > 0) {
@@ -739,11 +739,14 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
         <div key={item.id} className="mt-8 mb-4 first:mt-0">
           <div className="flex items-center gap-3">
             {dayNumber && (
-              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                <span className="text-lg font-bold text-primary">{dayNumber}</span>
+              <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
+                <span className="text-xl font-bold text-primary">{dayNumber}</span>
               </div>
             )}
-            <h3 className="text-xl font-display font-semibold text-foreground">
+            <h3 className={cn(
+              "font-display font-bold text-foreground",
+              dayNumber ? "text-2xl" : "text-xl font-semibold"
+            )}>
               {parseInlineContent(trimmedLine.replace(/^#+\s*/, ''))}
             </h3>
           </div>
@@ -770,18 +773,7 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
     // Bullet items
     if (trimmedLine.startsWith('-') || trimmedLine.startsWith('•')) {
       const content = trimmedLine.replace(/^[-•]\s*/, '');
-      const activityType = detectActivityType(content);
       const indentLevel = item.indentLevel;
-      
-      const hasFood = /restaurant|eat|food|breakfast|lunch|dinner|café|cafe|meal|dine|cuisine/i.test(content);
-      const hasPhoto = /photo|view|scenic|visit|see|explore|landmark|monument|museum/i.test(content);
-      const hasTip = /tip|recommend|don't miss|must|should|pro tip|insider/i.test(content);
-      const hasFlight = /flight|airport|airline|depart|arrive|layover/i.test(content);
-      const hasWeather = /weather|rain|sun|temperature|climate|season/i.test(content);
-      const hasDrink = /bar|brewery|cocktail|beer|wine|drinks?|pub/i.test(content);
-      
-      const Icon = hasFlight ? Plane : hasFood ? Utensils : hasDrink ? PartyPopper : hasPhoto ? Camera : hasTip ? Star : hasWeather ? CloudRain : null;
-      const iconColor = hasFlight ? 'text-sky-500' : hasFood ? 'text-orange-500' : hasDrink ? 'text-violet-500' : hasPhoto ? 'text-blue-500' : hasTip ? 'text-amber-500' : hasWeather ? 'text-cyan-500' : '';
       
       const parsedContent = parseInlineContent(content);
       const marginLeft = 0.5 + (indentLevel * 1);
@@ -797,21 +789,12 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
           )}
           style={{ marginLeft: `${marginLeft}rem` }}
         >
-          {Icon ? (
-            <Icon className={cn("w-4 h-4 mt-1 shrink-0", iconColor)} />
-          ) : (
-            <div className={cn(
-              "rounded-full mt-2 shrink-0",
-              indentLevel === 0 ? "w-2 h-2 bg-primary/60" : "w-1.5 h-1.5 bg-muted-foreground/40"
-            )} />
-          )}
+          <div className={cn(
+            "rounded-full mt-2 shrink-0",
+            indentLevel === 0 ? "w-2 h-2 bg-primary/60" : "w-1.5 h-1.5 bg-muted-foreground/40"
+          )} />
           <div className="flex-1 min-w-0">
             <p className="text-foreground/90 leading-relaxed">{parsedContent}</p>
-            {activityType && indentLevel === 0 && (
-              <div className="mt-1">
-                <ActivityTag type={activityType} />
-              </div>
-            )}
             {item.comment && !item.isUpdating && (
               <div className="mt-2 text-xs text-muted-foreground bg-muted/50 px-2 py-1 rounded">
                 💬 {item.comment}
@@ -859,7 +842,7 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, tripPreferences 
     
     // Regular paragraph text
     return (
-      <p key={item.id} className="text-foreground/80 leading-relaxed py-1 ml-2">
+      <p key={item.id} className="text-foreground/80 leading-relaxed py-1 pl-5">
         {parseInlineContent(trimmedLine.replace(/^#+\s*/, ''))}
       </p>
     );
