@@ -1,10 +1,76 @@
-import { MapPin, Clock, DollarSign, Utensils, Camera, Star, Plane, Sun, CloudRain } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { ExternalLink } from "lucide-react";
 
 interface ItineraryDisplayProps {
   itinerary: string;
   isLoading: boolean;
 }
+
+// Parse inline content for links and bold text
+const parseInlineContent = (text: string) => {
+  const parts: (string | JSX.Element)[] = [];
+  const regex = /\[([^\]]+)\]\(([^)]+)\)|(\*\*[^*]+\*\*)/g;
+  let lastIndex = 0;
+  let match;
+  let key = 0;
+  
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    
+    if (match[1] && match[2]) {
+      parts.push(
+        <a 
+          key={key++}
+          href={match[2]} 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="text-primary hover:underline inline-flex items-center gap-1"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {match[1]}
+          <ExternalLink className="w-3 h-3" />
+        </a>
+      );
+    } else if (match[3]) {
+      const boldText = match[3].replace(/\*\*/g, '');
+      parts.push(<strong key={key++} className="font-semibold">{boldText}</strong>);
+    }
+    
+    lastIndex = match.index + match[0].length;
+  }
+  
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+  
+  return parts.length > 0 ? parts : text;
+};
+
+const cleanLine = (line: string): string => {
+  let cleaned = line;
+  cleaned = cleaned.replace(/^```[\w]*\s*$/gm, '');
+  cleaned = cleaned.replace(/^---+$/gm, '');
+  return cleaned;
+};
+
+const isMainSectionHeader = (line: string): boolean => {
+  const mainSections = ['EXECUTIVE SUMMARY', 'KEY BOOKINGS & BUDGET', 'DAY-BY-DAY ITINERARY', 'ALTERNATIVES & ADDITIONAL OPTIONS'];
+  const trimmed = line.trim().replace(/^#+\s*/, '').replace(/\*\*/g, '');
+  return mainSections.some(section => trimmed.toUpperCase().includes(section));
+};
+
+const isSectionHeader = (line: string): boolean => {
+  return /^#{1,3}\s+/.test(line) || /^\*\*[^*]+\*\*$/.test(line.trim());
+};
+
+const isSubHeader = (line: string): boolean => {
+  const subHeaderPatterns = [
+    /^(morning|afternoon|evening|night)\s*[-–:]/i,
+    /^\*\*(morning|afternoon|evening|night)[^*]*\*\*/i,
+  ];
+  return subHeaderPatterns.some(p => p.test(line.trim()));
+};
 
 export function ItineraryDisplay({ itinerary, isLoading }: ItineraryDisplayProps) {
   if (isLoading) {
@@ -32,153 +98,58 @@ export function ItineraryDisplay({ itinerary, isLoading }: ItineraryDisplayProps
 
   // Parse the itinerary and render with styling
   const lines = itinerary.split('\n');
-  let currentDay = 0;
   
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-1 animate-fade-in">
       {lines.map((line, index) => {
-        const trimmedLine = line.trim();
+        const cleanedLine = cleanLine(line);
+        const trimmedLine = cleanedLine.trim();
         
         if (!trimmedLine) return null;
 
-        // Day headers
-        if (trimmedLine.match(/^(Day\s+\d+|##\s*Day)/i)) {
-          currentDay++;
-          const dayColors = [
-            'from-blue-500/20 to-blue-600/10 border-blue-500/30',
-            'from-emerald-500/20 to-emerald-600/10 border-emerald-500/30',
-            'from-purple-500/20 to-purple-600/10 border-purple-500/30',
-            'from-amber-500/20 to-amber-600/10 border-amber-500/30',
-            'from-rose-500/20 to-rose-600/10 border-rose-500/30',
-          ];
-          const colorClass = dayColors[(currentDay - 1) % dayColors.length];
-          
+        // Skip main section headers (rendered in collapsible wrappers)
+        if (isMainSectionHeader(trimmedLine)) return null;
+
+        // Section headers (Day headers, Flight info, etc.)
+        if (isSectionHeader(trimmedLine)) {
           return (
-            <div 
-              key={index} 
-              className={cn(
-                "mt-8 first:mt-0 p-4 rounded-xl bg-gradient-to-r border",
-                colorClass
-              )}
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-full bg-background/80 flex items-center justify-center shadow-sm">
-                  <span className="text-lg font-bold text-primary">{currentDay}</span>
-                </div>
-                <h3 className="text-xl font-display font-semibold text-foreground">
-                  {trimmedLine.replace(/^#+\s*/, '').replace(/^Day\s+\d+:?\s*/i, '')}
-                </h3>
-              </div>
+            <div key={index} className="mt-6 mb-3 first:mt-0">
+              <h3 className="text-lg font-semibold text-foreground">
+                {parseInlineContent(trimmedLine.replace(/^#+\s*/, ''))}
+              </h3>
             </div>
           );
         }
 
-        // Flight info section
-        if (trimmedLine.match(/^(##\s*)?(Flights?|Flight Details|Getting There|Travel Info)/i)) {
+        // Sub-headers (Morning, Afternoon, Evening)
+        if (isSubHeader(trimmedLine)) {
           return (
-            <div key={index} className="mt-6 p-4 bg-gradient-to-r from-sky-500/10 to-sky-600/5 rounded-xl border border-sky-500/20">
-              <div className="flex items-center gap-2">
-                <Plane className="w-5 h-5 text-sky-600" />
-                <h3 className="text-lg font-display font-semibold text-foreground">
-                  {trimmedLine.replace(/^#+\s*/, '')}
-                </h3>
-              </div>
+            <div key={index} className="mt-5 mb-2">
+              <span className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                {parseInlineContent(trimmedLine.replace(/^\*\*|\*\*$/g, ''))}
+              </span>
             </div>
           );
         }
 
-        // Best time to visit section
-        if (trimmedLine.match(/^(##\s*)?(Best Time|When to Visit|Travel Season|Timing)/i)) {
-          return (
-            <div key={index} className="mt-6 p-4 bg-gradient-to-r from-amber-500/10 to-amber-600/5 rounded-xl border border-amber-500/20">
-              <div className="flex items-center gap-2">
-                <Sun className="w-5 h-5 text-amber-600" />
-                <h3 className="text-lg font-display font-semibold text-foreground">
-                  {trimmedLine.replace(/^#+\s*/, '')}
-                </h3>
-              </div>
-            </div>
-          );
-        }
-
-        // Budget section
-        if (trimmedLine.match(/^(##\s*)?(Budget|Cost|Estimated Budget|Daily Budget)/i)) {
-          return (
-            <div key={index} className="mt-6 p-4 bg-gradient-to-r from-emerald-500/10 to-emerald-600/5 rounded-xl border border-emerald-500/20">
-              <div className="flex items-center gap-2">
-                <DollarSign className="w-5 h-5 text-emerald-600" />
-                <h3 className="text-lg font-display font-semibold text-foreground">
-                  {trimmedLine.replace(/^#+\s*/, '')}
-                </h3>
-              </div>
-            </div>
-          );
-        }
-
-        // Section headers (Morning, Afternoon, Evening)
-        if (trimmedLine.match(/^(Morning|Afternoon|Evening|Night)/i)) {
-          const timeIcons: Record<string, string> = {
-            'morning': '🌅',
-            'afternoon': '☀️',
-            'evening': '🌆',
-            'night': '🌙',
-          };
-          const timeKey = trimmedLine.toLowerCase().split(' ')[0];
-          
-          return (
-            <div key={index} className="flex items-center gap-3 ml-4 mt-6 mb-3">
-              <span className="text-xl">{timeIcons[timeKey] || '⏰'}</span>
-              <h4 className="text-base font-semibold text-foreground">{trimmedLine}</h4>
-              <div className="flex-1 h-px bg-border" />
-            </div>
-          );
-        }
-
-        // Bullet points
+        // Bullet points - simple clean styling
         if (trimmedLine.startsWith('-') || trimmedLine.startsWith('•') || trimmedLine.startsWith('*')) {
           const content = trimmedLine.replace(/^[-•*]\s*/, '');
-          const hasFood = /restaurant|eat|food|breakfast|lunch|dinner|café|cafe|meal|dine|cuisine/i.test(content);
-          const hasPhoto = /photo|view|scenic|visit|see|explore|landmark|monument|museum/i.test(content);
-          const hasTip = /tip|recommend|don't miss|must|should|pro tip|insider/i.test(content);
-          const hasFlight = /flight|airport|airline|depart|arrive|layover/i.test(content);
-          const hasWeather = /weather|rain|sun|temperature|climate|season/i.test(content);
-          
-          const Icon = hasFlight ? Plane : hasFood ? Utensils : hasPhoto ? Camera : hasTip ? Star : hasWeather ? CloudRain : null;
-          const iconColor = hasFlight ? 'text-sky-500' : hasFood ? 'text-orange-500' : hasPhoto ? 'text-blue-500' : hasTip ? 'text-amber-500' : hasWeather ? 'text-cyan-500' : '';
-          
-          // Parse bold text
-          const parsedContent = content.split(/(\*\*[^*]+\*\*)/g).map((part, i) => {
-            if (part.startsWith('**') && part.endsWith('**')) {
-              return <strong key={i} className="font-semibold text-foreground">{part.slice(2, -2)}</strong>;
-            }
-            return part;
-          });
           
           return (
-            <div key={index} className="flex items-start gap-3 ml-6 py-1.5 group hover:bg-muted/30 px-3 -mx-3 rounded-lg transition-colors">
-              {Icon ? (
-                <Icon className={cn("w-4 h-4 mt-1 shrink-0", iconColor)} />
-              ) : (
-                <div className="w-2 h-2 rounded-full bg-primary/60 mt-2 shrink-0" />
-              )}
-              <p className="text-foreground/90 leading-relaxed">{parsedContent}</p>
+            <div key={index} className="flex items-start gap-2 py-1.5 pl-2">
+              <span className="text-muted-foreground mt-0.5">•</span>
+              <p className="text-foreground leading-relaxed">
+                {parseInlineContent(content)}
+              </p>
             </div>
           );
         }
 
-        // Regular text (could be sub-headers or descriptions)
-        const isSubHeader = trimmedLine.match(/^###?\s+/);
-        if (isSubHeader) {
-          return (
-            <h4 key={index} className="text-base font-medium text-foreground mt-4 mb-2 ml-4">
-              {trimmedLine.replace(/^#+\s*/, '')}
-            </h4>
-          );
-        }
-
+        // Regular text
         return (
-          <p key={index} className="text-foreground/80 ml-6 leading-relaxed py-1">
-            {trimmedLine.replace(/^#+\s*/, '')}
+          <p key={index} className="text-foreground leading-relaxed py-1">
+            {parseInlineContent(trimmedLine)}
           </p>
         );
       })}
