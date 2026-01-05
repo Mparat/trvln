@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { Compass, Sparkles, MapPin, Plane } from "lucide-react";
+import { Globe, Sparkles, MapPin, Plane } from "lucide-react";
 import { TripInputForm, TripPreferences } from "@/components/TripInputForm";
 import { ItineraryOutput } from "@/components/ItineraryOutput";
 import { TripSummaryCard } from "@/components/TripSummaryCard";
@@ -262,13 +262,13 @@ const Index = () => {
 
         <div className="container relative pt-12 pb-8 md:pt-20 md:pb-12">
           <div className="flex items-center justify-center gap-2 mb-6">
-            <Compass className="w-8 h-8 text-primary animate-pulse-soft" />
-            <span className="font-display text-lg text-primary">Wanderlust AI</span>
+            <Globe className="w-8 h-8 text-primary animate-pulse-soft" />
+            <span className="font-display text-lg text-primary">Travellin'</span>
           </div>
           
           <h1 className="text-4xl md:text-6xl lg:text-7xl font-display font-bold text-center text-foreground leading-tight text-balance max-w-4xl mx-auto">
-            Stop Planning,{" "}
-            <span className="text-primary">Start Wandering</span>
+            Go Out<br />
+            <span className="text-primary">With Me</span>
           </h1>
           
           <p className="mt-6 text-lg md:text-xl text-muted-foreground text-center max-w-2xl mx-auto text-balance">
