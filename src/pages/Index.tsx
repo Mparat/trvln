@@ -17,6 +17,7 @@ const defaultPreferences: TripPreferences = {
   targetMonth: '',
   durationFlexibility: '1-week',
   durationDays: 7,
+  noFlight: false,
   departureCity: '',
   flightDirectness: 'short-layover',
   atmosphere: [],
