@@ -10,6 +10,7 @@ export interface MediaItem {
   preview?: string;
   url?: string; // Public URL from storage
   uploading?: boolean;
+  frameUrls?: string[]; // Extracted video frames for AI analysis
 }
 
 interface MediaDropZoneProps {
@@ -41,6 +42,72 @@ export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
     return publicUrl;
   };
 
+  // Extract frames from video at specified intervals
+  const extractVideoFrames = async (file: File): Promise<Blob[]> => {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.muted = true;
+      video.playsInline = true;
+      
+      const frames: Blob[] = [];
+      const timestamps = [0.1, 0.25, 0.5, 0.75, 0.9]; // Extract 5 frames at these percentages
+      let currentIndex = 0;
+
+      video.onloadedmetadata = () => {
+        const duration = video.duration;
+        if (!duration || duration <= 0) {
+          resolve([]);
+          return;
+        }
+        
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve([]);
+          return;
+        }
+
+        canvas.width = Math.min(video.videoWidth, 1280); // Cap at 1280px width
+        canvas.height = Math.min(video.videoHeight, 720);
+
+        const captureFrame = () => {
+          if (currentIndex >= timestamps.length) {
+            URL.revokeObjectURL(video.src);
+            resolve(frames);
+            return;
+          }
+
+          video.currentTime = duration * timestamps[currentIndex];
+        };
+
+        video.onseeked = () => {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          canvas.toBlob((blob) => {
+            if (blob) {
+              frames.push(blob);
+            }
+            currentIndex++;
+            captureFrame();
+          }, 'image/jpeg', 0.8);
+        };
+
+        video.onerror = () => {
+          console.error('Video frame extraction error');
+          resolve(frames); // Return whatever frames we got
+        };
+
+        captureFrame();
+      };
+
+      video.onerror = () => {
+        reject(new Error('Failed to load video'));
+      };
+
+      video.src = URL.createObjectURL(file);
+    });
+  };
+
   const processFiles = useCallback(async (files: File[]) => {
     // Create initial media items with uploading state
     const newMedia: MediaItem[] = files.map(file => ({
@@ -54,22 +121,53 @@ export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
     const updatedMedia = [...media, ...newMedia];
     onMediaChange(updatedMedia);
 
-    // Upload all files in parallel
-    const uploadPromises = files.map(async (file, index) => {
+    // Process all files in parallel
+    const processPromises = files.map(async (file, index) => {
+      const mediaIndex = media.length + index;
+      const isVideo = file.type.startsWith('video/');
+      
+      // Upload the main file
       const url = await uploadToStorage(file);
-      return { index: media.length + index, url };
+      
+      // For videos, also extract and upload frames
+      let frameUrls: string[] = [];
+      if (isVideo && url) {
+        try {
+          console.log('Extracting frames from video...');
+          const frames = await extractVideoFrames(file);
+          console.log(`Extracted ${frames.length} frames from video`);
+          
+          // Upload frames in parallel
+          const frameUploadPromises = frames.map(async (blob, frameIndex) => {
+            const frameFile = new File([blob], `frame_${crypto.randomUUID()}.jpg`, { type: 'image/jpeg' });
+            return await uploadToStorage(frameFile);
+          });
+          
+          const uploadedFrameUrls = await Promise.all(frameUploadPromises);
+          frameUrls = uploadedFrameUrls.filter((u): u is string => u !== null);
+          console.log(`Uploaded ${frameUrls.length} video frames`);
+        } catch (error) {
+          console.error('Video frame extraction failed:', error);
+        }
+      }
+      
+      return { index: mediaIndex, url, frameUrls };
     });
 
-    const results = await Promise.all(uploadPromises);
+    const results = await Promise.all(processPromises);
 
     // Update media with URLs
     const finalMedia = updatedMedia.map((item, idx) => {
       const result = results.find(r => r.index === idx);
       if (result) {
         if (result.url) {
-          return { ...item, url: result.url, uploading: false };
+          return { 
+            ...item, 
+            url: result.url, 
+            uploading: false,
+            frameUrls: result.frameUrls.length > 0 ? result.frameUrls : undefined,
+          };
         } else {
-          // Upload failed
           toast({
             title: "Upload failed",
             description: `Failed to upload ${item.file?.name}`,

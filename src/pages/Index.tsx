@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { Globe, Sparkles, MapPin, Plane } from "lucide-react";
+import { Globe, Sparkles, MapPin, Plane, ScanSearch } from "lucide-react";
 import { TripInputForm, TripPreferences } from "@/components/TripInputForm";
 import { ItineraryOutput } from "@/components/ItineraryOutput";
 import { TripSummaryCard } from "@/components/TripSummaryCard";
@@ -35,6 +35,12 @@ export type ItineraryVariant = {
   content: string;
 };
 
+type IdentifiedDestination = {
+  location: string;
+  confidence: 'high' | 'medium' | 'low';
+  reasoning: string;
+};
+
 // Strip the <itinerary_planning> thinking section from LLM output
 const stripPlanningSection = (content: string): string => {
   // Remove everything from start up to and including </itinerary_planning>
@@ -59,6 +65,8 @@ const Index = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [loadingVariants, setLoadingVariants] = useState<Record<string, boolean>>({});
   const [isSuggestingThemes, setIsSuggestingThemes] = useState(false);
+  const [isAnalyzingMedia, setIsAnalyzingMedia] = useState(false);
+  const [identifiedDestinations, setIdentifiedDestinations] = useState<IdentifiedDestination[]>([]);
 
   // Get headers for API calls
   const getHeaders = useCallback(() => {
@@ -66,6 +74,26 @@ const Index = () => {
       "Content-Type": "application/json",
     };
   }, []);
+
+  // Analyze inspiration media for location recognition
+  const analyzeInspiration = useCallback(async (mediaUrls: string[]): Promise<IdentifiedDestination[]> => {
+    if (mediaUrls.length === 0) return [];
+    
+    const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-inspiration`, {
+      method: "POST",
+      headers: getHeaders(),
+      body: JSON.stringify({ mediaUrls }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error("Analyze inspiration error:", errorData);
+      return []; // Don't fail the whole flow if analysis fails
+    }
+
+    const data = await response.json();
+    return data.destinations || [];
+  }, [getHeaders]);
 
   const suggestThemes = useCallback(async (prefs: TripPreferences): Promise<{ id: string; name: string; emoji: string }[]> => {
     const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/suggest-themes`, {
@@ -149,7 +177,7 @@ const Index = () => {
       : preferences.cities;
     
     // Build the effective preferences with pending city included
-    const effectivePreferences: TripPreferences = {
+    let effectivePreferences: TripPreferences = {
       ...preferences,
       cities: effectiveCities,
     };
@@ -171,12 +199,59 @@ const Index = () => {
     }
 
     setIsGenerating(true);
-    setIsSuggestingThemes(true);
     setItineraries([]);
     setActiveVariant(0);
+    setIdentifiedDestinations([]);
 
     try {
-      // First, get dynamic themes based on user inputs (using effectivePreferences!)
+      // Step 1: Analyze media for location recognition (if media exists)
+      const mediaWithUrls = effectivePreferences.media.filter(m => m.url);
+      if (mediaWithUrls.length > 0) {
+        setIsAnalyzingMedia(true);
+        
+        // Collect all image URLs (including video frames)
+        const allImageUrls: string[] = [];
+        for (const item of mediaWithUrls) {
+          if (item.type === 'image' && item.url) {
+            allImageUrls.push(item.url);
+          } else if (item.type === 'video' && item.frameUrls && item.frameUrls.length > 0) {
+            allImageUrls.push(...item.frameUrls);
+          }
+        }
+        
+        if (allImageUrls.length > 0) {
+          console.log(`Analyzing ${allImageUrls.length} images for location recognition...`);
+          const identified = await analyzeInspiration(allImageUrls);
+          setIdentifiedDestinations(identified);
+          
+          // Merge high/medium confidence locations with user-specified cities
+          const newLocations = identified
+            .filter(d => d.confidence === 'high' || d.confidence === 'medium')
+            .map(d => d.location)
+            .filter(loc => !effectivePreferences.cities.some(c => 
+              c.toLowerCase().includes(loc.toLowerCase()) || loc.toLowerCase().includes(c.toLowerCase())
+            ));
+          
+          if (newLocations.length > 0) {
+            console.log('AI identified new destinations:', newLocations);
+            effectivePreferences = {
+              ...effectivePreferences,
+              cities: [...effectivePreferences.cities, ...newLocations],
+            };
+            setPreferences(effectivePreferences);
+            
+            toast({
+              title: `📍 Found ${newLocations.length} destination${newLocations.length > 1 ? 's' : ''} in your photos!`,
+              description: newLocations.join(', '),
+            });
+          }
+        }
+        
+        setIsAnalyzingMedia(false);
+      }
+      
+      // Step 2: Get dynamic themes based on user inputs
+      setIsSuggestingThemes(true);
       const themes = await suggestThemes(effectivePreferences);
       
       setIsSuggestingThemes(false);
@@ -233,8 +308,9 @@ const Index = () => {
     } finally {
       setIsGenerating(false);
       setIsSuggestingThemes(false);
+      setIsAnalyzingMedia(false);
     }
-  }, [preferences, suggestThemes, generateSingleItinerary]);
+  }, [preferences, suggestThemes, generateSingleItinerary, analyzeInspiration]);
 
   const handleEdit = useCallback(async (editRequest: string) => {
     const current = itineraries[activeVariant];
@@ -346,6 +422,33 @@ const Index = () => {
           {/* Results */}
           {(itineraries.length > 0 || isGenerating) && (
             <div className="space-y-6 animate-slide-up" style={{ animationDelay: '0.1s' }}>
+              {/* Status indicator during analysis/theme suggestion */}
+              {isGenerating && itineraries.length === 0 && (
+                <div className="bg-card rounded-2xl shadow-medium p-6 flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center animate-pulse">
+                    {isAnalyzingMedia ? (
+                      <ScanSearch className="w-5 h-5 text-primary" />
+                    ) : (
+                      <Sparkles className="w-5 h-5 text-primary" />
+                    )}
+                  </div>
+                  <div>
+                    <p className="font-medium text-foreground">
+                      {isAnalyzingMedia 
+                        ? "Analyzing your inspiration photos..." 
+                        : isSuggestingThemes 
+                          ? "Crafting unique theme ideas..." 
+                          : "Preparing your itineraries..."}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {isAnalyzingMedia 
+                        ? "AI is identifying travel destinations from your images" 
+                        : "This usually takes a few seconds"}
+                    </p>
+                  </div>
+                </div>
+              )}
+              
               {/* Itinerary Switcher */}
               {itineraries.length > 0 && (
                 <ItinerarySwitcher

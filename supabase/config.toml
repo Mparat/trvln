@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.edit-itinerary]
 verify_jwt = false
+
+[functions.analyze-inspiration]
+verify_jwt = false
