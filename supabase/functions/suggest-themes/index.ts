@@ -17,16 +17,17 @@ const PreferencesSchema = z.object({
   cities: z.array(z.string().max(100)).max(20).default([]),
   budgetAccommodation: z.number().min(0).max(100).default(50),
   budgetFlight: z.number().min(0).max(100).default(50),
-  dateFlexibility: z.enum(['anytime', 'month', 'strict']).default('anytime'),
+  dateFlexibility: z.enum(['anytime', 'month', 'strict', 'flexible-days']).default('anytime'),
   startDate: z.string().max(50).optional(),
   endDate: z.string().max(50).optional(),
   targetMonth: z.string().max(50).default(''),
-  durationFlexibility: z.enum(['weekend', 'long-weekend', '1-week', '2-weeks', 'strict']).default('1-week'),
+  durationFlexibility: z.enum(['weekend', 'long-weekend', '1-week', '2-weeks', 'strict', 'flexible-days', 'flexible']).default('1-week'),
   durationDays: z.number().min(1).max(90).default(7),
+  noFlight: z.boolean().default(false),
   departureCity: z.string().max(100).default(''),
-  flightDirectness: z.enum(['nonstop', 'short-layover', 'flexible']).default('short-layover'),
+  flightDirectness: z.enum(['nonstop', 'short-layover', 'long-layover']).default('short-layover'),
   atmosphere: z.array(z.string().max(50)).max(10).default([]),
-  adventureLevel: z.enum(['relaxed', 'active', 'intense']).default('active'),
+  adventureLevel: z.enum(['none', 'family', 'active', 'adrenaline']).default('active'),
   guidedPreference: z.enum(['self-guided', 'some-guided', 'fully-guided']).default('some-guided'),
   foodDrink: z.array(z.string().max(50)).max(10).default([]),
   interests: z.array(z.string().max(50)).max(20).default([]),
@@ -82,6 +83,7 @@ serve(async (req) => {
       targetMonth,
       durationFlexibility,
       durationDays,
+      noFlight,
       departureCity,
       flightDirectness,
       atmosphere,
@@ -107,9 +109,19 @@ serve(async (req) => {
       case "long-weekend": durationContext = "4-5 days"; break;
       case "1-week": durationContext = "7 days"; break;
       case "2-weeks": durationContext = "14 days"; break;
-      case "strict": durationContext = `${durationDays} days`; break;
+      case "strict": durationContext = `exactly ${durationDays} days`; break;
+      case "flexible-days":
+      case "flexible": durationContext = `approximately ${durationDays} days (flexible)`; break;
       default: durationContext = `approximately ${durationDays} days`;
     }
+
+    // Adventure level labels
+    const adventureLabels: Record<string, string> = {
+      'none': 'Relaxed',
+      'family': 'Family-friendly',
+      'active': 'Active',
+      'adrenaline': 'Adrenaline junky'
+    };
 
     // Build date context
     let dateContext = "";
@@ -119,6 +131,15 @@ serve(async (req) => {
       dateContext = `Target month: ${targetMonth}`;
     } else {
       dateContext = "Flexible dates";
+    }
+
+    // Build flight context
+    let flightContext = "";
+    if (noFlight) {
+      flightContext = "No flight needed (local/road trip)";
+    } else {
+      const flightPref = flightDirectness === "nonstop" ? "Nonstop preferred" : flightDirectness === "short-layover" ? "Short layovers OK" : "Long layovers OK";
+      flightContext = `${departureCity ? `From ${departureCity}, ` : ""}${flightPref}`;
     }
 
     // Build context for theme suggestion with ALL user inputs
@@ -132,12 +153,11 @@ Budget (Accommodation): ${getBudgetLabel(budgetAccommodation || 50)}
 Budget (Flights): ${getBudgetLabel(budgetFlight || 50)}
 Duration: ${durationContext}
 Dates: ${dateContext}
-${departureCity ? `Departing from: ${departureCity}` : ""}
-Flight preference: ${flightDirectness === "nonstop" ? "Nonstop preferred" : flightDirectness === "short-layover" ? "Short layovers OK" : "Flexible"}
+${noFlight ? "No flight needed" : flightContext}
 
 ## VIBE
 Atmosphere: ${atmosphere?.length > 0 ? atmosphere.join(", ") : "Not specified"}
-Adventure level: ${adventureLevel || "Not specified"}
+Adventure level: ${adventureLabels[adventureLevel] || adventureLevel || "Not specified"}
 Guided preference: ${guidedPreference || "some-guided"}
 Food & drink preferences: ${foodDrink?.length > 0 ? foodDrink.join(", ") : "Not specified"}
 Interests (ranked): ${interests?.length > 0 ? interests.join(" > ") : "Not specified"}

@@ -101,6 +101,14 @@ RULES:
       return "Luxury";
     };
 
+    // Adventure level labels
+    const adventureLabels: Record<string, string> = {
+      'none': 'Relaxed',
+      'family': 'Family-friendly',
+      'active': 'Active',
+      'adrenaline': 'Adrenaline junky'
+    };
+
     const userPrompt = `NEAR MISS ITEM TO ADD:
 ${nearMissContent}
 
@@ -111,7 +119,7 @@ FULL TRIP PREFERENCES:
 - Destinations: ${tripPreferences.cities?.join(', ') || 'Not specified'}
 - Budget: ${getBudgetLabel(tripPreferences.budgetAccommodation)}
 - Atmosphere: ${tripPreferences.atmosphere?.join(', ') || 'Balanced'}
-- Adventure level: ${tripPreferences.adventureLevel || 'Active'}
+- Adventure level: ${adventureLabels[tripPreferences.adventureLevel || ''] || tripPreferences.adventureLevel || 'Active'}
 - Interests: ${tripPreferences.interests?.join(', ') || 'General'}
 - Food preferences: ${tripPreferences.foodDrink?.join(', ') || 'Local cuisine'}
 - Guided preference: ${tripPreferences.guidedPreference || 'Some guided'}

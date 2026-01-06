@@ -61,6 +61,13 @@ const guidedLabels: Record<string, string> = {
   'self-guided': 'Self-guided only - no guided tours, DIY everything'
 };
 
+const adventureLabels: Record<string, string> = {
+  'none': 'Relaxed',
+  'family': 'Family-friendly',
+  'active': 'Active',
+  'adrenaline': 'Adrenaline junky'
+};
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -147,7 +154,7 @@ ${flightContext}
 
 **VIBE**:
 - Atmosphere: ${tripPreferences.atmosphere?.join(', ') || 'No preference'}
-- Adventure level: ${tripPreferences.adventureLevel || 'No preference'}
+- Adventure level: ${adventureLabels[tripPreferences.adventureLevel || ''] || tripPreferences.adventureLevel || 'No preference'}
 - Guided vs self-serve: ${guidedLabel}
 - Food & drink: ${tripPreferences.foodDrink?.join(', ') || 'No preference'}
 - Interests (ranked): ${tripPreferences.interests?.join(' > ') || 'No preference'}
