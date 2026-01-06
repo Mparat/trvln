@@ -33,7 +33,7 @@ const TripPreferencesSchema = z.object({
 });
 
 const FeedbackSchema = z.object({
-  vote: z.enum(['up', 'down', 'neutral']),
+  vote: z.enum(['up', 'down', 'neutral']).nullable(),
   comment: z.string().max(1000).nullable(),
 });
 
