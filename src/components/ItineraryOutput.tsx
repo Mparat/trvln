@@ -267,13 +267,18 @@ export function ItineraryOutput({ itinerary, isLoading, isEditing, onEdit, theme
     }
   };
 
-  // Close edit box when editing completes
+  // Track previous isEditing state to detect when edit completes
+  const wasEditingRef = useRef(false);
+  
+  // Close edit box when editing completes (transitions from true to false)
   useEffect(() => {
-    if (!isEditing && editMode && editRequest) {
+    if (wasEditingRef.current && !isEditing) {
+      // Edit just completed, close the edit box
       setEditRequest("");
       setEditMode(false);
     }
-  }, [isEditing, editMode, editRequest]);
+    wasEditingRef.current = !!isEditing;
+  }, [isEditing]);
 
   // Handle feedback submission for a specific item
   const handleSubmitFeedback = useCallback(async (
