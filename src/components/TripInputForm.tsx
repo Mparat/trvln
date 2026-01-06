@@ -37,6 +37,7 @@ export interface TripPreferences {
   targetMonth?: string;
   durationFlexibility: 'strict' | 'flexible-days' | 'weekend' | 'long-weekend' | '1-week' | '2-weeks' | 'flexible';
   durationDays: number;
+  noFlight: boolean; // Skip flight-related content
   departureCity: string;
   flightDirectness: 'nonstop' | 'short-layover' | 'long-layover';
   
@@ -287,25 +288,27 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
                 </div>
               </div>
 
-              {/* Flight Budget */}
-              <div className="space-y-3">
-                <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <Plane className="w-4 h-4 text-primary" />
-                  Flight Budget (round trip)
-                </label>
-                <Slider
-                  value={[preferences.budgetFlight]}
-                  onValueChange={([value]) => updatePreferences({ budgetFlight: value })}
-                  min={0}
-                  max={100}
-                  step={25}
-                  className="w-full"
-                />
-                <div className="flex justify-between text-sm">
-                  <span className="font-medium">{getBudgetLabel(preferences.budgetFlight, flightBudgetLabels).label}</span>
-                  <span className="text-muted-foreground">{getBudgetLabel(preferences.budgetFlight, flightBudgetLabels).range}</span>
+              {/* Flight Budget - only show if flights are needed */}
+              {!preferences.noFlight && (
+                <div className="space-y-3">
+                  <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <Plane className="w-4 h-4 text-primary" />
+                    Flight Budget (round trip)
+                  </label>
+                  <Slider
+                    value={[preferences.budgetFlight]}
+                    onValueChange={([value]) => updatePreferences({ budgetFlight: value })}
+                    min={0}
+                    max={100}
+                    step={25}
+                    className="w-full"
+                  />
+                  <div className="flex justify-between text-sm">
+                    <span className="font-medium">{getBudgetLabel(preferences.budgetFlight, flightBudgetLabels).label}</span>
+                    <span className="text-muted-foreground">{getBudgetLabel(preferences.budgetFlight, flightBudgetLabels).range}</span>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Date Flexibility */}
@@ -480,38 +483,58 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
 
             {/* Flight Preferences */}
             <div className="p-4 bg-muted/50 rounded-xl space-y-4">
-              <h4 className="flex items-center gap-2 text-sm font-medium text-foreground">
-                <Plane className="w-4 h-4 text-primary" />
-                Flight Preferences
-              </h4>
+              <div className="flex items-center justify-between">
+                <h4 className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <Plane className="w-4 h-4 text-primary" />
+                  Flight Preferences
+                </h4>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="no-flight"
+                    checked={preferences.noFlight}
+                    onCheckedChange={(checked) => updatePreferences({ noFlight: !!checked })}
+                  />
+                  <Label htmlFor="no-flight" className="text-sm cursor-pointer text-muted-foreground">
+                    No flight needed
+                  </Label>
+                </div>
+              </div>
               
-              <div className="space-y-2">
-                <Label className="text-sm text-muted-foreground">Departing from</Label>
-                <AirportSelector 
-                  value={preferences.departureCity} 
-                  onChange={(value) => updatePreferences({ departureCity: value })} 
-                />
-              </div>
+              {!preferences.noFlight ? (
+                <>
+                  <div className="space-y-2">
+                    <Label className="text-sm text-muted-foreground">Departing from</Label>
+                    <AirportSelector 
+                      value={preferences.departureCity} 
+                      onChange={(value) => updatePreferences({ departureCity: value })} 
+                    />
+                  </div>
 
-              <div className="space-y-2">
-                <Label className="text-sm text-muted-foreground">Flight directness</Label>
-                <RadioGroup
-                  value={preferences.flightDirectness}
-                  onValueChange={(value) => updatePreferences({ flightDirectness: value as TripPreferences['flightDirectness'] })}
-                  className="flex flex-wrap gap-4"
-                >
-                  {[
-                    { value: 'nonstop', label: 'Nonstop only' },
-                    { value: 'short-layover', label: 'Short layovers OK' },
-                    { value: 'long-layover', label: 'Any layovers' },
-                  ].map(opt => (
-                    <div key={opt.value} className="flex items-center space-x-2">
-                      <RadioGroupItem value={opt.value} id={`flight-${opt.value}`} />
-                      <Label htmlFor={`flight-${opt.value}`} className="text-sm cursor-pointer">{opt.label}</Label>
-                    </div>
-                  ))}
-                </RadioGroup>
-              </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm text-muted-foreground">Flight directness</Label>
+                    <RadioGroup
+                      value={preferences.flightDirectness}
+                      onValueChange={(value) => updatePreferences({ flightDirectness: value as TripPreferences['flightDirectness'] })}
+                      className="flex flex-wrap gap-4"
+                    >
+                      {[
+                        { value: 'nonstop', label: 'Nonstop only' },
+                        { value: 'short-layover', label: 'Short layovers OK' },
+                        { value: 'long-layover', label: 'Any layovers' },
+                      ].map(opt => (
+                        <div key={opt.value} className="flex items-center space-x-2">
+                          <RadioGroupItem value={opt.value} id={`flight-${opt.value}`} />
+                          <Label htmlFor={`flight-${opt.value}`} className="text-sm cursor-pointer">{opt.label}</Label>
+                        </div>
+                      ))}
+                    </RadioGroup>
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  The itinerary will skip all flight-related content (e.g., road trip, train, local trip).
+                </p>
+              )}
             </div>
           </div>
         </CollapsibleContent>

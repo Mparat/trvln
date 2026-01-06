@@ -23,6 +23,7 @@ const PreferencesSchema = z.object({
   targetMonth: z.string().max(50).default(''),
   durationFlexibility: z.string().max(50).default('1-week'),
   durationDays: z.number().min(1).max(90).default(7),
+  noFlight: z.boolean().default(false),
   departureCity: z.string().max(100).default(''),
   flightDirectness: z.string().max(50).default('short-layover'),
   atmosphere: z.array(z.string().max(50)).max(10).default([]),
@@ -135,6 +136,7 @@ serve(async (req) => {
       targetMonth,
       durationFlexibility,
       durationDays,
+      noFlight,
       departureCity,
       flightDirectness,
       atmosphere,
@@ -253,17 +255,25 @@ This itinerary MUST embody the "${themeVariant.name}" theme throughout.
     console.log("Cities from preferences:", cities);
     console.log("Inspiration context:", inspirationContext);
 
+    // Build flight context
+    let flightContext = "";
+    if (noFlight) {
+      flightContext = "- **NO FLIGHT NEEDED**: Skip all flight-related content. This is a local/road trip or the traveler is arranging their own transportation.";
+    } else {
+      flightContext = `- Budget (Flights): ${flightBudget} round trip
+- Flight preference: ${flightDirectness === "nonstop" ? "Nonstop preferred" : flightDirectness === "short-layover" ? "Short layovers OK" : "All options including long layovers"}
+${departureCity ? `- Departing from: ${departureCity}` : ""}`;
+    }
+
     const userInputsBlock = `
 **INSPIRATION (must-visit destinations)**: ${inspirationContext || "No specific destinations - suggest based on preferences"}
 **Note: The destinations listed above MUST be included in the itinerary. You may also suggest additional nearby destinations if appropriate for the trip duration and interests.**
 
 **LOGISTICS**:
 - Budget (Accommodation): ${budgetInfo.label} (${budgetInfo.accommodation}, ~${budgetInfo.daily} total daily)
-- Budget (Flights): ${flightBudget} round trip
+${flightContext}
 - Date flexibility: ${dateContext}
 - Duration: ${durationContext}
-- Flight preference: ${flightDirectness === "nonstop" ? "Nonstop preferred" : flightDirectness === "short-layover" ? "Short layovers OK" : "All options including long layovers"}
-${departureCity ? `- Departing from: ${departureCity}` : ""}
 
 **VIBE**:
 - Atmosphere: ${atmosphere?.length > 0 ? atmosphere.join(", ") : "No preference"}

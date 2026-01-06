@@ -21,6 +21,7 @@ const TripPreferencesSchema = z.object({
   targetMonth: z.string().max(50).optional(),
   durationFlexibility: z.string().max(50).optional(),
   durationDays: z.number().min(1).max(90).optional(),
+  noFlight: z.boolean().optional(),
   departureCity: z.string().max(100).optional(),
   flightDirectness: z.string().max(50).optional(),
   atmosphere: z.array(z.string().max(50)).max(10).optional(),
@@ -124,16 +125,24 @@ serve(async (req) => {
       durationContext = `approximately ${tripPreferences.durationDays || 7} days (±2 days flexible)`;
     }
 
+    // Build flight context
+    let flightContext = "";
+    if (tripPreferences.noFlight) {
+      flightContext = "- **NO FLIGHT NEEDED**: This is a local/road trip or the traveler is arranging their own transportation.";
+    } else {
+      flightContext = `- Budget (Flights): ${flightBudget} round trip
+- Flight preference: ${tripPreferences.flightDirectness || 'No preference'}
+${tripPreferences.departureCity ? `- Departing from: ${tripPreferences.departureCity}` : ""}`;
+    }
+
     const userInputsBlock = `
 **INSPIRATION (destinations)**: ${tripPreferences.cities?.join(', ') || 'Not specified'}
 
 **LOGISTICS**:
 - Budget (Accommodation): ${budgetInfo.label} (${budgetInfo.accommodation}, ~${budgetInfo.daily} total daily)
-- Budget (Flights): ${flightBudget} round trip
+${flightContext}
 - Date flexibility: ${dateContext}
 - Duration: ${durationContext}
-- Flight preference: ${tripPreferences.flightDirectness || 'No preference'}
-${tripPreferences.departureCity ? `- Departing from: ${tripPreferences.departureCity}` : ""}
 
 **VIBE**:
 - Atmosphere: ${tripPreferences.atmosphere?.join(', ') || 'No preference'}
