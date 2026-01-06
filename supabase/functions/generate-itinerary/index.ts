@@ -226,9 +226,9 @@ serve(async (req) => {
 
     // Build vibe context
     const guidedLabels: Record<string, string> = {
-      'prefer-guided': 'Prefer guided tours and organized activities',
+      'fully-guided': 'Prefer guided tours and organized activities',
       'some-guided': 'Mix of guided activities and self-exploration',
-      'self-serve': 'Self-serve only - no guided tours, DIY everything'
+      'self-guided': 'Self-guided only - no guided tours, DIY everything'
     };
     const guidedLabel = guidedLabels[guidedPreference as string] || 'No preference';
 

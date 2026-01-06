@@ -44,7 +44,7 @@ export interface TripPreferences {
   // Vibe
   atmosphere: string[];
   adventureLevel: string;
-  guidedPreference: 'prefer-guided' | 'some-guided' | 'self-serve';
+  guidedPreference: 'fully-guided' | 'some-guided' | 'self-guided';
   foodDrink: string[];
   interests: string[];
   
@@ -74,9 +74,9 @@ const adventureOptions = [
 ];
 
 const guidedOptions = [
-  { id: 'prefer-guided', label: 'Prefer guided trips' },
+  { id: 'fully-guided', label: 'Prefer guided trips' },
   { id: 'some-guided', label: 'Some guided activities' },
-  { id: 'self-serve', label: 'Just self-serve' },
+  { id: 'self-guided', label: 'Just self-guided' },
 ];
 
 const foodDrinkOptions = [
