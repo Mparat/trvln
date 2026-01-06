@@ -9,8 +9,8 @@ const corsHeaders = {
 // Input validation schema
 const PreferencesSchema = z.object({
   media: z.array(z.object({
-    type: z.string().max(50),
-    url: z.string().max(500).optional(),
+    type: z.enum(['image', 'video']),
+    preview: z.string().max(5000).optional(),
     name: z.string().max(200).optional(),
   })).max(10).default([]),
   cities: z.array(z.string().max(100)).max(20).default([]),
