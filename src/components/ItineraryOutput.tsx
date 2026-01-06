@@ -17,6 +17,7 @@ import { toast } from "@/hooks/use-toast";
 interface ItineraryOutputProps {
   itinerary: string;
   isLoading: boolean;
+  isEditing?: boolean;
   onEdit?: (editRequest: string) => void;
   themeTitle?: string;
   tripPreferences?: {
@@ -33,7 +34,7 @@ const stripEmojis = (text: string): string => {
   return text.replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{1F000}-\u{1FFFF}]/gu, '').replace(/\s+/g, ' ').trim();
 };
 
-export function ItineraryOutput({ itinerary, isLoading, onEdit, themeTitle, tripPreferences }: ItineraryOutputProps) {
+export function ItineraryOutput({ itinerary, isLoading, isEditing, onEdit, themeTitle, tripPreferences }: ItineraryOutputProps) {
   const [editMode, setEditMode] = useState(false);
   const [editRequest, setEditRequest] = useState("");
   const [addingNearMiss, setAddingNearMiss] = useState<string | null>(null);
@@ -260,12 +261,19 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, themeTitle, trip
   }, [items]);
 
   const handleSubmitEdit = () => {
-    if (editRequest.trim() && onEdit) {
+    if (editRequest.trim() && onEdit && !isEditing) {
       onEdit(editRequest);
+      // Don't close immediately - wait for isEditing to become false
+    }
+  };
+
+  // Close edit box when editing completes
+  useEffect(() => {
+    if (!isEditing && editMode && editRequest) {
       setEditRequest("");
       setEditMode(false);
     }
-  };
+  }, [isEditing, editMode, editRequest]);
 
   // Handle feedback submission for a specific item
   const handleSubmitFeedback = useCallback(async (
@@ -920,12 +928,21 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, themeTitle, trip
                 className="min-h-[80px] resize-none"
               />
               <div className="flex justify-end gap-2">
-                <Button variant="outline" size="sm" onClick={() => setEditMode(false)}>
+                <Button variant="outline" size="sm" onClick={() => !isEditing && setEditMode(false)} disabled={isEditing}>
                   Cancel
                 </Button>
-                <Button size="sm" onClick={handleSubmitEdit} disabled={!editRequest.trim()}>
-                  <Send className="w-4 h-4 mr-2" />
-                  Submit
+                <Button size="sm" onClick={handleSubmitEdit} disabled={!editRequest.trim() || isEditing}>
+                  {isEditing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Updating...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4 mr-2" />
+                      Submit
+                    </>
+                  )}
                 </Button>
               </div>
             </div>
@@ -941,45 +958,55 @@ export function ItineraryOutput({ itinerary, isLoading, onEdit, themeTitle, trip
         </Card>
       )}
 
-      {/* Collapsible sections */}
-      <div className="space-y-4">
-        {groupedSections.map((section, index) => {
-          if (!section.header) {
-            // Pre-content items (before any main section)
-            return (
-              <div key={`pre-${index}`} className="space-y-1">
-                {renderSectionItems(section.items)}
-              </div>
-            );
-          }
-
-          return (
-            <Collapsible
-              key={section.header}
-              open={openSections[section.header]}
-              onOpenChange={() => toggleSection(section.header)}
-            >
-              <CollapsibleTrigger className="w-full">
-                <div className="flex items-center justify-between py-3 px-4 bg-muted/50 rounded-lg hover:bg-muted/70 transition-colors cursor-pointer">
-                  <h2 className="text-lg font-display font-bold text-foreground tracking-wide">
-                    {section.header}
-                  </h2>
-                  <ChevronDown 
-                    className={cn(
-                      "w-5 h-5 text-muted-foreground transition-transform duration-200",
-                      openSections[section.header] && "rotate-180"
-                    )}
-                  />
-                </div>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="pt-2">
-                <div className="space-y-1">
+      {/* Collapsible sections with loading overlay */}
+      <div className="relative">
+        {isEditing && (
+          <div className="absolute inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center rounded-lg z-10">
+            <div className="flex items-center gap-3 text-muted-foreground bg-card px-4 py-3 rounded-lg shadow-medium">
+              <Loader2 className="w-5 h-5 animate-spin text-primary" />
+              <span className="font-medium">Applying changes...</span>
+            </div>
+          </div>
+        )}
+        <div className={cn("space-y-4", isEditing && "pointer-events-none")}>
+          {groupedSections.map((section, index) => {
+            if (!section.header) {
+              // Pre-content items (before any main section)
+              return (
+                <div key={`pre-${index}`} className="space-y-1">
                   {renderSectionItems(section.items)}
                 </div>
-              </CollapsibleContent>
-            </Collapsible>
-          );
-        })}
+              );
+            }
+
+            return (
+              <Collapsible
+                key={section.header}
+                open={openSections[section.header]}
+                onOpenChange={() => toggleSection(section.header)}
+              >
+                <CollapsibleTrigger className="w-full">
+                  <div className="flex items-center justify-between py-3 px-4 bg-muted/50 rounded-lg hover:bg-muted/70 transition-colors cursor-pointer">
+                    <h2 className="text-lg font-display font-bold text-foreground tracking-wide">
+                      {section.header}
+                    </h2>
+                    <ChevronDown 
+                      className={cn(
+                        "w-5 h-5 text-muted-foreground transition-transform duration-200",
+                        openSections[section.header] && "rotate-180"
+                      )}
+                    />
+                  </div>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-2">
+                  <div className="space-y-1">
+                    {renderSectionItems(section.items)}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

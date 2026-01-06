@@ -386,6 +386,7 @@ const Index = () => {
                 <ItineraryOutput 
                   itinerary={currentItinerary?.content || ""} 
                   isLoading={isGenerating && !currentItinerary?.content}
+                  isEditing={currentItinerary ? loadingVariants[currentItinerary.id] : false}
                   onEdit={handleEdit}
                   themeTitle={currentItinerary ? `${currentItinerary.emoji} ${currentItinerary.name}` : undefined}
                   tripPreferences={preferences}
