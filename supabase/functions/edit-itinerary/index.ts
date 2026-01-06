@@ -10,6 +10,7 @@ const TripPreferencesSchema = z.object({
   media: z.array(z.object({
     type: z.enum(['image', 'video']),
     preview: z.string().max(10000).optional(),
+    url: z.string().max(1000).optional(),
     name: z.string().max(200).optional(),
   })).max(10).optional(),
   cities: z.array(z.string().max(100)).max(20).optional(),

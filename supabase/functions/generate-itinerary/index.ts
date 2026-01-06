@@ -11,6 +11,7 @@ const PreferencesSchema = z.object({
   media: z.array(z.object({
     type: z.enum(['image', 'video']),
     preview: z.string().max(10000).optional(),
+    url: z.string().max(1000).optional(), // Public URL from storage
     name: z.string().max(200).optional(),
   })).max(10).default([]),
   cities: z.array(z.string().max(100)).max(20).default([]),
@@ -1041,10 +1042,26 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
       console.log("Injected grounded research context into messages");
     }
 
-    // Note: Media (images/videos) are local blob URLs that can't be accessed remotely.
-    // We include media context in the text prompt but cannot send the actual files.
-    // Future enhancement: Upload media to storage and use public URLs.
-    messages.push({ role: "user", content: userPrompt });
+    // Handle media (images/videos) - use public URLs from storage
+    const mediaWithUrls = media?.filter(item => item.url && item.type === 'image') || [];
+    
+    if (mediaWithUrls.length > 0) {
+      const content: any[] = [{ type: "text", text: userPrompt }];
+
+      for (const item of mediaWithUrls) {
+        if (item.url) {
+          content.push({
+            type: "image_url",
+            image_url: { url: item.url },
+          });
+        }
+      }
+
+      messages.push({ role: "user", content });
+      console.log(`Attached ${mediaWithUrls.length} image(s) to the request`);
+    } else {
+      messages.push({ role: "user", content: userPrompt });
+    }
 
     console.log("Calling Lovable AI Gateway");
 

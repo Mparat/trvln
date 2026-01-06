@@ -1,11 +1,15 @@
 import { useState, useCallback } from "react";
-import { Upload, X, Image as ImageIcon, Video } from "lucide-react";
+import { Upload, X, Image as ImageIcon, Video, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/hooks/use-toast";
 
 export interface MediaItem {
   type: 'image' | 'video';
   file?: File;
   preview?: string;
+  url?: string; // Public URL from storage
+  uploading?: boolean;
 }
 
 interface MediaDropZoneProps {
@@ -15,6 +19,70 @@ interface MediaDropZoneProps {
 
 export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
+
+  const uploadToStorage = async (file: File): Promise<string | null> => {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${crypto.randomUUID()}.${fileExt}`;
+    const filePath = `uploads/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('inspiration-media')
+      .upload(filePath, file);
+
+    if (uploadError) {
+      console.error('Upload error:', uploadError);
+      return null;
+    }
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('inspiration-media')
+      .getPublicUrl(filePath);
+
+    return publicUrl;
+  };
+
+  const processFiles = useCallback(async (files: File[]) => {
+    // Create initial media items with uploading state
+    const newMedia: MediaItem[] = files.map(file => ({
+      type: file.type.startsWith('image/') ? 'image' : 'video',
+      file,
+      preview: URL.createObjectURL(file),
+      uploading: true,
+    }));
+
+    // Add to state immediately for preview
+    const updatedMedia = [...media, ...newMedia];
+    onMediaChange(updatedMedia);
+
+    // Upload all files in parallel
+    const uploadPromises = files.map(async (file, index) => {
+      const url = await uploadToStorage(file);
+      return { index: media.length + index, url };
+    });
+
+    const results = await Promise.all(uploadPromises);
+
+    // Update media with URLs
+    const finalMedia = updatedMedia.map((item, idx) => {
+      const result = results.find(r => r.index === idx);
+      if (result) {
+        if (result.url) {
+          return { ...item, url: result.url, uploading: false };
+        } else {
+          // Upload failed
+          toast({
+            title: "Upload failed",
+            description: `Failed to upload ${item.file?.name}`,
+            variant: "destructive",
+          });
+          return { ...item, uploading: false };
+        }
+      }
+      return item;
+    });
+
+    onMediaChange(finalMedia);
+  }, [media, onMediaChange]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -35,14 +103,9 @@ export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
     );
     
     if (files.length > 0) {
-      const newMedia: MediaItem[] = files.map(file => ({
-        type: file.type.startsWith('image/') ? 'image' : 'video',
-        file,
-        preview: URL.createObjectURL(file)
-      }));
-      onMediaChange([...media, ...newMedia]);
+      processFiles(files);
     }
-  }, [media, onMediaChange]);
+  }, [processFiles]);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []).filter(file => 
@@ -50,14 +113,11 @@ export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
     );
     
     if (files.length > 0) {
-      const newMedia: MediaItem[] = files.map(file => ({
-        type: file.type.startsWith('image/') ? 'image' : 'video',
-        file,
-        preview: URL.createObjectURL(file)
-      }));
-      onMediaChange([...media, ...newMedia]);
+      processFiles(files);
     }
-  }, [media, onMediaChange]);
+    // Reset input so same file can be selected again
+    e.target.value = '';
+  }, [processFiles]);
 
   const removeMedia = useCallback((index: number) => {
     onMediaChange(media.filter((_, i) => i !== index));
@@ -139,6 +199,14 @@ export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
                   </div>
                 </div>
               )}
+              
+              {/* Upload overlay */}
+              {item.uploading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-background/70">
+                  <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                </div>
+              )}
+              
               <div className="absolute inset-0 bg-foreground/0 group-hover:bg-foreground/20 transition-all duration-300" />
               <button
                 onClick={() => removeMedia(index)}
@@ -146,9 +214,12 @@ export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
               >
                 <X className="w-4 h-4" />
               </button>
-              <div className="absolute bottom-2 left-2">
+              <div className="absolute bottom-2 left-2 flex items-center gap-1">
                 {item.type === 'image' && <ImageIcon className="w-4 h-4 text-background drop-shadow" />}
                 {item.type === 'video' && <Video className="w-4 h-4 text-background drop-shadow" />}
+                {item.url && (
+                  <span className="text-xs text-background drop-shadow">✓</span>
+                )}
               </div>
             </div>
           ))}
