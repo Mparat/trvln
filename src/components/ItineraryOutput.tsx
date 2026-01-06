@@ -697,7 +697,7 @@ export function ItineraryOutput({ itinerary, isLoading, isEditing, onEdit, theme
       title: "PDF Exported",
       description: "Your full itinerary has been downloaded with clickable links.",
     });
-  }, [items]);
+  }, [items, themeTitle]);
 
   if (isLoading) {
     return (
