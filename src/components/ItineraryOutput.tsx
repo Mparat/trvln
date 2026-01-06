@@ -749,7 +749,7 @@ export function ItineraryOutput({ itinerary, isLoading, isEditing, onEdit, theme
             <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
               <span className="text-2xl font-bold text-primary">{dayNumber}</span>
             </div>
-            <h3 className="font-display font-bold text-foreground text-3xl">
+            <h3 className="font-display font-bold text-foreground text-xl">
               {parseInlineContent(trimmedLine.replace(/^#+\s*/, ''))}
             </h3>
           </div>
