@@ -65,15 +65,15 @@ export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
 
   return (
     <div className="space-y-4">
-      <div
+      <label
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         className={cn(
-          "relative border-2 border-dashed rounded-xl p-8 transition-all duration-300 cursor-pointer group",
+          "relative border-2 border-dashed rounded-xl p-8 transition-all duration-300 cursor-pointer group block",
           isDragging 
             ? "border-primary bg-primary/5 scale-[1.02]" 
-            : "border-border hover:border-primary/50 hover:bg-muted/50",
+            : "border-border hover:border-primary/50 hover:bg-muted/50 active:bg-muted/70",
           "min-h-[180px] flex flex-col items-center justify-center"
         )}
       >
@@ -82,11 +82,11 @@ export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
           accept="image/*,video/*"
           multiple
           onChange={handleFileSelect}
-          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          className="sr-only"
         />
         
         <div className={cn(
-          "flex flex-col items-center gap-4 transition-all duration-300",
+          "flex flex-col items-center gap-4 transition-all duration-300 pointer-events-none",
           isDragging ? "scale-110" : "group-hover:scale-105"
         )}>
           <div className={cn(
@@ -106,11 +106,11 @@ export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
               Screenshots, photos, or screen recordings from your saved TikToks
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              or click to browse • Images & videos up to 50MB
+              or tap to browse • Images & videos up to 50MB
             </p>
           </div>
         </div>
-      </div>
+      </label>
 
       {/* Media Preview Grid */}
       {media.length > 0 && (
