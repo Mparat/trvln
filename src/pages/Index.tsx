@@ -236,18 +236,58 @@ const Index = () => {
   }, [preferences, suggestThemes, generateSingleItinerary]);
 
   const handleEdit = useCallback(async (editRequest: string) => {
-    setPreferences(prev => ({
-      ...prev,
-      additionalNotes: prev.additionalNotes + `\n\nEdit request: ${editRequest}`
-    }));
-    
+    const current = itineraries[activeVariant];
+    if (!current) return;
+
     toast({
       title: "Processing your changes...",
-      description: "Updating all 3 itineraries based on your feedback",
+      description: "Updating the itinerary based on your request",
     });
-    
-    setTimeout(() => handleGenerate(), 100);
-  }, [handleGenerate]);
+
+    // Mark this variant as loading
+    setLoadingVariants(prev => ({ ...prev, [current.id]: true }));
+
+    try {
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/edit-itinerary`, {
+        method: "POST",
+        headers: getHeaders(),
+        body: JSON.stringify({
+          editRequest,
+          currentItinerary: current.content,
+          themeTitle: `${current.emoji} ${current.name}`,
+          tripPreferences: preferences,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to edit itinerary");
+      }
+
+      const data = await response.json();
+      
+      // Update only the current itinerary variant
+      setItineraries(prev => prev.map((it, idx) => 
+        idx === activeVariant 
+          ? { ...it, content: stripPlanningSection(data.updatedItinerary) }
+          : it
+      ));
+
+      toast({
+        title: "Changes applied!",
+        description: "Your itinerary has been updated",
+      });
+    } catch (error) {
+      console.error("Edit error:", error);
+      toast({
+        title: "Edit failed",
+        description: error instanceof Error ? error.message : "Something went wrong",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingVariants(prev => ({ ...prev, [current.id]: false }));
+    }
+  }, [itineraries, activeVariant, getHeaders, preferences]);
 
   const currentItinerary = itineraries[activeVariant];
 
