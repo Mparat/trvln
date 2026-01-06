@@ -8,8 +8,8 @@ const corsHeaders = {
 
 const TripPreferencesSchema = z.object({
   media: z.array(z.object({
-    type: z.string().max(50),
-    url: z.string().max(500),
+    type: z.enum(['image', 'video']),
+    preview: z.string().max(10000).optional(),
     name: z.string().max(200).optional(),
   })).max(10).optional(),
   cities: z.array(z.string().max(100)).max(20).optional(),
