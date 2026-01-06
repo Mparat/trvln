@@ -38,6 +38,27 @@ const RequestSchema = z.object({
   tripPreferences: TripPreferencesSchema,
 });
 
+// Helper functions for context building
+const getBudgetLabel = (value?: number) => {
+  if (!value || value <= 25) return { label: "Budget", accommodation: "$0-$50/night", daily: "$50-80/day" };
+  if (value <= 50) return { label: "Moderate", accommodation: "$50-$100/night", daily: "$100-150/day" };
+  if (value <= 75) return { label: "Comfortable", accommodation: "$100-$200/night", daily: "$200-300/day" };
+  return { label: "Luxury", accommodation: "$200+/night", daily: "$400+/day" };
+};
+
+const getFlightBudget = (value?: number) => {
+  if (!value || value <= 25) return "$100-$300";
+  if (value <= 50) return "$300-$600";
+  if (value <= 75) return "$600-$1000";
+  return "$1000+";
+};
+
+const guidedLabels: Record<string, string> = {
+  'prefer-guided': 'Prefer guided tours and organized activities',
+  'some-guided': 'Mix of guided activities and self-exploration',
+  'self-serve': 'Self-serve only - no guided tours, DIY everything'
+};
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -70,56 +91,171 @@ serve(async (req) => {
       throw new Error('LOVABLE_API_KEY is not configured');
     }
 
-    const getBudgetLabel = (value?: number) => {
-      if (!value) return "Moderate";
-      if (value <= 25) return "Budget";
-      if (value <= 50) return "Moderate";
-      if (value <= 75) return "Comfortable";
-      return "Luxury";
-    };
+    // Build full user context
+    const budgetInfo = getBudgetLabel(tripPreferences.budgetAccommodation);
+    const flightBudget = getFlightBudget(tripPreferences.budgetFlight);
+    const guidedLabel = guidedLabels[tripPreferences.guidedPreference || ''] || 'No preference';
 
-    const systemPrompt = `You are a travel itinerary editor. You will receive an existing itinerary and an edit request.
-Your job is to apply the requested changes while preserving the overall structure and unaffected content.
+    // Build date context
+    let dateContext = "";
+    switch (tripPreferences.dateFlexibility) {
+      case "strict":
+        dateContext = tripPreferences.startDate && tripPreferences.endDate 
+          ? `Fixed dates: ${tripPreferences.startDate} to ${tripPreferences.endDate}` 
+          : "Specific dates";
+        break;
+      case "flexible-days":
+        dateContext = tripPreferences.startDate 
+          ? `Around ${tripPreferences.startDate} (±few days flexible)` 
+          : "Flexible around specific dates";
+        break;
+      case "month":
+        dateContext = tripPreferences.targetMonth 
+          ? `Target: ${tripPreferences.targetMonth}` 
+          : "Specific month/season";
+        break;
+      default:
+        dateContext = "Anytime";
+    }
 
-FORMATTING RULES:
-- Use the EXACT SAME formatting as the original itinerary
-- Main sections: ## SECTION TITLE
-- Day headers: ## Day N: Theme
-- Sub-sections: ### Category Name
-- Time periods: #### Morning / Afternoon / Evening
-- ALL content under headers must be bullet points using "-" (never "*")
-- 2-space indent for first level nesting, 4-space for second level
-- NO loose paragraphs - everything is bullets
-- Keep emojis in headers where appropriate
+    // Build duration context
+    let durationContext = `${tripPreferences.durationDays || 7} days`;
+    if (tripPreferences.durationFlexibility === "flexible-days") {
+      durationContext = `approximately ${tripPreferences.durationDays || 7} days (±2 days flexible)`;
+    }
 
-CONTENT RULES:
-- Make ONLY the changes requested - preserve everything else exactly
-- If the request is about a specific day/section, only modify that part
-- Maintain the same level of detail and style
-- Use verified URL patterns:
-  - Places: https://www.google.com/maps/search/?api=1&query=PLACE+NAME+CITY
-  - Tours: https://www.getyourguide.com/s/?q=TOUR+CITY
-  - Hotels: https://www.booking.com/searchresults.html?ss=HOTEL+CITY
+    const userInputsBlock = `
+**INSPIRATION (destinations)**: ${tripPreferences.cities?.join(', ') || 'Not specified'}
 
-Return the COMPLETE updated itinerary with all sections.`;
+**LOGISTICS**:
+- Budget (Accommodation): ${budgetInfo.label} (${budgetInfo.accommodation}, ~${budgetInfo.daily} total daily)
+- Budget (Flights): ${flightBudget} round trip
+- Date flexibility: ${dateContext}
+- Duration: ${durationContext}
+- Flight preference: ${tripPreferences.flightDirectness || 'No preference'}
+${tripPreferences.departureCity ? `- Departing from: ${tripPreferences.departureCity}` : ""}
 
-    const userPrompt = `THEME: ${themeTitle}
+**VIBE**:
+- Atmosphere: ${tripPreferences.atmosphere?.join(', ') || 'No preference'}
+- Adventure level: ${tripPreferences.adventureLevel || 'No preference'}
+- Guided vs self-serve: ${guidedLabel}
+- Food & drink: ${tripPreferences.foodDrink?.join(', ') || 'No preference'}
+- Interests (ranked): ${tripPreferences.interests?.join(' > ') || 'No preference'}
 
-TRIP CONTEXT:
-- Destinations: ${tripPreferences.cities?.join(', ') || 'Not specified'}
-- Duration: ${tripPreferences.durationDays || 7} days
-- Budget: ${getBudgetLabel(tripPreferences.budgetAccommodation)}
-- Atmosphere: ${tripPreferences.atmosphere?.join(', ') || 'Balanced'}
-- Interests: ${tripPreferences.interests?.join(', ') || 'General'}
-- Food preferences: ${tripPreferences.foodDrink?.join(', ') || 'Local cuisine'}
+**ADDITIONAL NOTES**:
+${tripPreferences.additionalNotes || 'None provided'}
+`;
 
-CURRENT ITINERARY:
+    const systemPrompt = `You are an expert travel itinerary editor. You will receive an existing itinerary and an edit request from the user.
+
+## Your Task
+
+Apply the user's edit request to the existing itinerary while:
+1. Following the edit instructions PRECISELY
+2. Preserving all unaffected content EXACTLY as-is
+3. Maintaining the original structure and formatting
+4. Ensuring the edit fits naturally with the rest of the itinerary
+
+## Understanding the User Context
+
+The user has already generated an itinerary based on these preferences. Use this context to ensure your edits are consistent with their overall trip vision:
+
+${userInputsBlock}
+
+## CRITICAL: Following the Edit Request
+
+**READ THE EDIT REQUEST CAREFULLY.** The user's edit request is the PRIMARY instruction you must follow.
+
+Before making changes, reason through:
+1. What EXACTLY is the user asking to change?
+2. Which specific sections/days/items are affected?
+3. What should remain UNCHANGED?
+4. Does this edit conflict with any stated preferences? If so, the edit request takes priority.
+
+**PAY SPECIAL ATTENTION TO:**
+- The user's Additional Notes above - these often contain critical constraints or preferences
+- The edit request may add detail, override previous choices, or request entirely new content
+- If the edit request contradicts something in the original preferences, FOLLOW THE EDIT REQUEST
+
+## Planning Your Edit (IMPORTANT)
+
+Before writing your output, work through your thinking in <edit_planning> tags:
+
+1. **Quote the edit request** - Write out exactly what the user asked for
+2. **Identify affected sections** - List which parts of the itinerary need to change
+3. **Plan the changes** - Describe specifically what you will add/modify/remove
+4. **Check for consistency** - Ensure the changes fit with the rest of the itinerary
+5. **Verify formatting** - Note any formatting requirements for the changed sections
+
+After </edit_planning>, output the COMPLETE updated itinerary.
+
+## Formatting Rules (CRITICAL - FOLLOW EXACTLY)
+
+### Header Hierarchy:
+- **## SECTION TITLE** - Main sections (EXECUTIVE SUMMARY, KEY BOOKINGS, etc.) - ALL CAPS
+- **## Day X: Location - Theme** - Day headers
+- **### Sub-section Title** - Sub-sections (Flights, Accommodation, Budget Breakdown)
+- **#### Time Period** - Time-of-day headers (Morning, Afternoon, Evening)
+
+### Bullet Point Rules (MANDATORY):
+- ALL content under headers MUST be bullet points using "-" (hyphen)
+- Top-level bullets: "- Content here" (no leading spaces)
+- Nested bullets level 1: "  - Content here" (exactly 2 spaces before hyphen)
+- Nested bullets level 2: "    - Content here" (exactly 4 spaces before hyphen)
+- NEVER use "*" for bullets - ONLY use "-"
+- NEVER write loose paragraph text - ALWAYS use bullets
+
+### URL Formatting:
+EVERY place, restaurant, tour, or hotel MUST have a clickable URL using these patterns:
+
+**For restaurants/cafes/bars** - Use specific names:
+- https://www.google.com/maps/search/?api=1&query=RESTAURANT+NAME+CITY
+
+**For places/attractions**:
+- https://www.google.com/maps/search/?api=1&query=PLACE+NAME+CITY
+
+**For tours**:
+- https://www.getyourguide.com/s/?q=TOUR+DESCRIPTION+CITY
+
+**For hotels**:
+- https://www.booking.com/searchresults.html?ss=HOTEL+NAME+CITY
+
+### Emoji Usage:
+- ✈️ for flights, 🏨 for accommodation, 🍽️ for dining, 🚌 for transport, 💰 for budget
+- Activity emojis (🏯🎨🌳) at start of activity names only
+
+### Bold Text:
+- **Bold** important names, prices, time slots
+- Do NOT bold entire sentences
+
+## Important Guidelines
+
+- Make ONLY the changes requested - preserve everything else EXACTLY
+- If the edit affects one day, other days should remain unchanged
+- Maintain consistent budget if the user didn't ask to change it
+- Keep the same level of detail and style as the original
+- If adding new activities/restaurants, provide the same detail level as existing ones
+- Ensure transportation and timing still make sense after the edit
+
+## Output
+
+After your </edit_planning> section, output the COMPLETE updated itinerary with all sections, even those that weren't changed. The user needs the full itinerary back, not just the edited portions.`;
+
+    const userPrompt = `## Theme: ${themeTitle}
+
+## Current Itinerary:
+
 ${currentItinerary}
 
-EDIT REQUEST:
+---
+
+## EDIT REQUEST:
+
 ${editRequest}
 
-Apply the edit request and return the complete updated itinerary:`;
+---
+
+Apply the edit request above to the itinerary. First plan your changes in <edit_planning> tags, then output the complete updated itinerary.`;
 
     console.log('Calling Lovable AI for itinerary edit...');
 
@@ -135,7 +271,7 @@ Apply the edit request and return the complete updated itinerary:`;
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
         ],
-        max_tokens: 8000,
+        max_tokens: 16000,
         temperature: 0.7,
       }),
     });
@@ -161,11 +297,14 @@ Apply the edit request and return the complete updated itinerary:`;
     }
 
     const data = await response.json();
-    const updatedItinerary = data.choices?.[0]?.message?.content?.trim();
+    let updatedItinerary = data.choices?.[0]?.message?.content?.trim();
 
     if (!updatedItinerary) {
       throw new Error('No content returned from AI');
     }
+
+    // Strip the <edit_planning> section from the output
+    updatedItinerary = updatedItinerary.replace(/<edit_planning>[\s\S]*?<\/edit_planning>/g, '').trim();
 
     console.log('Itinerary edit complete, length:', updatedItinerary.length);
 
