@@ -1041,25 +1041,10 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
       console.log("Injected grounded research context into messages");
     }
 
-    // Handle media (images/videos)
-    const hasMedia = media && media.length > 0;
-
-    if (hasMedia) {
-      const content: any[] = [{ type: "text", text: userPrompt }];
-
-      for (const item of media) {
-        if (item.preview) {
-          content.push({
-            type: "image_url",
-            image_url: { url: item.preview },
-          });
-        }
-      }
-
-      messages.push({ role: "user", content });
-    } else {
-      messages.push({ role: "user", content: userPrompt });
-    }
+    // Note: Media (images/videos) are local blob URLs that can't be accessed remotely.
+    // We include media context in the text prompt but cannot send the actual files.
+    // Future enhancement: Upload media to storage and use public URLs.
+    messages.push({ role: "user", content: userPrompt });
 
     console.log("Calling Lovable AI Gateway");
 
