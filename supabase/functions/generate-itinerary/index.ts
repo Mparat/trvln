@@ -66,7 +66,7 @@ async function searchWithPerplexity(
         messages: [
           { 
             role: 'system', 
-            content: 'You are a travel research assistant. Provide specific, detailed recommendations with exact names of restaurants, hotels, tours, and activities. Include price ranges when available. Be comprehensive but concise.' 
+            content: 'You are a travel research assistant. Provide specific, detailed recommendations with exact names of restaurants, hotels, tours, and activities. When researching hotels, prioritize options within the specified price range and include nightly rates. If most options exceed the budget, explicitly note this and suggest alternatives. Include price ranges when available. Be comprehensive but concise.' 
           },
           { role: 'user', content: query }
         ],
@@ -86,6 +86,18 @@ async function searchWithPerplexity(
   } catch (error) {
     console.error("Perplexity search error:", error);
     return { content: '', citations: [] };
+  }
+}
+
+// Helper to format dates for booking URLs
+function formatDateForBooking(dateStr: string | undefined): string {
+  if (!dateStr) return '';
+  try {
+    const date = new Date(dateStr);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toISOString().split('T')[0]; // YYYY-MM-DD format
+  } catch {
+    return '';
   }
 }
 
@@ -334,8 +346,8 @@ ${additionalNotes || "None provided"}
         // Query 2: Restaurants and food scene (contextual to the destination)
         `Best ${foodStr} restaurants and food experiences in ${destinationStr}. Include specific restaurant names, neighborhoods known for food, price ranges, and local specialties. ${budgetInfo.label} budget.`,
         
-        // Query 3: Accommodation and practical logistics
-        `Best ${budgetInfo.label} hotels and accommodation in ${destinationStr}. Include specific hotel names, neighborhoods to stay in, and price ranges. Also include transportation tips and getting around.`,
+        // Query 3: Accommodation and practical logistics (with date-specific pricing)
+        `Best ${budgetInfo.label} hotels and accommodation in ${destinationStr} priced ${budgetInfo.accommodation}. ${startDate && endDate ? `For dates: check-in ${startDate}, check-out ${endDate}.` : targetMonth ? `For travel in ${targetMonth}.` : ''} Include specific hotel names with current nightly rates, neighborhoods to stay in, and whether the prices shown are for the requested dates or general averages. Also include transportation tips and getting around.`,
         
         // Query 4: Nearby destinations & multi-city options (critical for long trips)
         isSingleCity && isLongTrip
@@ -345,8 +357,8 @@ ${additionalNotes || "None provided"}
         // Query 5: Inter-city transportation & routing
         `How to travel between cities near ${destinationStr}. Include train times and prices (e.g., Shinkansen for Japan, Eurostar for Europe, high-speed rail), bus options, domestic flights if relevant. Best route to visit multiple cities in the region. Travel time and cost between major destinations.`,
         
-        // Query 6: Seasonal & practical information
-        `${destinationStr} travel in ${targetMonth || 'the travel season'}. Include weather conditions, peak vs off-season pricing differences, festivals or events happening, typical crowd levels, and any seasonal closures or considerations.`
+        // Query 6: Seasonal & practical information (with hotel price seasonality)
+        `${destinationStr} travel in ${targetMonth || 'the travel season'}. Include weather conditions, peak vs off-season pricing differences (especially for hotels - how much more expensive are hotels during this period compared to off-season?), festivals or events happening, typical crowd levels, and any seasonal closures or considerations.`
       ];
       
       // Query 7: Flight estimates (conditional - only if origin is provided and flights needed)
@@ -438,6 +450,9 @@ ${restaurantsResearch.citations?.length > 0 ? restaurantsResearch.citations.map(
 ### 🏨 ACCOMMODATION & LOGISTICS RESEARCH
 ${accommodationResearch.content || 'No accommodation research available - use Booking.com search URLs for hotel recommendations.'}
 
+**User's Accommodation Budget Target:** ${budgetInfo.accommodation}
+**If researched prices exceed this range, the AI MUST note this and suggest alternatives or explain the budget tradeoff.**
+
 **Source Citations:**
 ${accommodationResearch.citations?.length > 0 ? accommodationResearch.citations.map((c, i) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
 
@@ -520,7 +535,7 @@ You have been provided with LIVE WEB SEARCH RESULTS in the assistant message bel
 **If something specific isn't in the research, use these SEARCH URL patterns as fallback:**
 - Places: https://www.google.com/maps/search/?api=1&query=PLACE+NAME+CITY
 - Tours: https://www.getyourguide.com/s/?q=TOUR+DESCRIPTION+CITY
-- Hotels: https://www.booking.com/searchresults.html?ss=HOTEL+NAME+CITY
+- Hotels: https://www.booking.com/searchresults.html?ss=HOTEL+NAME+CITY${startDate ? `&checkin=${formatDateForBooking(startDate)}` : ''}${endDate ? `&checkout=${formatDateForBooking(endDate)}` : ''}
 - Flights: https://www.google.com/flights
 
 ## Planning Your Itinerary
@@ -590,6 +605,18 @@ Calculate explicitly whether everything fits within budget. Show ALL your arithm
 - Compare to budget: "$Total vs $Budget_Available"
 - Calculate the difference explicitly: "Difference: $Total - $Budget_Available = $X (over/under)"
 - If over budget, identify specific line items to cut, recalculate each affected location's subtotal, and show the new total
+
+**Step 5b: Accommodation Price Verification**
+
+For each hotel you recommend, verify pricing against the user's budget:
+- User's accommodation budget target: ${budgetInfo.accommodation}
+- Calculate: "User budget: ${budgetInfo.accommodation} × [number of nights] nights = $X total for accommodation"
+- For each recommended hotel: "[Hotel name]: $Y/night × [nights] = $Z total"
+- Compare: If $Z > $X, explicitly note this is over budget
+- If prices exceed the user's accommodation budget due to seasonal factors or high demand:
+  - Explain WHY prices are higher (peak season, event, high-demand area, etc.)
+  - Provide at least one budget-friendly alternative hotel
+  - Calculate the savings: "Alternative hotel: $A/night saves $B vs. primary recommendation"
 
 **Step 6: Seasonal Considerations**
 
