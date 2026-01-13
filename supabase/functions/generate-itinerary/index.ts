@@ -488,6 +488,7 @@ The user inputs are organized into four main categories:
 - Food & drink preferences: These guide restaurant recommendations
 - Interests ranking: Use this to prioritize when making choices between competing options
 - Self-serve appetite: This determines whether to suggest guided tours or independent exploration
+- Note: Neighborhood exploration, wandering, and unstructured discovery time are legitimate activities - not every time slot needs a specific attraction
 
 **4. Open Text** - Additional context
 - This may clarify, override, or add nuance to the structured inputs above
@@ -591,6 +592,8 @@ For each destination in your chosen route, calculate:
 - Travel time to arrive and depart
 - Recommended number of days with justification
 
+Note: A well-paced itinerary includes breathing room. Not every time block needs a specific attraction - sometimes the best travel experiences come from wandering a neighborhood, sitting in a local cafe, or stumbling upon something unexpected. For trips of 5+ days, include at least 1-2 "exploration" blocks rather than back-to-back structured activities.
+
 **Step 5: Budget Breakdown Math**
 
 Calculate explicitly whether everything fits within budget. Show ALL your arithmetic step-by-step with explicit numbers:
@@ -632,11 +635,16 @@ Based on all the above, can you visit all of the user's inspiration locations? I
 
 **Step 8: Research Activities for Each Day**
 
-For each day of your itinerary, research and list 3-5 potential activities. For each activity, note:
+For each day of your itinerary, research and list 3-5 potential activities. Activities can include:
+- Specific attractions, museums, tours, or experiences
+- **Neighborhood exploration** (e.g., "Walk around Shimokitazawa and browse vintage shops")
+- **Unstructured discovery time** (e.g., "Explore the backstreets of Yanaka")
+
+For each activity, note:
 - What it is and key details
 - Why it matches user's interests and vibe
-- Time required and cost
-- Source citation
+- Time required and cost (exploration activities can be $0 or minimal)
+- Source citation (for exploration, cite a travel blog recommending the neighborhood, or use [Neighborhood exploration - no booking required])
 
 **Step 9: Cross-Check and Compare Activities**
 
@@ -875,7 +883,7 @@ For each day, use this structure:
 - Total: $XX
 \`\`\`
 
-**Activity Tags:** [Include relevant tags: nature, cultural, food & drink, adventure, educational, photo-worthy, romantic, family-friendly]
+**Activity Tags:** [Include relevant tags: nature, cultural, food & drink, adventure, educational, photo-worthy, romantic, family-friendly, wandering, local-vibe]
 
 **Example structure for a day:**
 \`\`\`
@@ -888,7 +896,11 @@ Details: 2-3-1 Asakusa, Taito City. Open 6 AM-5 PM. Free entry.
 [Source citation]
 
 **Afternoon:**
-[Similar format]
+🚶 Explore Shimokitazawa (2:00 PM - 5:00 PM) [wandering] [local-vibe] [shopping]
+Why: This bohemian neighborhood is perfect for unstructured exploration - vintage shops, indie cafes, and local street life
+Details: No tickets needed. Wander the backstreets, pop into shops that catch your eye, grab coffee when you're tired
+[Shimokitazawa area](https://www.google.com/maps/search/?api=1&query=Shimokitazawa+Tokyo)
+[Source: Time Out Tokyo - "Shimokitazawa neighborhood guide"]
 
 **Evening:**
 [Similar format]
