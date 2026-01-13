@@ -20,6 +20,7 @@ const PreferencesSchema = z.object({
   dateFlexibility: z.string().max(50).default('anytime'),
   startDate: z.string().max(50).optional(),
   endDate: z.string().max(50).optional(),
+  flexibleDays: z.number().min(1).max(14).optional(), // ± days flexibility when using exact dates
   targetMonth: z.string().max(50).default(''),
   durationFlexibility: z.string().max(50).default('1-week'),
   durationDays: z.number().min(1).max(90).default(7),
@@ -133,6 +134,7 @@ serve(async (req) => {
       dateFlexibility,
       startDate,
       endDate,
+      flexibleDays,
       targetMonth,
       durationFlexibility,
       durationDays,
@@ -178,10 +180,21 @@ serve(async (req) => {
 
     let durationContext = "";
 
-    // If user chose exact dates, always respect the date range as the duration
+    // If user chose exact dates, calculate base duration and apply flexibility
     if (dateFlexibility === "strict") {
       const daysFromDates = computeInclusiveDays(startDate, endDate);
-      durationContext = daysFromDates ? `exactly ${daysFromDates} days` : "dates provided but duration unclear";
+      if (daysFromDates) {
+        if (flexibleDays && flexibleDays > 0) {
+          // User has exact dates but with ± N days flexibility
+          const minDays = Math.max(1, daysFromDates - flexibleDays);
+          const maxDays = daysFromDates + flexibleDays;
+          durationContext = `${minDays}-${maxDays} days (base: ${daysFromDates} days, ±${flexibleDays} days flexible)`;
+        } else {
+          durationContext = `exactly ${daysFromDates} days`;
+        }
+      } else {
+        durationContext = "dates provided but duration unclear";
+      }
     } else {
       switch (durationFlexibility) {
         case "weekend":
@@ -211,8 +224,16 @@ serve(async (req) => {
     let dateContext = "";
     switch (dateFlexibility) {
       case "strict":
-        dateContext =
-          startDate && endDate ? `Fixed dates: ${startDate} to ${endDate}` : "Specific dates (not provided)";
+        if (startDate && endDate) {
+          if (flexibleDays && flexibleDays > 0) {
+            // Exact dates with flexibility - AI can extend trip by ± N days on either end
+            dateContext = `Target dates: ${startDate} to ${endDate} (±${flexibleDays} days flexible on either end). You may start up to ${flexibleDays} days earlier or end up to ${flexibleDays} days later if it improves the trip. Choose what works best for the destination and activities.`;
+          } else {
+            dateContext = `Fixed dates: ${startDate} to ${endDate}`;
+          }
+        } else {
+          dateContext = "Specific dates (not provided)";
+        }
         break;
       case "flexible-days":
         dateContext = startDate ? `Around ${startDate} (±few days flexible)` : "Flexible around specific dates";
