@@ -316,12 +316,18 @@ ${additionalNotes || "None provided"}
       console.log("Starting Perplexity grounded research...");
       
       const destinationStr = cities?.length > 0 ? cities.join(', ') : 'popular travel destinations';
+      const primaryCity = cities?.[0] || 'the destination';
       const interestsStr = interests?.length > 0 ? interests.join(', ') : 'general sightseeing';
       const foodStr = foodDrink?.length > 0 ? foodDrink.join(', ') : 'local cuisine';
       const themeStr = themeVariant?.name || '';
       
+      // Determine trip length for context-aware queries
+      const tripDaysNum = durationDays || 7;
+      const isSingleCity = cities?.length === 1;
+      const isLongTrip = tripDaysNum >= 7;
+      
       // Build focused search queries based on user preferences
-      const searchQueries = [
+      const searchQueries: string[] = [
         // Query 1: Activities and things to do (this drives the itinerary structure)
         `Best things to do in ${destinationStr} for ${interestsStr} travelers. Include specific activity names, tour recommendations, must-visit attractions, hidden gems, and neighborhoods to explore.${themeStr ? ` Focus on ${themeStr} experiences.` : ''} ${budgetInfo.label} budget level.`,
         
@@ -329,10 +335,29 @@ ${additionalNotes || "None provided"}
         `Best ${foodStr} restaurants and food experiences in ${destinationStr}. Include specific restaurant names, neighborhoods known for food, price ranges, and local specialties. ${budgetInfo.label} budget.`,
         
         // Query 3: Accommodation and practical logistics
-        `Best ${budgetInfo.label} hotels and accommodation in ${destinationStr}. Include specific hotel names, neighborhoods to stay in, and price ranges. Also include transportation tips and getting around.`
+        `Best ${budgetInfo.label} hotels and accommodation in ${destinationStr}. Include specific hotel names, neighborhoods to stay in, and price ranges. Also include transportation tips and getting around.`,
+        
+        // Query 4: Nearby destinations & multi-city options (critical for long trips)
+        isSingleCity && isLongTrip
+          ? `For a ${tripDaysNum}-day trip to ${primaryCity}, what other cities and destinations should I also visit? Include nearby cities worth visiting, recommended number of days for each city, day trip options from ${primaryCity}, and why each destination is worth including. Consider travel time between cities.`
+          : `Best day trips and nearby destinations from ${destinationStr}. Include travel time, recommended duration, and why each is worth visiting for a ${tripDaysNum}-day trip.`,
+        
+        // Query 5: Inter-city transportation & routing
+        `How to travel between cities near ${destinationStr}. Include train times and prices (e.g., Shinkansen for Japan, Eurostar for Europe, high-speed rail), bus options, domestic flights if relevant. Best route to visit multiple cities in the region. Travel time and cost between major destinations.`,
+        
+        // Query 6: Seasonal & practical information
+        `${destinationStr} travel in ${targetMonth || 'the travel season'}. Include weather conditions, peak vs off-season pricing differences, festivals or events happening, typical crowd levels, and any seasonal closures or considerations.`
       ];
       
+      // Query 7: Flight estimates (conditional - only if origin is provided and flights needed)
+      if (!noFlight && departureCity) {
+        searchQueries.push(
+          `Flights from ${departureCity} to ${primaryCity} in ${targetMonth || 'upcoming months'}. Include typical price ranges, best airlines, flight duration, whether nonstop options exist, and best time to book.`
+        );
+      }
+      
       // Run all searches in parallel for speed
+      console.log(`Executing ${searchQueries.length} Perplexity research queries...`);
       const searchPromises = searchQueries.map(query => searchWithPerplexity(query, PERPLEXITY_API_KEY));
       const results = await Promise.all(searchPromises);
       
@@ -342,6 +367,10 @@ ${additionalNotes || "None provided"}
       const activitiesResearch = results[0];
       const restaurantsResearch = results[1];
       const accommodationResearch = results[2];
+      const nearbyDestinationsResearch = results[3];
+      const transportationResearch = results[4];
+      const seasonalResearch = results[5];
+      const flightResearch = results[6]; // May be undefined if no flight query
       
       groundedResearchContext = `
 ## GROUNDED RESEARCH DATA (From Live Web Search)
@@ -355,6 +384,38 @@ You are a reasoning model. The following content is retrieved from live web sear
 - ONLY recommend places, activities, and restaurants that appear in this research data
 - When you cite a source, use the actual URLs provided in the citations below
 - If something specific isn't in the research, use the fallback URL patterns (Google Maps search, GetYourGuide search, etc.)
+
+---
+
+### 🗺️ NEARBY DESTINATIONS & MULTI-CITY OPTIONS
+${nearbyDestinationsResearch?.content || 'No nearby destinations research available.'}
+
+**Source Citations:**
+${nearbyDestinationsResearch?.citations?.length > 0 ? nearbyDestinationsResearch.citations.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
+
+---
+
+### 🚄 INTER-CITY TRANSPORTATION & ROUTING
+${transportationResearch?.content || 'No transportation research available - use Google Maps for transit options.'}
+
+**Source Citations:**
+${transportationResearch?.citations?.length > 0 ? transportationResearch.citations.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
+
+---
+
+### 📅 SEASONAL & PRACTICAL INFORMATION
+${seasonalResearch?.content || 'No seasonal research available.'}
+
+**Source Citations:**
+${seasonalResearch?.citations?.length > 0 ? seasonalResearch.citations.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
+
+---
+
+### ✈️ FLIGHT INFORMATION
+${flightResearch?.content || 'No flight research available - use Google Flights for accurate pricing.'}
+
+**Source Citations:**
+${flightResearch?.citations?.length > 0 ? flightResearch.citations.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
 
 ---
 
