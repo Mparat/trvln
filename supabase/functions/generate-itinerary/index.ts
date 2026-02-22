@@ -537,7 +537,7 @@ You have been provided with LIVE WEB SEARCH RESULTS in the assistant message bel
 - Places: https://www.google.com/maps/search/?api=1&query=PLACE+NAME+CITY
 - Tours: https://www.getyourguide.com/s/?q=TOUR+DESCRIPTION+CITY
 - Hotels: https://www.booking.com/searchresults.html?ss=HOTEL+NAME+CITY${startDate ? `&checkin=${formatDateForBooking(startDate)}` : ''}${endDate ? `&checkout=${formatDateForBooking(endDate)}` : ''}
-- Flights: https://www.google.com/flights
+- Flights: https://www.google.com/travel/flights?q=flights+from+${departureCity ? departureCity.replace(/\s+/g, '+') : 'ORIGIN'}+to+DESTINATION${startDate ? `+departing+${formatDateForBooking(startDate)}` : ''}${endDate ? `+returning+${formatDateForBooking(endDate)}` : ''}
 
 ## Planning Your Itinerary
 
@@ -760,7 +760,7 @@ If relevant (different dates, airports, etc.), provide alternatives with same de
 - Arrival: [Date] at [Time]
 - Duration: [X hours], [X stops/Nonstop]
 - Price: $XXX-XXX
-- Book: [Google Flights URL]
+- Book: [Search on Google Flights](https://www.google.com/travel/flights?q=flights+from+DEPARTURE_CITY+to+DESTINATION${startDate ? `+departing+${formatDateForBooking(startDate)}` : ''}${endDate ? `+returning+${formatDateForBooking(endDate)}` : ''})
 - [Source citation]
 \`\`\`
 
@@ -1002,8 +1002,13 @@ EVERY activity, tour, restaurant, cafe, bar, or experience MUST include a clicka
 - Format: https://www.getyourguide.com/s/?q=TOUR+DESCRIPTION+CITY
 - Example: [Teotihuacan Day Tour](https://www.getyourguide.com/s/?q=Teotihuacan+day+tour+Mexico+City)
 
-**FOR FLIGHTS**:
-- Use: https://www.google.com/flights
+**FOR FLIGHTS** - Use Google Flights with dates and route:
+- Format: https://www.google.com/travel/flights?q=flights+from+ORIGIN+to+DESTINATION+departing+YYYY-MM-DD+returning+YYYY-MM-DD
+${departureCity ? `- User's departure city: ${departureCity} (use this as the flight origin)` : '- No departure city specified (use a reasonable origin based on context)'}
+${startDate ? `- User's start date: ${formatDateForBooking(startDate)} (use as departing date)` : ''}
+${endDate ? `- User's end date: ${formatDateForBooking(endDate)} (use as returning date)` : ''}
+- Example: [Search Flights](https://www.google.com/travel/flights?q=flights+from+${departureCity ? departureCity.replace(/\s+/g, '+') : 'New+York'}+to+Tokyo${startDate ? `+departing+${formatDateForBooking(startDate)}` : ''}${endDate ? `+returning+${formatDateForBooking(endDate)}` : ''})
+- If no specific dates: https://www.google.com/travel/flights?q=flights+from+ORIGIN+to+DESTINATION
 
 **FOR HOTELS/ACCOMMODATION** - Use Booking.com SEARCH:
 - Format: https://www.booking.com/searchresults.html?ss=HOTEL+NAME+CITY
