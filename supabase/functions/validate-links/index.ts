@@ -180,7 +180,7 @@ Respond ONLY with a JSON array, no other text. Format:
   } catch (error) {
     console.error('Error validating links:', error);
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : 'Failed to validate links' }),
+      JSON.stringify({ error: 'Unable to validate links. Please try again.' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
