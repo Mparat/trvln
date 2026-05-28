@@ -258,7 +258,7 @@ Respond with ONLY a JSON array of 3 objects, each with "id" (snake_case), "name"
   } catch (error) {
     console.error("Error in suggest-themes function:", error);
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error occurred" }),
+      JSON.stringify({ error: "Unable to process request. Please try again." }),
       {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

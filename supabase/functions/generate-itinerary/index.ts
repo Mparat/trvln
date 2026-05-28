@@ -1233,7 +1233,7 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
     });
   } catch (error) {
     console.error("Error in generate-itinerary function:", error);
-    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error occurred" }), {
+    return new Response(JSON.stringify({ error: "Unable to process request. Please try again." }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

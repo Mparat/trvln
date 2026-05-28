@@ -207,7 +207,7 @@ Provide the updated item (just the line, nothing else):`;
   } catch (error) {
     console.error('Error in update-itinerary-item:', error);
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : 'Failed to update item' }),
+      JSON.stringify({ error: 'Unable to update item. Please try again.' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
