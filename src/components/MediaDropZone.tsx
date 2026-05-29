@@ -56,11 +56,11 @@ export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
 
       video.onloadedmetadata = () => {
         const duration = video.duration;
-        if (!duration || duration <= 0) {
+        if (!duration || duration <= 0 || video.videoWidth <= 0 || video.videoHeight <= 0) {
           resolve([]);
           return;
         }
-        
+
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         if (!ctx) {
@@ -68,8 +68,10 @@ export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
           return;
         }
 
-        canvas.width = Math.min(video.videoWidth, 1280); // Cap at 1280px width
-        canvas.height = Math.min(video.videoHeight, 720);
+        // Scale to fit within 1280x720 while preserving aspect ratio
+        const scale = Math.min(1280 / video.videoWidth, 720 / video.videoHeight, 1);
+        canvas.width = Math.round(video.videoWidth * scale);
+        canvas.height = Math.round(video.videoHeight * scale);
 
         const captureFrame = () => {
           if (currentIndex >= timestamps.length) {
@@ -137,14 +139,17 @@ export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
           const frames = await extractVideoFrames(file);
           console.log(`Extracted ${frames.length} frames from video`);
           
-          // Upload frames in parallel
-          const frameUploadPromises = frames.map(async (blob, frameIndex) => {
+          // Upload frames in parallel; partial failures are tolerated
+          const frameUploadPromises = frames.map(async (blob) => {
             const frameFile = new File([blob], `frame_${crypto.randomUUID()}.jpg`, { type: 'image/jpeg' });
             return await uploadToStorage(frameFile);
           });
-          
-          const uploadedFrameUrls = await Promise.all(frameUploadPromises);
-          frameUrls = uploadedFrameUrls.filter((u): u is string => u !== null);
+
+          const uploadedFrameUrls = await Promise.allSettled(frameUploadPromises);
+          frameUrls = uploadedFrameUrls
+            .filter((r): r is PromiseFulfilledResult<string | null> => r.status === 'fulfilled')
+            .map(r => r.value)
+            .filter((u): u is string => u !== null);
           console.log(`Uploaded ${frameUrls.length} video frames`);
         } catch (error) {
           console.error('Video frame extraction failed:', error);

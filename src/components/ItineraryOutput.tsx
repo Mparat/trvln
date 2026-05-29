@@ -305,10 +305,10 @@ export function ItineraryOutput({ itinerary, isLoading, isEditing, onEdit, theme
     if (!shouldUpdate) return;
 
     if (overrides?.vote !== undefined && overrides.vote !== current.vote) {
-      setVote(itemId, overrides.vote as any);
+      setVote(itemId, overrides.vote);
     }
     if (overrides?.comment !== undefined && overrides.comment !== current.comment) {
-      setComment(itemId, (overrides.comment ?? '') as any);
+      setComment(itemId, overrides.comment ?? '');
     }
 
     setItemUpdating(itemId, true);

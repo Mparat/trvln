@@ -67,9 +67,9 @@ serve(async (req) => {
     const { preferences } = validationResult.data;
     console.log("Suggesting themes for preferences:", JSON.stringify(preferences, null, 2));
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      throw new Error("LOVABLE_API_KEY is not configured");
+    const GOOGLE_API_KEY = Deno.env.get("GOOGLE_API_KEY");
+    if (!GOOGLE_API_KEY) {
+      throw new Error("GOOGLE_API_KEY is not configured");
     }
 
     const {
@@ -183,14 +183,14 @@ The themes should feel tailored to THIS specific traveler, not generic.
 
 Respond with ONLY a JSON array of 3 objects, each with "id" (snake_case), "name", and "emoji" fields. No other text.`;
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        Authorization: `Bearer ${GOOGLE_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "models/gemini-2.5-flash",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: context },
@@ -200,7 +200,7 @@ Respond with ONLY a JSON array of 3 objects, each with "id" (snake_case), "name"
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("AI gateway error:", response.status, errorText);
+      console.error("Google AI error:", response.status, errorText);
       
       if (response.status === 429) {
         return new Response(

@@ -95,9 +95,9 @@ serve(async (req) => {
     console.log('Edit request:', editRequest);
     console.log('Theme:', themeTitle);
 
-    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-    if (!LOVABLE_API_KEY) {
-      throw new Error('LOVABLE_API_KEY is not configured');
+    const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
+    if (!ANTHROPIC_API_KEY) {
+      throw new Error('ANTHROPIC_API_KEY is not configured');
     }
 
     // Build full user context
@@ -274,18 +274,19 @@ ${editRequest}
 
 Apply the edit request above to the itinerary. First plan your changes in <edit_planning> tags, then output the complete updated itinerary.`;
 
-    console.log('Calling Lovable AI for itinerary edit...');
+    console.log('Calling Anthropic for itinerary edit...');
 
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
+        model: 'claude-sonnet-4-6',
+        system: systemPrompt,
         messages: [
-          { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
         ],
         max_tokens: 16000,
@@ -314,7 +315,7 @@ Apply the edit request above to the itinerary. First plan your changes in <edit_
     }
 
     const data = await response.json();
-    let updatedItinerary = data.choices?.[0]?.message?.content?.trim();
+    let updatedItinerary = data.content?.[0]?.text?.trim();
 
     if (!updatedItinerary) {
       throw new Error('No content returned from AI');

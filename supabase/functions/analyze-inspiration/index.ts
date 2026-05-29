@@ -36,9 +36,9 @@ serve(async (req) => {
       );
     }
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      throw new Error("LOVABLE_API_KEY is not configured");
+    const GOOGLE_API_KEY = Deno.env.get("GOOGLE_API_KEY");
+    if (!GOOGLE_API_KEY) {
+      throw new Error("GOOGLE_API_KEY is not configured");
     }
 
     console.log(`Analyzing ${mediaUrls.length} media items for location recognition`);
@@ -86,16 +86,16 @@ If no locations can be identified from any images, return:
       });
     }
 
-    console.log("Calling Lovable AI Gateway for vision analysis");
+    console.log("Calling Google AI for vision analysis");
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        Authorization: `Bearer ${GOOGLE_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "models/gemini-2.5-flash",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content },
@@ -106,7 +106,7 @@ If no locations can be identified from any images, return:
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("AI gateway error:", response.status, errorText);
+      console.error("Google AI error:", response.status, errorText);
 
       if (response.status === 429) {
         return new Response(

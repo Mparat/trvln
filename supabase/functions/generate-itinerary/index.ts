@@ -62,7 +62,7 @@ async function searchWithPerplexity(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'sonar',
+        model: 'sonar-pro',
         messages: [
           { 
             role: 'system', 
@@ -131,9 +131,9 @@ serve(async (req) => {
     console.log("Received preferences:", JSON.stringify(preferences, null, 2));
     console.log("Theme variant:", themeVariant || "default");
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      throw new Error("LOVABLE_API_KEY is not configured");
+    const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
+    if (!ANTHROPIC_API_KEY) {
+      throw new Error("ANTHROPIC_API_KEY is not configured");
     }
     
     const PERPLEXITY_API_KEY = Deno.env.get("PERPLEXITY_API_KEY");
@@ -1189,35 +1189,35 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
       messages.push({ role: "user", content: userPrompt });
     }
 
-    console.log("Calling Lovable AI Gateway");
+    console.log("Calling Anthropic API");
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    // Extract system message; Anthropic API takes it as a top-level field
+    const systemMessage = messages.find((m: any) => m.role === "system");
+    const nonSystemMessages = messages.filter((m: any) => m.role !== "system");
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages,
+        model: "claude-sonnet-4-6",
+        system: systemMessage?.content,
+        messages: nonSystemMessages,
+        max_tokens: 16000,
         stream: true,
       }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("AI gateway error:", response.status, errorText);
+      console.error("Anthropic API error:", response.status, errorText);
 
       if (response.status === 429) {
         return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment." }), {
           status: 429,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "Usage limit reached. Please add credits to continue." }), {
-          status: 402,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
@@ -1228,7 +1228,45 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
       });
     }
 
-    return new Response(response.body, {
+    // Transform Anthropic SSE format → OpenAI SSE format (frontend expects OpenAI spec)
+    const { readable, writable } = new TransformStream();
+    const writer = writable.getWriter();
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+
+    (async () => {
+      const reader = response.body!.getReader();
+      let buffer = "";
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const jsonStr = line.slice(6).trim();
+            if (jsonStr === "[DONE]") {
+              await writer.write(encoder.encode("data: [DONE]\n\n"));
+              continue;
+            }
+            try {
+              const event = JSON.parse(jsonStr);
+              if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+                const openAiChunk = JSON.stringify({ choices: [{ delta: { content: event.delta.text } }] });
+                await writer.write(encoder.encode(`data: ${openAiChunk}\n\n`));
+              }
+            } catch { /* skip malformed lines */ }
+          }
+        }
+        await writer.write(encoder.encode("data: [DONE]\n\n"));
+      } finally {
+        writer.close();
+      }
+    })();
+
+    return new Response(readable, {
       headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
     });
   } catch (error) {

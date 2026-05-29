@@ -134,8 +134,8 @@ export function TripSummaryCard({ itinerary, departureCity, startDate, endDate, 
         <div className="mt-4 pt-4 border-t border-border">
           <p className="text-sm text-muted-foreground mb-2">Key highlights:</p>
           <div className="flex flex-wrap gap-2">
-            {summary.highlights.map((highlight, i) => (
-              <Badge key={i} variant="outline" className="text-xs">
+            {summary.highlights.map((highlight) => (
+              <Badge key={highlight} variant="outline" className="text-xs">
                 {highlight}
               </Badge>
             ))}

@@ -141,7 +141,7 @@ export function useItineraryItems(initialItinerary: string = '') {
   }, []);
 
   // Set vote for an item
-  const setVote = useCallback((itemId: string, vote: 'up' | 'down' | 'neutral') => {
+  const setVote = useCallback((itemId: string, vote: 'up' | 'down' | 'neutral' | null) => {
     setItems(prev => prev.map(item => 
       item.id === itemId ? { ...item, vote } : item
     ));
@@ -250,11 +250,6 @@ export function useItineraryItems(initialItinerary: string = '') {
       // Check if we're leaving the section (new section header)
       if (inTargetSection && item.type === 'section-header' && !item.content.toLowerCase().includes(section.toLowerCase())) {
         inTargetSection = false;
-      }
-
-      // Check if we're leaving the day
-      if (inTargetDay && item.type === 'day-header' && item.content !== items.find(i => i.content.match(new RegExp(`Day\\s+${dayNumber}`, 'i')))?.content) {
-        break;
       }
 
       if (inTargetDay && inTargetSection && item.type === 'bullet') {
