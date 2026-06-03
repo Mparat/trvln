@@ -95,7 +95,7 @@ If no locations can be identified from any images, return:
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "models/gemini-2.5-flash",
+        model: "models/gemini-2.5-pro",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content },

@@ -1,5 +1,5 @@
-import { useState, useCallback } from "react";
-import { Upload, X, Image as ImageIcon, Video, Loader2 } from "lucide-react";
+import { useState, useCallback, useRef } from "react";
+import { Upload, X, Image as ImageIcon, Video, Loader2, Link } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -20,6 +20,9 @@ interface MediaDropZoneProps {
 
 export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
+  const [socialUrl, setSocialUrl] = useState("");
+  const [isExtractingUrl, setIsExtractingUrl] = useState(false);
+  const urlInputRef = useRef<HTMLInputElement>(null);
 
   const uploadToStorage = async (file: File): Promise<string | null> => {
     const fileExt = file.name.split('.').pop();
@@ -109,6 +112,122 @@ export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
       video.src = URL.createObjectURL(file);
     });
   };
+
+  const extractVideoFramesFromUrl = async (videoUrl: string): Promise<Blob[]> => {
+    return new Promise((resolve) => {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.muted = true;
+      video.playsInline = true;
+      video.crossOrigin = 'anonymous';
+
+      const frames: Blob[] = [];
+      const timestamps = [0.1, 0.25, 0.5, 0.75, 0.9];
+      let currentIndex = 0;
+
+      video.onloadedmetadata = () => {
+        const duration = video.duration;
+        if (!duration || duration <= 0 || video.videoWidth <= 0 || video.videoHeight <= 0) {
+          resolve([]);
+          return;
+        }
+
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { resolve([]); return; }
+
+        const scale = Math.min(1280 / video.videoWidth, 720 / video.videoHeight, 1);
+        canvas.width = Math.round(video.videoWidth * scale);
+        canvas.height = Math.round(video.videoHeight * scale);
+
+        const captureFrame = () => {
+          if (currentIndex >= timestamps.length) { resolve(frames); return; }
+          video.currentTime = duration * timestamps[currentIndex];
+        };
+
+        video.onseeked = () => {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          canvas.toBlob((blob) => {
+            if (blob) frames.push(blob);
+            currentIndex++;
+            captureFrame();
+          }, 'image/jpeg', 0.8);
+        };
+
+        video.onerror = () => resolve(frames);
+        captureFrame();
+      };
+
+      video.onerror = () => resolve([]);
+      video.src = videoUrl;
+    });
+  };
+
+  const handleSocialUrl = useCallback(async () => {
+    const url = socialUrl.trim();
+    if (!url) return;
+
+    const isTikTok = url.includes('tiktok.com');
+    const isInstagram = url.includes('instagram.com');
+    if (!isTikTok && !isInstagram) {
+      toast({ title: "Unsupported URL", description: "Only TikTok and Instagram links are supported", variant: "destructive" });
+      return;
+    }
+
+    setIsExtractingUrl(true);
+    const placeholder: MediaItem = { type: 'video', uploading: true };
+    const mediaWithPlaceholder = [...media, placeholder];
+    const placeholderIndex = media.length;
+    onMediaChange(mediaWithPlaceholder);
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/extract-social-video`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        }
+      );
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to extract video");
+
+      const videoUrl: string = data.url;
+
+      // Extract frames from the uploaded video for AI analysis
+      let frameUrls: string[] = [];
+      try {
+        const frames = await extractVideoFramesFromUrl(videoUrl);
+        const frameUploadPromises = frames.map(async (blob) => {
+          const frameFile = new File([blob], `frame_${crypto.randomUUID()}.jpg`, { type: 'image/jpeg' });
+          return await uploadToStorage(frameFile);
+        });
+        const uploaded = await Promise.allSettled(frameUploadPromises);
+        frameUrls = uploaded
+          .filter((r): r is PromiseFulfilledResult<string | null> => r.status === 'fulfilled')
+          .map(r => r.value)
+          .filter((u): u is string => u !== null);
+      } catch {
+        // Frame extraction failure is non-fatal
+      }
+
+      const completed = mediaWithPlaceholder.map((item, idx) =>
+        idx === placeholderIndex
+          ? { type: 'video' as const, url: videoUrl, preview: videoUrl, uploading: false, frameUrls: frameUrls.length > 0 ? frameUrls : undefined }
+          : item
+      );
+      onMediaChange(completed);
+
+      setSocialUrl("");
+      toast({ title: "Video added!", description: `${isTikTok ? "TikTok" : "Instagram"} video imported successfully` });
+    } catch (error) {
+      onMediaChange(mediaWithPlaceholder.filter((_, idx) => idx !== placeholderIndex));
+      toast({ title: "Couldn't import video", description: error instanceof Error ? error.message : "Please try again", variant: "destructive" });
+    } finally {
+      setIsExtractingUrl(false);
+    }
+  }, [socialUrl, media, onMediaChange]);
 
   const processFiles = useCallback(async (files: File[]) => {
     // Create initial media items with uploading state
@@ -274,6 +393,30 @@ export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
           </div>
         </div>
       </label>
+
+      {/* Social URL input */}
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <Link className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+          <input
+            ref={urlInputRef}
+            type="url"
+            value={socialUrl}
+            onChange={e => setSocialUrl(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleSocialUrl()}
+            placeholder="Paste a TikTok or Instagram link..."
+            className="w-full pl-9 pr-4 py-2.5 text-sm rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
+            disabled={isExtractingUrl}
+          />
+        </div>
+        <button
+          onClick={handleSocialUrl}
+          disabled={!socialUrl.trim() || isExtractingUrl}
+          className="px-4 py-2.5 text-sm font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
+        >
+          {isExtractingUrl ? <Loader2 className="w-4 h-4 animate-spin" /> : "Import"}
+        </button>
+      </div>
 
       {/* Media Preview Grid */}
       {media.length > 0 && (
