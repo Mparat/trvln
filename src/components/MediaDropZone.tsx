@@ -400,7 +400,7 @@ export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
           <Link className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
           <input
             ref={urlInputRef}
-            type="url"
+            type="text"
             value={socialUrl}
             onChange={e => setSocialUrl(e.target.value)}
             onKeyDown={e => e.key === "Enter" && handleSocialUrl()}
