@@ -16,9 +16,10 @@ export interface MediaItem {
 interface MediaDropZoneProps {
   media: MediaItem[];
   onMediaChange: (media: MediaItem[]) => void;
+  onFramesReady?: (frameUrls: string[]) => void;
 }
 
-export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
+export function MediaDropZone({ media, onMediaChange, onFramesReady }: MediaDropZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [socialUrl, setSocialUrl] = useState("");
   const [isExtractingUrl, setIsExtractingUrl] = useState(false);
@@ -218,6 +219,7 @@ export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
           : item
       );
       onMediaChange(completed);
+      if (frameUrls.length > 0) onFramesReady?.(frameUrls);
 
       setSocialUrl("");
       toast({ title: "Video added!", description: `${isTikTok ? "TikTok" : "Instagram"} video imported successfully` });

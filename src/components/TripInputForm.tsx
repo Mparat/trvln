@@ -57,6 +57,7 @@ interface TripInputFormProps {
   onPreferencesChange: (preferences: TripPreferences) => void;
   onGenerate: (pendingCity?: string) => void;
   isGenerating: boolean;
+  onFramesReady?: (frameUrls: string[]) => void;
 }
 
 const atmosphereOptions = [
@@ -145,7 +146,7 @@ const SectionHeader = forwardRef<HTMLButtonElement, SectionHeaderProps & React.B
 
 SectionHeader.displayName = 'SectionHeader';
 
-export function TripInputForm({ preferences, onPreferencesChange, onGenerate, isGenerating }: TripInputFormProps) {
+export function TripInputForm({ preferences, onPreferencesChange, onGenerate, isGenerating, onFramesReady }: TripInputFormProps) {
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     inspiration: true,
     logistics: false,
@@ -215,9 +216,10 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
               <label className="text-sm font-medium text-foreground flex items-center gap-2">
                 📸 Drop screenshots or travel videos
               </label>
-              <MediaDropZone 
-                media={preferences.media} 
-                onMediaChange={(media) => updatePreferences({ media })} 
+              <MediaDropZone
+                media={preferences.media}
+                onMediaChange={(media) => updatePreferences({ media })}
+                onFramesReady={onFramesReady}
               />
               <p className="text-xs text-muted-foreground">Screen recordings, saved Instagram posts, travel photos</p>
             </div>
