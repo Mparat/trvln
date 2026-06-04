@@ -66,7 +66,7 @@ const Index = () => {
   const [loadingVariants, setLoadingVariants] = useState<Record<string, boolean>>({});
   const [isSuggestingThemes, setIsSuggestingThemes] = useState(false);
   const [isAnalyzingMedia, setIsAnalyzingMedia] = useState(false);
-  const [identifiedDestinations, setIdentifiedDestinations] = useState<IdentifiedDestination[]>([]);
+  const [isIdentifyingLocations, setIsIdentifyingLocations] = useState(false);
 
   // Get headers for API calls
   const getHeaders = useCallback(() => {
@@ -417,20 +417,31 @@ const Index = () => {
             onPreferencesChange={setPreferences}
             onGenerate={handleGenerate}
             isGenerating={isGenerating}
+            isIdentifyingLocations={isIdentifyingLocations}
             onFramesReady={async (frameUrls) => {
-              const identified = await analyzeInspiration(frameUrls);
-              const newLocations = identified
-                .filter(d => d.confidence === 'high' || d.confidence === 'medium')
-                .map(d => d.location)
-                .filter(loc => !preferences.cities.some(c =>
-                  c.toLowerCase().includes(loc.toLowerCase()) || loc.toLowerCase().includes(c.toLowerCase())
-                ));
-              if (newLocations.length > 0) {
-                setPreferences(prev => ({ ...prev, cities: [...prev.cities, ...newLocations] }));
-                toast({
-                  title: `📍 Found ${newLocations.length} destination${newLocations.length > 1 ? 's' : ''}!`,
-                  description: newLocations.join(', '),
-                });
+              setIsIdentifyingLocations(true);
+              try {
+                const identified = await analyzeInspiration(frameUrls);
+                const newLocations = identified
+                  .filter(d => d.confidence === 'high' || d.confidence === 'medium')
+                  .map(d => d.location)
+                  .filter(loc => !preferences.cities.some(c =>
+                    c.toLowerCase().includes(loc.toLowerCase()) || loc.toLowerCase().includes(c.toLowerCase())
+                  ));
+                if (newLocations.length > 0) {
+                  setPreferences(prev => ({ ...prev, cities: [...prev.cities, ...newLocations] }));
+                  toast({
+                    title: `📍 Found ${newLocations.length} destination${newLocations.length > 1 ? 's' : ''}!`,
+                    description: newLocations.join(', '),
+                  });
+                } else {
+                  toast({
+                    title: "No locations identified",
+                    description: "Try a video with clearer landmarks or add cities manually",
+                  });
+                }
+              } finally {
+                setIsIdentifyingLocations(false);
               }
             }}
           />
