@@ -194,28 +194,13 @@ export function MediaDropZone({ media, onMediaChange, onFramesReady }: MediaDrop
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to extract video");
 
-      const videoUrl: string = data.url;
-
-      // Extract frames from the uploaded video for AI analysis
-      let frameUrls: string[] = [];
-      try {
-        const frames = await extractVideoFramesFromUrl(videoUrl);
-        const frameUploadPromises = frames.map(async (blob) => {
-          const frameFile = new File([blob], `frame_${crypto.randomUUID()}.jpg`, { type: 'image/jpeg' });
-          return await uploadToStorage(frameFile);
-        });
-        const uploaded = await Promise.allSettled(frameUploadPromises);
-        frameUrls = uploaded
-          .filter((r): r is PromiseFulfilledResult<string | null> => r.status === 'fulfilled')
-          .map(r => r.value)
-          .filter((u): u is string => u !== null);
-      } catch {
-        // Frame extraction failure is non-fatal
-      }
+      // Server returns frames directly — no client-side extraction needed
+      const frameUrls: string[] = data.frameUrls || [];
+      const thumbnailUrl: string = data.thumbnailUrl || frameUrls[0] || "";
 
       const completed = mediaWithPlaceholder.map((item, idx) =>
         idx === placeholderIndex
-          ? { type: 'video' as const, url: videoUrl, preview: videoUrl, uploading: false, frameUrls: frameUrls.length > 0 ? frameUrls : undefined }
+          ? { type: 'video' as const, url: thumbnailUrl, preview: thumbnailUrl, uploading: false, frameUrls: frameUrls.length > 0 ? frameUrls : undefined }
           : item
       );
       onMediaChange(completed);
