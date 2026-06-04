@@ -62,7 +62,7 @@ async function searchWithPerplexity(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'sonar-pro',
+        model: 'sonar',
         messages: [
           { 
             role: 'system', 
@@ -340,31 +340,28 @@ ${additionalNotes || "None provided"}
       
       // Build focused search queries based on user preferences
       const searchQueries: string[] = [
-        // Query 1: Activities and things to do (this drives the itinerary structure)
+        // Query 1: Activities and things to do
         `Best things to do in ${destinationStr} for ${interestsStr} travelers. Include specific activity names, tour recommendations, must-visit attractions, hidden gems, and neighborhoods to explore.${themeStr ? ` Focus on ${themeStr} experiences.` : ''} ${budgetInfo.label} budget level.`,
-        
-        // Query 2: Restaurants and food scene (contextual to the destination)
+
+        // Query 2: Restaurants and food scene
         `Best ${foodStr} restaurants and food experiences in ${destinationStr}. Include specific restaurant names, neighborhoods known for food, price ranges, and local specialties. ${budgetInfo.label} budget.`,
-        
-        // Query 3: Accommodation and practical logistics (with date-specific pricing)
-        `Best ${budgetInfo.label} hotels and accommodation in ${destinationStr} priced ${budgetInfo.accommodation}. ${startDate && endDate ? `For dates: check-in ${startDate}, check-out ${endDate}.` : targetMonth ? `For travel in ${targetMonth}.` : ''} Include specific hotel names with current nightly rates, neighborhoods to stay in, and whether the prices shown are for the requested dates or general averages. Also include transportation tips and getting around.`,
-        
-        // Query 4: Nearby destinations & multi-city options (critical for long trips)
+
+        // Query 3: Accommodation with date-specific pricing
+        `Best ${budgetInfo.label} hotels in ${destinationStr} priced ${budgetInfo.accommodation}. ${startDate && endDate ? `For dates: check-in ${startDate}, check-out ${endDate}.` : targetMonth ? `For travel in ${targetMonth}.` : ''} Include specific hotel names with nightly rates and neighborhoods to stay.`,
+
+        // Query 4: Nearby destinations + transportation (combined)
         isSingleCity && isLongTrip
-          ? `For a ${tripDaysNum}-day trip to ${primaryCity}, what other cities and destinations should I also visit? Include nearby cities worth visiting, recommended number of days for each city, day trip options from ${primaryCity}, and why each destination is worth including. Consider travel time between cities.`
-          : `Best day trips and nearby destinations from ${destinationStr}. Include travel time, recommended duration, and why each is worth visiting for a ${tripDaysNum}-day trip.`,
-        
-        // Query 5: Inter-city transportation & routing
-        `How to travel between cities near ${destinationStr}. Include train times and prices (e.g., Shinkansen for Japan, Eurostar for Europe, high-speed rail), bus options, domestic flights if relevant. Best route to visit multiple cities in the region. Travel time and cost between major destinations.`,
-        
-        // Query 6: Seasonal & practical information (with hotel price seasonality)
-        `${destinationStr} travel in ${targetMonth || 'the travel season'}. Include weather conditions, peak vs off-season pricing differences (especially for hotels - how much more expensive are hotels during this period compared to off-season?), festivals or events happening, typical crowd levels, and any seasonal closures or considerations.`
+          ? `For a ${tripDaysNum}-day trip based in ${primaryCity}: what other cities should I visit, how to travel between them (trains, buses, flights with prices and times), and how many days to spend in each? Include day trips and overnight options.`
+          : `Best day trips and nearby destinations from ${destinationStr} for a ${tripDaysNum}-day trip. Include travel time, transport options with prices, and why each is worth visiting.`,
+
+        // Query 5: Seasonal & practical information
+        `${destinationStr} travel in ${targetMonth || 'the travel season'}. Include weather, peak vs off-season pricing, festivals or events, crowd levels, and any seasonal closures.`
       ];
-      
-      // Query 7: Flight estimates (conditional - only if origin is provided and flights needed)
+
+      // Query 6: Flight estimates (conditional)
       if (!noFlight && departureCity) {
         searchQueries.push(
-          `Flights from ${departureCity} to ${primaryCity} in ${targetMonth || 'upcoming months'}. Include typical price ranges, best airlines, flight duration, whether nonstop options exist, and best time to book.`
+          `Flights from ${departureCity} to ${primaryCity} in ${targetMonth || 'upcoming months'}. Include typical price ranges, best airlines, flight duration, and whether nonstop options exist.`
         );
       }
       
@@ -379,46 +376,32 @@ ${additionalNotes || "None provided"}
       const activitiesResearch = results[0];
       const restaurantsResearch = results[1];
       const accommodationResearch = results[2];
-      const nearbyDestinationsResearch = results[3];
-      const transportationResearch = results[4];
-      const seasonalResearch = results[5];
-      const flightResearch = results[6]; // May be undefined if no flight query
-      
+      const nearbyAndTransportResearch = results[3];
+      const seasonalResearch = results[4];
+      const flightResearch = results[5]; // May be undefined if no flight query
+
       groundedResearchContext = `
 ## GROUNDED RESEARCH DATA (From Live Web Search)
 
-**CRITICAL INSTRUCTIONS - READ CAREFULLY:**
-
-You are a reasoning model. The following content is retrieved from live web search and should be treated as FACTUAL GROUNDING, not speculation.
-
-- Do NOT introduce new facts beyond what is provided in this research
-- Do NOT hallucinate restaurant names, tour companies, hotel names, or URLs
-- ONLY recommend places, activities, and restaurants that appear in this research data
-- When you cite a source, use the actual URLs provided in the citations below
-- If something specific isn't in the research, use the fallback URL patterns (Google Maps search, GetYourGuide search, etc.)
+**CRITICAL INSTRUCTIONS:** The following is retrieved from live web search — treat it as FACTUAL GROUNDING.
+- ONLY recommend places, activities, and restaurants that appear in this research
+- Do NOT hallucinate establishment names or URLs
+- For anything not in the research, use the fallback URL patterns in the system prompt
 
 ---
 
-### 🗺️ NEARBY DESTINATIONS & MULTI-CITY OPTIONS
-${nearbyDestinationsResearch?.content || 'No nearby destinations research available.'}
+### 🗺️ NEARBY DESTINATIONS, DAY TRIPS & TRANSPORTATION
+${nearbyAndTransportResearch?.content || 'No nearby destinations/transport research available.'}
 
-**Source Citations:**
-${nearbyDestinationsResearch?.citations?.length > 0 ? nearbyDestinationsResearch.citations.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
-
----
-
-### 🚄 INTER-CITY TRANSPORTATION & ROUTING
-${transportationResearch?.content || 'No transportation research available - use Google Maps for transit options.'}
-
-**Source Citations:**
-${transportationResearch?.citations?.length > 0 ? transportationResearch.citations.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
+**Citations:**
+${nearbyAndTransportResearch?.citations?.length > 0 ? nearbyAndTransportResearch.citations.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
 
 ---
 
 ### 📅 SEASONAL & PRACTICAL INFORMATION
 ${seasonalResearch?.content || 'No seasonal research available.'}
 
-**Source Citations:**
+**Citations:**
 ${seasonalResearch?.citations?.length > 0 ? seasonalResearch.citations.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
 
 ---
@@ -426,39 +409,35 @@ ${seasonalResearch?.citations?.length > 0 ? seasonalResearch.citations.map((c: s
 ### ✈️ FLIGHT INFORMATION
 ${flightResearch?.content || 'No flight research available - use Google Flights for accurate pricing.'}
 
-**Source Citations:**
+**Citations:**
 ${flightResearch?.citations?.length > 0 ? flightResearch.citations.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
 
 ---
 
-### 🎯 ACTIVITIES & THINGS TO DO RESEARCH
-${activitiesResearch.content || 'No activity research available - use Google Maps and GetYourGuide search URLs for recommendations.'}
+### 🎯 ACTIVITIES & THINGS TO DO
+${activitiesResearch.content || 'No activity research available.'}
 
-**Source Citations:**
+**Citations:**
 ${activitiesResearch.citations?.length > 0 ? activitiesResearch.citations.map((c, i) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
 
 ---
 
-### 🍽️ RESTAURANTS & FOOD RESEARCH
-${restaurantsResearch.content || 'No restaurant research available - use Google Maps search URLs for restaurant recommendations.'}
+### 🍽️ RESTAURANTS & FOOD
+${restaurantsResearch.content || 'No restaurant research available.'}
 
-**Source Citations:**
+**Citations:**
 ${restaurantsResearch.citations?.length > 0 ? restaurantsResearch.citations.map((c, i) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
 
 ---
 
-### 🏨 ACCOMMODATION & LOGISTICS RESEARCH
-${accommodationResearch.content || 'No accommodation research available - use Booking.com search URLs for hotel recommendations.'}
+### 🏨 ACCOMMODATION
+${accommodationResearch.content || 'No accommodation research available.'}
 
-**User's Accommodation Budget Target:** ${budgetInfo.accommodation}
-**If researched prices exceed this range, the AI MUST note this and suggest alternatives or explain the budget tradeoff.**
+**User's Accommodation Budget:** ${budgetInfo.accommodation}
+**If prices exceed this range, note why and provide a budget alternative.**
 
-**Source Citations:**
+**Citations:**
 ${accommodationResearch.citations?.length > 0 ? accommodationResearch.citations.map((c, i) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
-
----
-
-**REMEMBER:** Only recommend places that appear in the research above. For any place/restaurant/activity mentioned in the research, create proper URLs using the patterns specified in the system prompt.
 `;
     } else {
       console.log("PERPLEXITY_API_KEY not configured - skipping grounded research");
@@ -541,18 +520,9 @@ You have been provided with LIVE WEB SEARCH RESULTS in the assistant message bel
 
 ## Planning Your Itinerary
 
-Before writing your final itinerary, work through your planning systematically in <itinerary_planning> tags. This section will likely be quite long - that's expected and encouraged for thorough planning. It's OK for this section to be very detailed with extensive research notes and calculations.
+Before writing your final itinerary, work through your planning systematically in <itinerary_planning> tags. Keep this section focused and efficient.
 
 Address these steps in order:
-
-**Step 0: Extract and Quote Key User Preferences**
-
-Quote verbatim the most important preferences from the user inputs. Write out the exact text as it appears:
-- Write out their exact inspiration destinations (copy the text word-for-word)
-- Write out their exact budget and duration constraints (copy the text word-for-word)
-- Write out their exact vibe preferences - atmosphere, adventure level, interests ranking (copy the text word-for-word)
-- Write out any critical statements from the open text section (copy the text word-for-word)
-- After quoting each category, note which preferences might conflict with each other
 
 **Step 1: Extract Hard Constraints**
 
@@ -646,50 +616,21 @@ For each activity, note:
 - Time required and cost (exploration activities can be $0 or minimal)
 - Source citation (for exploration, cite a travel blog recommending the neighborhood, or use [Neighborhood exploration - no booking required])
 
-**Step 9: Cross-Check and Compare Activities**
+**Step 9: Activity Selection**
 
-This is a critical verification step. For each activity you researched in Step 8, conduct a second comparative search and create a structured comparison:
+For each day, pick the best activities from your Step 8 research. Note any strong alternatives worth including in the alternatives section at the end.
 
-For each time slot, create a comparison in this format:
-- **Time Slot:** [Day X, Morning/Afternoon/Evening]
-- **Options identified:**
-  - Option A: [Activity name]
-  - Option B: [Activity name]
-  - Option C: [Activity name]
-- **Comparison criteria:**
-  - Match to user's interests ranking: [Rate each option]
-  - Cost-effectiveness: [Compare costs and value]
-  - Time efficiency: [Compare time requirements]
-  - User's vibe preferences: [How each matches atmosphere/adventure level]
-  - Unique value offered: [What makes each special]
-- **Decision:** [Which option wins and why - be explicit]
-- **Near-tie alternatives:** [Note any options that were very close for inclusion in alternatives section]
+**Step 10: Assumptions & Output Structure Planning**
 
-Do this structured comparison for every significant activity in your itinerary.
+List key assumptions (budget tier, season pricing, etc.), then confirm the final output order:
+1. Executive summary
+2. Key bookings and budget
+3. Day-by-day itinerary
+4. Alternatives
 
-**Step 10: Assumptions Summary**
+**Step 11: Output Structure Planning**
 
-List all key assumptions you're making (e.g., "assuming mid-range accommodation," "assuming shoulder season pricing," etc.)
-
-**Step 11: Citation Verification**
-
-Before moving to the output, verify you have sources ready for:
-- All flight information
-- All accommodation recommendations
-- All activities and attractions
-- All restaurant recommendations
-- All transportation between cities
-- All practical information (visa, weather, etc.)
-
-Note any gaps where you'll need to indicate that up-to-date research is needed.
-
-**Step 12: Output Structure Planning**
-
-Review your planning and determine the final structure for your itinerary. The output must follow this specific ordering:
-1. Executive summary first
-2. Key things to book and budget information second
-3. Day-by-day itinerary third
-4. Alternative options and extras at the end
+Review your planning and confirm the final structure: executive summary → key bookings/budget → day-by-day → alternatives.
 
 ## Output Structure
 
@@ -1206,7 +1147,7 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
         model: "claude-sonnet-4-6",
         system: systemMessage?.content,
         messages: nonSystemMessages,
-        max_tokens: 16000,
+        max_tokens: 10000,
         stream: true,
       }),
     });
