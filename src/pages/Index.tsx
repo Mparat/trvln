@@ -514,9 +514,9 @@ const Index = () => {
 
 
               {/* Detailed Itinerary */}
-              <div className="bg-card rounded-2xl shadow-medium overflow-hidden">
-                {/* Sticky header — stays at top while scrolling the itinerary */}
-                <div className="sticky top-0 z-20 bg-card/95 backdrop-blur-sm flex items-center gap-3 px-6 py-4 md:px-8 border-b border-border">
+              <div className="bg-card rounded-2xl shadow-medium">
+                {/* Sticky header — overflow-hidden on parent breaks sticky, so rounded-t-2xl is on the header instead */}
+                <div className="sticky top-0 z-20 bg-card/95 backdrop-blur-sm flex items-center gap-3 px-6 py-4 md:px-8 border-b border-border rounded-t-2xl">
                   <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                     <Sparkles className="w-4 h-4 text-primary" />
                   </div>
