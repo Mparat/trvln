@@ -5,6 +5,7 @@ import { ItineraryOutput } from "@/components/ItineraryOutput";
 import { TripSummaryCard } from "@/components/TripSummaryCard";
 import { ItinerarySwitcher } from "@/components/ItinerarySwitcher";
 import { toast } from "@/hooks/use-toast";
+import { ItineraryData } from "@/types/itinerary";
 
 const defaultPreferences: TripPreferences = {
   media: [],
@@ -33,6 +34,7 @@ export type ItineraryVariant = {
   name: string;
   emoji: string;
   content: string;
+  structuredData?: ItineraryData;
 };
 
 type IdentifiedDestination = {
@@ -267,21 +269,35 @@ const Index = () => {
             effectivePreferences,
             theme,
             (updatedContent) => {
-              // Strip the planning section before displaying
               const displayContent = stripPlanningSection(updatedContent);
               contentMap[theme.id] = displayContent;
-              
-              // Use functional update to ensure we're working with latest state
               setItineraries(prev => {
-                const newState = prev.map(it => 
-                  contentMap[it.id] !== undefined 
-                    ? { ...it, content: contentMap[it.id] } 
+                return prev.map(it =>
+                  contentMap[it.id] !== undefined
+                    ? { ...it, content: contentMap[it.id] }
                     : it
                 );
-                return newState;
               });
             }
           );
+
+          // Parse the completed JSON response into structured data
+          let structuredData: ItineraryData | undefined;
+          try {
+            const jsonMatch = content.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              structuredData = JSON.parse(jsonMatch[0]) as ItineraryData;
+            }
+          } catch (e) {
+            console.error(`Failed to parse structured itinerary for ${theme.id}:`, e);
+          }
+
+          // Batch: set structuredData and mark loading done in same render cycle
+          if (structuredData) {
+            setItineraries(prev => prev.map(it =>
+              it.id === theme.id ? { ...it, structuredData } : it
+            ));
+          }
           setLoadingVariants(prev => ({ ...prev, [theme.id]: false }));
           return { id: theme.id, success: true, content };
         } catch (error) {
@@ -342,10 +358,10 @@ const Index = () => {
 
       const data = await response.json();
       
-      // Update only the current itinerary variant
-      setItineraries(prev => prev.map((it, idx) => 
-        idx === activeVariant 
-          ? { ...it, content: stripPlanningSection(data.updatedItinerary) }
+      // Update only the current itinerary variant; clear structuredData so fallback markdown renders
+      setItineraries(prev => prev.map((it, idx) =>
+        idx === activeVariant
+          ? { ...it, content: stripPlanningSection(data.updatedItinerary), structuredData: undefined }
           : it
       ));
 
@@ -485,9 +501,9 @@ const Index = () => {
                 />
               )}
 
-              {/* Summary Card */}
-              {currentItinerary?.content && !loadingVariants[currentItinerary.id] && (
-                <TripSummaryCard 
+              {/* Summary Card — only shown in markdown fallback mode */}
+              {currentItinerary?.content && !loadingVariants[currentItinerary.id] && !currentItinerary.structuredData && (
+                <TripSummaryCard
                   itinerary={currentItinerary.content}
                   departureCity={preferences.departureCity}
                   startDate={preferences.startDate}
@@ -513,9 +529,10 @@ const Index = () => {
                   </div>
                 </div>
                 
-                <ItineraryOutput 
-                  itinerary={currentItinerary?.content || ""} 
-                  isLoading={isGenerating && !currentItinerary?.content}
+                <ItineraryOutput
+                  itinerary={currentItinerary?.content || ""}
+                  structuredData={currentItinerary?.structuredData}
+                  isLoading={!!loadingVariants[currentItinerary?.id || '']}
                   isEditing={currentItinerary ? loadingVariants[currentItinerary.id] && !isGenerating : false}
                   onEdit={handleEdit}
                   themeTitle={currentItinerary ? `${currentItinerary.emoji} ${currentItinerary.name}` : undefined}

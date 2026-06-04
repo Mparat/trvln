@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { 
+import {
   Clock, DollarSign, Sparkles, ExternalLink, Edit3, Send,
   X, Plus, Loader2, ChevronDown, Share2
 } from "lucide-react";
@@ -13,6 +13,8 @@ import { cn } from "@/lib/utils";
 import { ItemFeedbackControls } from "./ItemFeedbackControls";
 import { useItineraryItems, type ItineraryItem } from "@/hooks/useItineraryItems";
 import { toast } from "@/hooks/use-toast";
+import { StructuredItinerary } from "./StructuredItinerary";
+import { ItineraryData } from "@/types/itinerary";
 
 interface ItineraryOutputProps {
   itinerary: string;
@@ -20,6 +22,7 @@ interface ItineraryOutputProps {
   isEditing?: boolean;
   onEdit?: (editRequest: string) => void;
   themeTitle?: string;
+  structuredData?: ItineraryData;
   tripPreferences?: {
     cities?: string[];
     atmosphere?: string[];
@@ -34,7 +37,7 @@ const stripEmojis = (text: string): string => {
   return text.replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{1F000}-\u{1FFFF}]/gu, '').replace(/\s+/g, ' ').trim();
 };
 
-export function ItineraryOutput({ itinerary, isLoading, isEditing, onEdit, themeTitle, tripPreferences }: ItineraryOutputProps) {
+export function ItineraryOutput({ itinerary, isLoading, isEditing, onEdit, themeTitle, structuredData, tripPreferences }: ItineraryOutputProps) {
   const [editMode, setEditMode] = useState(false);
   const [editRequest, setEditRequest] = useState("");
   const [addingNearMiss, setAddingNearMiss] = useState<string | null>(null);
@@ -720,7 +723,68 @@ export function ItineraryOutput({ itinerary, isLoading, isEditing, onEdit, theme
     );
   }
 
-  if (!itinerary) return null;
+  if (!itinerary && !structuredData) return null;
+
+  // When structured JSON data is available, render the beautiful UI
+  if (structuredData) {
+    return (
+      <div className="space-y-5">
+        {/* Edit mode card */}
+        {onEdit && (
+          <Card className="p-4 bg-muted/30 border-dashed">
+            {editMode ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-medium text-foreground flex items-center gap-2">
+                    <Edit3 className="w-4 h-4" />
+                    Request changes
+                  </h4>
+                  <Button variant="ghost" size="sm" onClick={() => setEditMode(false)}>
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+                <Textarea
+                  value={editRequest}
+                  onChange={(e) => setEditRequest(e.target.value)}
+                  placeholder="e.g., 'Add more food options' or 'Replace day 2 with beach activities'"
+                  className="min-h-[80px] resize-none"
+                />
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" size="sm" onClick={() => !isEditing && setEditMode(false)} disabled={isEditing}>
+                    Cancel
+                  </Button>
+                  <Button size="sm" onClick={handleSubmitEdit} disabled={!editRequest.trim() || isEditing}>
+                    {isEditing ? (
+                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Updating...</>
+                    ) : (
+                      <><Send className="w-4 h-4 mr-2" />Submit</>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setEditMode(true)}
+                className="w-full flex items-center justify-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors py-2"
+              >
+                <Edit3 className="w-4 h-4" />
+                <span>Want to make changes? Click here to request edits</span>
+              </button>
+            )}
+          </Card>
+        )}
+
+        {isEditing && (
+          <div className="flex items-center justify-center gap-3 py-4 text-muted-foreground bg-muted/30 rounded-xl">
+            <Loader2 className="w-5 h-5 animate-spin text-primary" />
+            <span className="text-sm font-medium">Applying changes...</span>
+          </div>
+        )}
+
+        <StructuredItinerary data={structuredData} />
+      </div>
+    );
+  }
 
   const toggleSection = (section: string) => {
     setOpenSections(prev => ({ ...prev, [section]: !prev[section] }));
