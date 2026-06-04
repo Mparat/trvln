@@ -514,31 +514,34 @@ const Index = () => {
 
 
               {/* Detailed Itinerary */}
-              <div className="bg-card rounded-2xl shadow-medium p-6 md:p-8">
-                <div className="flex items-center gap-3 pb-4 border-b border-border mb-6">
-                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                    <Sparkles className="w-5 h-5 text-primary" />
+              <div className="bg-card rounded-2xl shadow-medium overflow-hidden">
+                {/* Sticky header — stays at top while scrolling the itinerary */}
+                <div className="sticky top-0 z-20 bg-card/95 backdrop-blur-sm flex items-center gap-3 px-6 py-4 md:px-8 border-b border-border">
+                  <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                    <Sparkles className="w-4 h-4 text-primary" />
                   </div>
-                  <div>
-                    <h2 className="font-display text-xl font-semibold text-foreground">
+                  <div className="min-w-0">
+                    <h2 className="font-display text-lg font-semibold text-foreground truncate">
                       {currentItinerary ? `${currentItinerary.emoji} ${currentItinerary.name}` : "Your Personalized Itinerary"}
                     </h2>
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-xs text-muted-foreground">
                       {currentItinerary ? "Swipe between themes above" : "Crafted based on your preferences"}
                     </p>
                   </div>
                 </div>
-                
-                <ItineraryOutput
-                  itinerary={currentItinerary?.content || ""}
-                  structuredData={currentItinerary?.structuredData}
-                  isLoading={isGenerating && !currentItinerary?.content}
-                  isStreaming={!!(currentItinerary?.content && loadingVariants[currentItinerary?.id])}
-                  isEditing={currentItinerary ? loadingVariants[currentItinerary.id] && !isGenerating : false}
-                  onEdit={handleEdit}
-                  themeTitle={currentItinerary ? `${currentItinerary.emoji} ${currentItinerary.name}` : undefined}
-                  tripPreferences={preferences}
-                />
+
+                <div className="p-6 md:p-8">
+                  <ItineraryOutput
+                    itinerary={currentItinerary?.content || ""}
+                    structuredData={currentItinerary?.structuredData}
+                    isLoading={isGenerating && !currentItinerary?.content}
+                    isStreaming={!!(currentItinerary?.content && loadingVariants[currentItinerary?.id])}
+                    isEditing={currentItinerary ? loadingVariants[currentItinerary.id] && !isGenerating : false}
+                    onEdit={handleEdit}
+                    themeTitle={currentItinerary ? `${currentItinerary.emoji} ${currentItinerary.name}` : undefined}
+                    tripPreferences={preferences}
+                  />
+                </div>
               </div>
             </div>
           )}

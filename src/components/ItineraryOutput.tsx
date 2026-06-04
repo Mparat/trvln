@@ -958,24 +958,125 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
     );
   };
 
-  // Render items for a section
+  // Render items for a section — groups a top-level bullet with its indented children
+  // so the whole entity highlights together and feedback appears at the group level.
   const renderSectionItems = (sectionItems: typeof items) => {
-    let currentInNearMiss = false;
-    
-    return sectionItems.map((item) => {
-      const cleanedLine = cleanLine(item.content);
-      const trimmedLine = cleanedLine.trim();
-      
-      if (!trimmedLine) return null;
-      
-      // Track near miss section
-      if (isNearMissHeader(trimmedLine)) {
-        currentInNearMiss = true;
-      } else if (isNewMajorSection(trimmedLine)) {
-        currentInNearMiss = false;
+    type GroupEntry =
+      | { kind: 'header'; item: typeof items[0]; nearMiss: boolean }
+      | { kind: 'activity'; parent: typeof items[0]; children: typeof items[0][]; nearMiss: boolean };
+
+    const groups: GroupEntry[] = [];
+    let currentGroup: { parent: typeof items[0]; children: typeof items[0][] } | null = null;
+    let inNearMiss = false;
+
+    const flush = () => {
+      if (currentGroup) {
+        groups.push({ kind: 'activity', parent: currentGroup.parent, children: currentGroup.children, nearMiss: inNearMiss });
+        currentGroup = null;
       }
-      
-      return renderItem(item, currentInNearMiss);
+    };
+
+    sectionItems.forEach(item => {
+      const line = cleanLine(item.content).trim();
+      if (!line) return;
+      if (isMainSectionHeader(line)) return;
+      if (isNearMissHeader(line)) inNearMiss = true;
+      else if (isNewMajorSection(line)) inNearMiss = false;
+
+      const isBullet = line.startsWith('-') || line.startsWith('•');
+
+      if (!isBullet) {
+        flush();
+        groups.push({ kind: 'header', item, nearMiss: inNearMiss });
+        return;
+      }
+
+      if (item.indentLevel === 0) {
+        flush();
+        currentGroup = { parent: item, children: [] };
+      } else if (currentGroup) {
+        currentGroup.children.push(item);
+      }
+    });
+    flush();
+
+    return groups.map(entry => {
+      if (entry.kind === 'header') return renderItem(entry.item, entry.nearMiss);
+
+      const { parent, children, nearMiss } = entry;
+      const isNearMissItem = nearMiss && parent.type === 'bullet';
+      const parentContent = cleanLine(parent.content).trim().replace(/^[-•]\s*/, '');
+
+      return (
+        <div
+          key={parent.id}
+          ref={(el) => { itemRefs.current[parent.id] = el; }}
+          className={cn(
+            "rounded-xl px-3 py-1 transition-colors group/act",
+            "hover:bg-muted/30",
+            parent.isUpdating && "opacity-60",
+            isNearMissItem && "bg-amber-500/5 border-l-2 border-amber-500/30"
+          )}
+        >
+          {/* Parent bullet + actions */}
+          <div className="flex items-start gap-3 py-1.5">
+            <div className="w-2 h-2 rounded-full mt-2.5 shrink-0 bg-primary/60" />
+            <div className="flex-1 min-w-0">
+              <p className="text-foreground/90 leading-relaxed">
+                {parseInlineContent(parentContent)}
+              </p>
+              {parent.comment && !parent.isUpdating && (
+                <div className="mt-2 text-xs text-muted-foreground bg-muted/50 px-2 py-1 rounded">
+                  💬 {parent.comment}
+                </div>
+              )}
+            </div>
+            {/* Actions reveal on group hover */}
+            <div className="shrink-0 self-start pt-1 opacity-0 group-hover/act:opacity-100 transition-opacity flex items-center gap-1">
+              {isNearMissItem ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700"
+                  onClick={() => handleAddNearMiss(parent)}
+                  disabled={addingNearMiss === parent.id}
+                >
+                  {addingNearMiss === parent.id
+                    ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Adding...</>
+                    : <><Plus className="w-3 h-3 mr-1" />Add to trip</>}
+                </Button>
+              ) : parent.type === 'bullet' && (
+                <ItemFeedbackControls
+                  item={parent}
+                  canUndo={canUndo(parent.id)}
+                  onVote={(vote) => setVote(parent.id, vote)}
+                  onComment={(comment) => setComment(parent.id, comment)}
+                  onSubmitFeedback={(overrides) => handleSubmitFeedback(parent.id, overrides)}
+                  onUndo={() => undoItem(parent.id)}
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Sub-bullets — no individual hover/feedback */}
+          {children.length > 0 && (
+            <div className="ml-5 pb-2 space-y-0.5">
+              {children.map(child => {
+                const childLine = cleanLine(child.content).trim().replace(/^[-•]\s*/, '');
+                if (!childLine || /^\[source:/i.test(childLine)) return null;
+                return (
+                  <div key={child.id} className="flex items-start gap-2 py-0.5">
+                    <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 bg-muted-foreground/40" />
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      {parseInlineContent(childLine)}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
     });
   };
 
