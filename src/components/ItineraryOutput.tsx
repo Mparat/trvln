@@ -726,8 +726,9 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
 
   if (!itinerary && !structuredData) return null;
 
-  // While JSON is streaming in (content arriving but not yet parseable), show a calm progress state
-  if (isStreaming && !structuredData) {
+  // Only intercept streaming when content looks like JSON (starts with '{').
+  // Markdown content should fall through and render as it streams in.
+  if (isStreaming && !structuredData && itinerary.trimStart().startsWith('{')) {
     return (
       <div className="flex flex-col items-center justify-center py-16 gap-5 text-center">
         <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
