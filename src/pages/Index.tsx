@@ -532,7 +532,8 @@ const Index = () => {
                 <ItineraryOutput
                   itinerary={currentItinerary?.content || ""}
                   structuredData={currentItinerary?.structuredData}
-                  isLoading={!!loadingVariants[currentItinerary?.id || '']}
+                  isLoading={isGenerating && !currentItinerary?.content}
+                  isStreaming={!!(currentItinerary?.content && loadingVariants[currentItinerary?.id])}
                   isEditing={currentItinerary ? loadingVariants[currentItinerary.id] && !isGenerating : false}
                   onEdit={handleEdit}
                   themeTitle={currentItinerary ? `${currentItinerary.emoji} ${currentItinerary.name}` : undefined}

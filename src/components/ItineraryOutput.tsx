@@ -19,6 +19,7 @@ import { ItineraryData } from "@/types/itinerary";
 interface ItineraryOutputProps {
   itinerary: string;
   isLoading: boolean;
+  isStreaming?: boolean;
   isEditing?: boolean;
   onEdit?: (editRequest: string) => void;
   themeTitle?: string;
@@ -37,7 +38,7 @@ const stripEmojis = (text: string): string => {
   return text.replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{1F000}-\u{1FFFF}]/gu, '').replace(/\s+/g, ' ').trim();
 };
 
-export function ItineraryOutput({ itinerary, isLoading, isEditing, onEdit, themeTitle, structuredData, tripPreferences }: ItineraryOutputProps) {
+export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, onEdit, themeTitle, structuredData, tripPreferences }: ItineraryOutputProps) {
   const [editMode, setEditMode] = useState(false);
   const [editRequest, setEditRequest] = useState("");
   const [addingNearMiss, setAddingNearMiss] = useState<string | null>(null);
@@ -724,6 +725,30 @@ export function ItineraryOutput({ itinerary, isLoading, isEditing, onEdit, theme
   }
 
   if (!itinerary && !structuredData) return null;
+
+  // While JSON is streaming in (content arriving but not yet parseable), show a calm progress state
+  if (isStreaming && !structuredData) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 gap-5 text-center">
+        <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
+          <Sparkles className="w-7 h-7 text-primary animate-pulse" />
+        </div>
+        <div>
+          <p className="font-semibold text-foreground">Building your itinerary…</p>
+          <p className="text-sm text-muted-foreground mt-1">Researching destinations, hotels, and activities</p>
+        </div>
+        <div className="flex gap-1.5">
+          {[0, 1, 2].map(i => (
+            <div
+              key={i}
+              className="w-2 h-2 rounded-full bg-primary/50 animate-bounce"
+              style={{ animationDelay: `${i * 0.18}s` }}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   // When structured JSON data is available, render the beautiful UI
   if (structuredData) {
