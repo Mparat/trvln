@@ -422,11 +422,19 @@ export function MediaDropZone({ media, onMediaChange, onFramesReady }: MediaDrop
               )}
               {item.type === 'video' && item.preview && (
                 <div className="relative w-full h-full">
-                  <video
-                    src={item.preview}
-                    className="w-full h-full object-cover"
-                    muted
-                  />
+                  {item.file ? (
+                    <video
+                      src={item.preview}
+                      className="w-full h-full object-cover"
+                      muted
+                    />
+                  ) : (
+                    <img
+                      src={item.preview}
+                      alt={`Video ${index + 1}`}
+                      className="w-full h-full object-cover"
+                    />
+                  )}
                   <div className="absolute inset-0 flex items-center justify-center bg-foreground/10">
                     <Video className="w-8 h-8 text-background" />
                   </div>
