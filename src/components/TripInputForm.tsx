@@ -253,8 +253,9 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
               {preferences.cities.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-2">
                   {preferences.cities.map((city) => (
-                    <Badge key={city} variant="secondary" className="cursor-pointer" onClick={() => removeCity(city)}>
-                      {city} ✕
+                    <Badge key={city} variant="secondary" className="cursor-pointer flex items-center gap-1 pr-1">
+                      <span onClick={() => { removeCity(city); setNewCity(city); }}>{city}</span>
+                      <span onClick={() => removeCity(city)} className="opacity-50 hover:opacity-100 px-1">✕</span>
                     </Badge>
                   ))}
                 </div>
