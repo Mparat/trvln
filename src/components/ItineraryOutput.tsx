@@ -781,7 +781,7 @@ export function ItineraryOutput({ itinerary, isLoading, isEditing, onEdit, theme
           </div>
         )}
 
-        <StructuredItinerary data={structuredData} />
+        <StructuredItinerary data={structuredData} rawItinerary={itinerary} tripPreferences={tripPreferences} />
       </div>
     );
   }
@@ -903,7 +903,7 @@ export function ItineraryOutput({ itinerary, isLoading, isEditing, onEdit, theme
             </Button>
           )}
 
-          {item.type === 'bullet' && !isNearMissItem && (
+          {item.type === 'bullet' && !isNearMissItem && item.indentLevel === 0 && (
             <div className="shrink-0 self-center">
               <ItemFeedbackControls
                 item={item}

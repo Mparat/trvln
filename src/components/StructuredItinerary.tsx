@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { ItineraryData } from "@/types/itinerary";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { toast } from "@/hooks/use-toast";
 import {
   ExternalLink, Plane, Hotel, MapPin, Clock, DollarSign,
-  Sunrise, Sun, Moon, Utensils, Calendar, ChevronRight, Info
+  Sunrise, Sun, Moon, Utensils, Calendar, ChevronRight, Info,
+  ThumbsUp, ThumbsDown, Loader2, Send, X
 } from "lucide-react";
 
 type Tab = 'overview' | 'days' | 'bookings';
@@ -26,17 +29,103 @@ const TAG_COLORS: Record<string, string> = {
 
 const PERIOD_ICONS = { Morning: Sunrise, Afternoon: Sun, Evening: Moon };
 
-interface Props {
-  data: ItineraryData;
+type ActivityKey = string; // "d{dayIdx}-p{periodIdx}-a{actIdx}"
+
+interface FeedbackState {
+  vote: 'up' | 'down' | null;
+  comment: string;
+  isSubmitting: boolean;
+  updatedDescription?: string;
 }
 
-export function StructuredItinerary({ data }: Props) {
+interface Props {
+  data: ItineraryData;
+  rawItinerary?: string;
+  tripPreferences?: {
+    cities?: string[];
+    atmosphere?: string[];
+    interests?: string[];
+    budgetAccommodation?: number;
+  };
+}
+
+export function StructuredItinerary({ data, rawItinerary, tripPreferences }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [activeDayIdx, setActiveDayIdx] = useState(0);
   const [activePeriodIdx, setActivePeriodIdx] = useState(0);
+  const [feedbacks, setFeedbacks] = useState<Record<ActivityKey, FeedbackState>>({});
+  const [openComment, setOpenComment] = useState<ActivityKey | null>(null);
 
   const activeDay = data.days[activeDayIdx];
   const activePeriod = activeDay?.periods[activePeriodIdx];
+
+  const activityKey = (d: number, p: number, a: number) => `d${d}-p${p}-a${a}`;
+
+  const getFeedback = (key: ActivityKey): FeedbackState =>
+    feedbacks[key] ?? { vote: null, comment: '', isSubmitting: false };
+
+  const setFeedback = (key: ActivityKey, patch: Partial<FeedbackState>) =>
+    setFeedbacks(prev => ({ ...prev, [key]: { ...getFeedback(key), ...patch } }));
+
+  const handleVote = useCallback((key: ActivityKey, vote: 'up' | 'down') => {
+    setFeedback(key, { vote });
+    if (vote === 'up') {
+      toast({ title: "Noted!", description: "We'll keep this recommendation." });
+      if (openComment === key) setOpenComment(null);
+    } else {
+      setOpenComment(key);
+    }
+  }, [openComment]);
+
+  const handleSubmitFeedback = useCallback(async (
+    key: ActivityKey,
+    dayIdx: number,
+    periodIdx: number,
+    actIdx: number
+  ) => {
+    const state = getFeedback(key);
+    const activity = data.days[dayIdx].periods[periodIdx].activities[actIdx];
+    const day = data.days[dayIdx];
+    const period = data.days[dayIdx].periods[periodIdx];
+
+    setFeedback(key, { isSubmitting: true });
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-itinerary-item`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({
+            itemContent: `${activity.name}: ${activity.description}`,
+            itemContext: `Day ${day.dayNumber}: ${day.title} > ${period.label}`,
+            feedback: { vote: state.vote, comment: state.comment },
+            fullItinerary: rawItinerary || JSON.stringify(data),
+            tripPreferences: tripPreferences || {},
+          }),
+        }
+      );
+
+      if (!response.ok) throw new Error("Failed to update");
+
+      const result = await response.json();
+      setOpenComment(null);
+
+      if (result.changed) {
+        setFeedback(key, { isSubmitting: false, updatedDescription: result.updatedContent });
+        toast({ title: "Updated!", description: "This recommendation has been refreshed." });
+      } else {
+        setFeedback(key, { isSubmitting: false });
+        toast({ title: "Kept as is", description: result.reason || "No changes needed." });
+      }
+    } catch {
+      setFeedback(key, { isSubmitting: false });
+      toast({ title: "Couldn't update", description: "Please try again", variant: "destructive" });
+    }
+  }, [data, rawItinerary, tripPreferences]);
 
   return (
     <div className="space-y-5">
@@ -190,7 +279,8 @@ export function StructuredItinerary({ data }: Props) {
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
                               <span className="text-sm font-semibold text-primary whitespace-nowrap">
-                                {opt.pricePerNight}<span className="text-xs font-normal text-muted-foreground">/night</span>
+                                {opt.pricePerNight}
+                                <span className="text-xs font-normal text-muted-foreground">/night</span>
                               </span>
                               <ExternalLink className="w-3.5 h-3.5 text-muted-foreground group-hover:text-primary transition-colors" />
                             </div>
@@ -305,59 +395,153 @@ export function StructuredItinerary({ data }: Props) {
           {/* Activities */}
           {activePeriod && (
             <div className="space-y-3">
-              {activePeriod.activities.map((activity, i) => (
-                <div key={i} className="bg-card border border-border/60 rounded-2xl p-4">
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <h4 className="font-semibold text-foreground leading-snug">{activity.name}</h4>
+              {activePeriod.activities.map((activity, actIdx) => {
+                const key = activityKey(activeDayIdx, activePeriodIdx, actIdx);
+                const fb = getFeedback(key);
+                const isOpen = openComment === key;
+                const description = fb.updatedDescription ?? activity.description;
+
+                return (
+                  <div
+                    key={actIdx}
+                    className={cn(
+                      "bg-card border rounded-2xl p-4 transition-all",
+                      fb.vote === 'up' && "border-green-200 bg-green-50/30",
+                      fb.vote === 'down' && !fb.updatedDescription && "border-red-200 bg-red-50/20",
+                      fb.updatedDescription && "border-green-200 bg-green-50/30",
+                      !fb.vote && "border-border/60"
+                    )}
+                  >
+                    {/* Header row */}
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <h4 className="font-semibold text-foreground leading-snug">{activity.name}</h4>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {/* Thumbs up */}
+                        <button
+                          onClick={() => handleVote(key, 'up')}
+                          className={cn(
+                            "p-1.5 rounded-lg transition-colors",
+                            fb.vote === 'up'
+                              ? "bg-green-100 text-green-600"
+                              : "text-muted-foreground hover:text-green-600 hover:bg-green-50"
+                          )}
+                          title="Keep this"
+                        >
+                          <ThumbsUp className="w-3.5 h-3.5" />
+                        </button>
+                        {/* Thumbs down */}
+                        <button
+                          onClick={() => handleVote(key, 'down')}
+                          className={cn(
+                            "p-1.5 rounded-lg transition-colors",
+                            fb.vote === 'down'
+                              ? "bg-red-100 text-red-600"
+                              : "text-muted-foreground hover:text-red-600 hover:bg-red-50"
+                          )}
+                          title="Suggest change"
+                        >
+                          <ThumbsDown className="w-3.5 h-3.5" />
+                        </button>
+                        {/* External link */}
+                        {activity.bookingUrl && (
+                          <a
+                            href={activity.bookingUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                      </div>
+                    </div>
+
+                    <p className={cn(
+                      "text-sm leading-relaxed",
+                      fb.updatedDescription ? "text-foreground" : "text-muted-foreground"
+                    )}>
+                      {description}
+                      {fb.updatedDescription && (
+                        <span className="ml-1.5 text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium align-middle">
+                          updated
+                        </span>
+                      )}
+                    </p>
+
+                    {/* Meta row */}
+                    <div className="flex flex-wrap items-center gap-2 mt-2.5">
+                      {activity.duration && (
+                        <span className="flex items-center gap-1 text-xs text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-full">
+                          <Clock className="w-3 h-3" />
+                          {activity.duration}
+                        </span>
+                      )}
+                      {activity.cost === 'Free' ? (
+                        <span className="text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full font-medium">Free</span>
+                      ) : activity.cost ? (
+                        <span className="flex items-center gap-1 text-xs text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-full">
+                          <DollarSign className="w-3 h-3" />
+                          {activity.cost}
+                        </span>
+                      ) : null}
+                      {activity.tags?.map(tag => (
+                        <span
+                          key={tag}
+                          className={cn("text-xs px-2 py-0.5 rounded-full", TAG_COLORS[tag] || 'bg-gray-100 text-gray-600')}
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+
                     {activity.bookingUrl && (
                       <a
                         href={activity.bookingUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="shrink-0 p-1 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                        className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline mt-2"
                       >
-                        <ExternalLink className="w-3.5 h-3.5" />
+                        Book this <ExternalLink className="w-3 h-3" />
                       </a>
                     )}
+
+                    {/* Inline feedback comment box */}
+                    {isOpen && (
+                      <div className="mt-3 pt-3 border-t border-border/50 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-medium text-foreground">What would you change?</p>
+                          <button
+                            onClick={() => setOpenComment(null)}
+                            className="text-muted-foreground hover:text-foreground"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <Textarea
+                          value={fb.comment}
+                          onChange={(e) => setFeedback(key, { comment: e.target.value })}
+                          placeholder="e.g. 'I'd prefer something more low-key' or 'Replace with a cooking class'"
+                          className="min-h-[72px] resize-none text-sm"
+                          disabled={fb.isSubmitting}
+                        />
+                        <div className="flex justify-end">
+                          <Button
+                            size="sm"
+                            onClick={() => handleSubmitFeedback(key, activeDayIdx, activePeriodIdx, actIdx)}
+                            disabled={fb.isSubmitting}
+                          >
+                            {fb.isSubmitting ? (
+                              <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Updating...</>
+                            ) : (
+                              <><Send className="w-3.5 h-3.5 mr-1.5" />Submit</>
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <p className="text-sm text-muted-foreground leading-relaxed">{activity.description}</p>
-                  <div className="flex flex-wrap items-center gap-2 mt-2.5">
-                    {activity.duration && (
-                      <span className="flex items-center gap-1 text-xs text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-full">
-                        <Clock className="w-3 h-3" />
-                        {activity.duration}
-                      </span>
-                    )}
-                    {activity.cost && activity.cost !== 'Free' && (
-                      <span className="flex items-center gap-1 text-xs text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-full">
-                        <DollarSign className="w-3 h-3" />
-                        {activity.cost}
-                      </span>
-                    )}
-                    {activity.cost === 'Free' && (
-                      <span className="text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full font-medium">Free</span>
-                    )}
-                    {activity.tags?.map(tag => (
-                      <span
-                        key={tag}
-                        className={cn("text-xs px-2 py-0.5 rounded-full", TAG_COLORS[tag] || 'bg-gray-100 text-gray-600')}
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                  {activity.bookingUrl && (
-                    <a
-                      href={activity.bookingUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline mt-2"
-                    >
-                      Book this <ExternalLink className="w-3 h-3" />
-                    </a>
-                  )}
-                </div>
-              ))}
+                );
+              })}
 
               {/* Dining suggestions */}
               {activePeriod.dining && activePeriod.dining.length > 0 && (
