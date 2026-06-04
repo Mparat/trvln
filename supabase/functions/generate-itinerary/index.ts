@@ -680,12 +680,14 @@ STRICT RULES:
 - Output ONLY the JSON object — nothing before or after it
 - No markdown code fences in the actual output — the above \`\`\` are just for illustration
 - Every day must have exactly 3 periods: Morning, Afternoon, Evening
-- Each period must have at least 1 activity
-- Include 2–3 dining options for Afternoon and Evening periods when possible
+- Each period must have EXACTLY 2 activities (no more, no fewer)
+- Include EXACTLY 1 dining option for Afternoon and Evening periods; Morning dining must be null
 - Tags must only be from: transit, cultural, nature, hiking, beach, food, photo-worthy, walking, adventure, relaxation, shopping, nightlife
 - priority must be exactly "high", "medium", or "low"
 - Use real URLs from the grounded research — fallback to search URL patterns listed above
-- Keep activity descriptions to 1–2 sentences
+- Keep ALL descriptions to 1 short sentence (25 words maximum) — be ruthlessly concise
+- Keep activity names under 6 words
+- Omit bookingUrl entirely if it would be an empty string
 - If noFlight is true, set flights.skip to true and flights.options to []
 
 ## Guidelines

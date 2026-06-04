@@ -966,6 +966,18 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
       | { kind: 'header'; item: typeof items[0]; nearMiss: boolean }
       | { kind: 'activity'; parent: typeof items[0]; children: typeof items[0][]; nearMiss: boolean };
 
+    // Find the minimum indent level among bullets so we treat them as top-level
+    // regardless of how the parser counted section depth offsets.
+    let minBulletIndent = Infinity;
+    for (const item of sectionItems) {
+      const line = cleanLine(item.content).trim();
+      if (!line || isMainSectionHeader(line)) continue;
+      if ((line.startsWith('-') || line.startsWith('•')) && item.indentLevel < minBulletIndent) {
+        minBulletIndent = item.indentLevel;
+      }
+    }
+    if (minBulletIndent === Infinity) minBulletIndent = 0;
+
     const groups: GroupEntry[] = [];
     let currentGroup: { parent: typeof items[0]; children: typeof items[0][] } | null = null;
     let inNearMiss = false;
@@ -992,7 +1004,7 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
         return;
       }
 
-      if (item.indentLevel === 0) {
+      if (item.indentLevel === minBulletIndent) {
         flush();
         currentGroup = { parent: item, children: [] };
       } else if (currentGroup) {

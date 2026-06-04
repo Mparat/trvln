@@ -282,7 +282,7 @@ const Index = () => {
           );
 
           // Parse the completed JSON response into structured data.
-          // If truncated, attempt to salvage by closing any open arrays/objects.
+          // If truncated, attempt to salvage by tracking open bracket stack.
           let structuredData: ItineraryData | undefined;
           try {
             const jsonMatch = content.match(/\{[\s\S]*\}/);
@@ -291,15 +291,26 @@ const Index = () => {
               try {
                 structuredData = JSON.parse(raw) as ItineraryData;
               } catch {
-                // Try to repair truncated JSON by closing dangling brackets
-                const opens = (raw.match(/[\[{]/g) || []).length;
-                const closes = (raw.match(/[\]}]/g) || []).length;
-                let repaired = raw.trimEnd().replace(/,\s*$/, '');
-                for (let i = 0; i < opens - closes; i++) {
-                  repaired += (repaired.endsWith('}') || repaired.endsWith(']')) ? '' : '"';
-                  repaired += i % 2 === 0 ? '}' : ']';
-                }
-                structuredData = JSON.parse(repaired) as ItineraryData;
+                // Repair truncated JSON using a proper bracket stack
+                const repairJson = (s: string): string => {
+                  let t = s.trimEnd().replace(/,\s*$/, '');
+                  const stack: string[] = [];
+                  let inStr = false;
+                  let esc = false;
+                  for (const ch of t) {
+                    if (esc) { esc = false; continue; }
+                    if (ch === '\\' && inStr) { esc = true; continue; }
+                    if (ch === '"') { inStr = !inStr; continue; }
+                    if (inStr) continue;
+                    if (ch === '{') stack.push('}');
+                    else if (ch === '[') stack.push(']');
+                    else if (ch === '}' || ch === ']') stack.pop();
+                  }
+                  if (inStr) t += '"';
+                  while (stack.length > 0) t += stack.pop()!;
+                  return t;
+                };
+                structuredData = JSON.parse(repairJson(raw)) as ItineraryData;
               }
             }
           } catch (e) {
