@@ -72,6 +72,7 @@ const Index = () => {
   const getHeaders = useCallback(() => {
     return {
       "Content-Type": "application/json",
+      "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
     };
   }, []);
 
