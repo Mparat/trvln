@@ -281,12 +281,26 @@ const Index = () => {
             }
           );
 
-          // Parse the completed JSON response into structured data
+          // Parse the completed JSON response into structured data.
+          // If truncated, attempt to salvage by closing any open arrays/objects.
           let structuredData: ItineraryData | undefined;
           try {
             const jsonMatch = content.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
-              structuredData = JSON.parse(jsonMatch[0]) as ItineraryData;
+              let raw = jsonMatch[0];
+              try {
+                structuredData = JSON.parse(raw) as ItineraryData;
+              } catch {
+                // Try to repair truncated JSON by closing dangling brackets
+                const opens = (raw.match(/[\[{]/g) || []).length;
+                const closes = (raw.match(/[\]}]/g) || []).length;
+                let repaired = raw.trimEnd().replace(/,\s*$/, '');
+                for (let i = 0; i < opens - closes; i++) {
+                  repaired += (repaired.endsWith('}') || repaired.endsWith(']')) ? '' : '"';
+                  repaired += i % 2 === 0 ? '}' : ']';
+                }
+                structuredData = JSON.parse(repaired) as ItineraryData;
+              }
             }
           } catch (e) {
             console.error(`Failed to parse structured itinerary for ${theme.id}:`, e);

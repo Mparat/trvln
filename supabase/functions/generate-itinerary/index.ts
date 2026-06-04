@@ -754,7 +754,7 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
         model: "claude-sonnet-4-6",
         system: systemMessage?.content,
         messages: nonSystemMessages,
-        max_tokens: 10000,
+        max_tokens: 16000,
         stream: true,
       }),
     });
