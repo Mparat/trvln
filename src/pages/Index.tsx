@@ -202,7 +202,6 @@ const Index = () => {
     setIsGenerating(true);
     setItineraries([]);
     setActiveVariant(0);
-    setIdentifiedDestinations([]);
 
     try {
       // Step 1: Analyze media for location recognition (if media exists)
@@ -223,7 +222,6 @@ const Index = () => {
         if (allImageUrls.length > 0) {
           console.log(`Analyzing ${allImageUrls.length} images for location recognition...`);
           const identified = await analyzeInspiration(allImageUrls);
-          setIdentifiedDestinations(identified);
           
           // Merge high/medium confidence locations with user-specified cities
           const newLocations = identified
