@@ -518,123 +518,9 @@ You have been provided with LIVE WEB SEARCH RESULTS in the assistant message bel
 - Hotels: https://www.booking.com/searchresults.html?ss=HOTEL+NAME+CITY${startDate ? `&checkin=${formatDateForBooking(startDate)}` : ''}${endDate ? `&checkout=${formatDateForBooking(endDate)}` : ''}
 - Flights: https://www.google.com/travel/flights?q=flights+from+${departureCity ? departureCity.replace(/\s+/g, '+') : 'ORIGIN'}+to+DESTINATION${startDate ? `+departing+${formatDateForBooking(startDate)}` : ''}${endDate ? `+returning+${formatDateForBooking(endDate)}` : ''}
 
-## Planning Your Itinerary
-
-Before writing your final itinerary, work through your planning systematically in <itinerary_planning> tags. Keep this section focused and efficient.
-
-Address these steps in order:
-
-**Step 1: Extract Hard Constraints**
-
-List all non-negotiable constraints from the user inputs:
-- Total budget (and calculate daily budget if possible)
-- Trip duration (minimum and maximum days)
-- Must-visit destinations
-- Specific dates or date constraints
-- Any dealbreakers mentioned in open text
-
-**Step 2: Research Additional Destinations**
-
-Given the number of destinations the user mentioned and the trip duration, research and list 3-5 potential additional nearby destinations that an expert would recommend. For each, write down:
-- Name of destination
-- Key research findings (quote highlights from your research about why it's recommended)
-- Why it's worth including based on the user's interests ranking
-- How many days it would need
-- Rough daily cost estimate with source
-
-Then decide which (if any) to include in the itinerary and explain why.
-
-**Step 3: Optimal Routing**
-
-Map out the geographic order to visit all locations (user-specified plus any additions). For each potential routing:
-- List the order of destinations
-- Note the distance/time between each stop (with citations)
-- Calculate total transportation time and cost
-- Identify any backtracking
-
-Then select the most efficient route and explain why.
-
-**Step 4: Time Allocation**
-
-For each destination in your chosen route, calculate:
-- Number of major activities/sights to cover (list them out)
-- Days needed based on user's interests ranking
-- Travel time to arrive and depart
-- Recommended number of days with justification
-
-Note: A well-paced itinerary includes breathing room. Not every time block needs a specific attraction - sometimes the best travel experiences come from wandering a neighborhood, sitting in a local cafe, or stumbling upon something unexpected. For trips of 5+ days, include at least 1-2 "exploration" blocks rather than back-to-back structured activities.
-
-**Step 5: Budget Breakdown Math**
-
-Calculate explicitly whether everything fits within budget. Show ALL your arithmetic step-by-step with explicit numbers:
-
-- First, calculate total available budget: Write out "Total trip days × daily budget = total available" then substitute the actual numbers: "X days × $Y/day = $Z total"
-- For each destination, calculate the subtotal showing each component:
-  - Write: "Location 1: (accommodation cost per night × nights) + (estimated activities) + (estimated food) + (transport to/from)"
-  - Then substitute numbers: "Location 1: ($X × Y nights) + $A activities + $B food + $C transport = $D"
-  - Do this calculation for every single location, writing out each one
-- Calculate flights separately: "Flights: $X"
-- Now sum everything: Write out the addition: "$D1 + $D2 + $D3 + ... + $Flights" then calculate: "= $Total"
-- Compare to budget: "$Total vs $Budget_Available"
-- Calculate the difference explicitly: "Difference: $Total - $Budget_Available = $X (over/under)"
-- If over budget, identify specific line items to cut, recalculate each affected location's subtotal, and show the new total
-
-**Step 5b: Accommodation Price Verification**
-
-For each hotel you recommend, verify pricing against the user's budget:
-- User's accommodation budget target: ${budgetInfo.accommodation}
-- Calculate: "User budget: ${budgetInfo.accommodation} × [number of nights] nights = $X total for accommodation"
-- For each recommended hotel: "[Hotel name]: $Y/night × [nights] = $Z total"
-- Compare: If $Z > $X, explicitly note this is over budget
-- If prices exceed the user's accommodation budget due to seasonal factors or high demand:
-  - Explain WHY prices are higher (peak season, event, high-demand area, etc.)
-  - Provide at least one budget-friendly alternative hotel
-  - Calculate the savings: "Alternative hotel: $A/night saves $B vs. primary recommendation"
-
-**Step 6: Seasonal Considerations**
-
-Research and note seasonal factors:
-- Weather during travel dates (with citations)
-- Peak/shoulder/off-season pricing implications
-- Any closures or festivals (with citations)
-- Crowd levels
-
-**Step 7: Feasibility Check**
-
-Based on all the above, can you visit all of the user's inspiration locations? If not, which must be cut and why?
-
-**Step 8: Research Activities for Each Day**
-
-For each day of your itinerary, research and list 3-5 potential activities. Activities can include:
-- Specific attractions, museums, tours, or experiences
-- **Neighborhood exploration** (e.g., "Walk around Shimokitazawa and browse vintage shops")
-- **Unstructured discovery time** (e.g., "Explore the backstreets of Yanaka")
-
-For each activity, note:
-- What it is and key details
-- Why it matches user's interests and vibe
-- Time required and cost (exploration activities can be $0 or minimal)
-- Source citation (for exploration, cite a travel blog recommending the neighborhood, or use [Neighborhood exploration - no booking required])
-
-**Step 9: Activity Selection**
-
-For each day, pick the best activities from your Step 8 research. Note any strong alternatives worth including in the alternatives section at the end.
-
-**Step 10: Assumptions & Output Structure Planning**
-
-List key assumptions (budget tier, season pricing, etc.), then confirm the final output order:
-1. Executive summary
-2. Key bookings and budget
-3. Day-by-day itinerary
-4. Alternatives
-
-**Step 11: Output Structure Planning**
-
-Review your planning and confirm the final structure: executive summary → key bookings/budget → day-by-day → alternatives.
-
 ## Output Structure
 
-After your </itinerary_planning> closing tag, present your complete itinerary following this structure exactly:
+Present your complete itinerary directly — no preamble, no planning notes. Start immediately with the executive summary:
 
 ### SECTION 1: EXECUTIVE SUMMARY
 
@@ -1090,7 +976,7 @@ Keep these guidelines in mind throughout your work:
 - Ensure the adventure level matches user preferences (don't suggest extreme activities for low-adventure preferences)
 - **Critical verification step:** After researching activities, conduct a second comparative search to cross-check each option against alternatives. Compare the top 2-3 options explicitly before committing to your final choice. Document near-tie alternatives for the alternatives section.
 
-Begin by working through your systematic planning in <itinerary_planning> tags, then present your complete itinerary following the structure outlined above.`;
+Present your complete itinerary following the structure outlined above. Start immediately with the executive summary.`;
 
     const userPrompt = `Here are my travel planning inputs:
 
