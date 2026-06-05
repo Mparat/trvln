@@ -979,14 +979,17 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
   const renderSectionItems = (sectionItems: typeof items) => {
     type GroupEntry =
       | { kind: 'header'; item: typeof items[0]; nearMiss: boolean }
-      | { kind: 'activity'; parent: typeof items[0]; children: typeof items[0][]; nearMiss: boolean };
+      | { kind: 'activity'; parent: typeof items[0]; children: typeof items[0][]; nearMiss: boolean }
+      | { kind: 'titled-group'; title: typeof items[0]; children: typeof items[0][]; nearMiss: boolean };
 
     const groups: GroupEntry[] = [];
     let currentGroup: { parent: typeof items[0]; children: typeof items[0][] } | null = null;
     let currentGroupIndentLevel = Infinity;
+    // Titled groups collect bullets under a bold section header (e.g. Transportation, Budget)
+    let currentTitledGroupChildren: typeof items | null = null;
     let inNearMiss = false;
 
-    const flush = () => {
+    const flushActivity = () => {
       if (currentGroup) {
         groups.push({ kind: 'activity', parent: currentGroup.parent, children: currentGroup.children, nearMiss: inNearMiss });
         currentGroup = null;
@@ -1004,25 +1007,76 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
       const isBullet = line.startsWith('-') || line.startsWith('•');
 
       if (!isBullet) {
-        flush();
-        groups.push({ kind: 'header', item, nearMiss: inNearMiss });
+        flushActivity();
+        currentTitledGroupChildren = null;
+
+        // Bold (or ##) subheaders that are NOT time-period headers become titled groups
+        // that collect their following bullets as sub-items (Transportation, Budget, etc.)
+        const isBoldHeader = !!(line.match(/^\*\*([^*]+)\*\*:?$/) || line.match(/^###?\s+/));
+        const isPeriodHeader = /^\*?\*?(Morning|Afternoon|Evening|Night)/i.test(line);
+        const isDayHdr = /Day\s+\d+/i.test(line);
+
+        if (isBoldHeader && !isPeriodHeader && !isDayHdr) {
+          const childrenArr: typeof items = [];
+          groups.push({ kind: 'titled-group', title: item, children: childrenArr, nearMiss: inNearMiss });
+          currentTitledGroupChildren = childrenArr;
+        } else {
+          groups.push({ kind: 'header', item, nearMiss: inNearMiss });
+        }
         return;
       }
 
-      // Start a new group when there's no current group, or this bullet is at
-      // the same or lower indent level as the current group's parent.
+      // Bullets: route into titled group if one is active, else normal activity grouping
+      if (currentTitledGroupChildren !== null) {
+        currentTitledGroupChildren.push(item);
+        return;
+      }
+
       if (!currentGroup || item.indentLevel <= currentGroupIndentLevel) {
-        flush();
+        flushActivity();
         currentGroup = { parent: item, children: [] };
         currentGroupIndentLevel = item.indentLevel;
       } else {
         currentGroup.children.push(item);
       }
     });
-    flush();
+    flushActivity();
+
+    const renderSubItems = (children: typeof items) =>
+      children.map(child => {
+        const childLine = cleanLine(child.content).trim().replace(/^[-•]\s*/, '');
+        if (!childLine || /^\[source:/i.test(childLine)) return null;
+        return (
+          <div key={child.id} className="flex items-start gap-2 py-0.5">
+            <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 bg-muted-foreground/40" />
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              {parseInlineContent(childLine)}
+            </p>
+          </div>
+        );
+      });
 
     return groups.map(entry => {
       if (entry.kind === 'header') return renderItem(entry.item, entry.nearMiss);
+
+      // Titled group: bold section header (Transportation, Budget, etc.) + sub-items
+      if (entry.kind === 'titled-group') {
+        const titleText = cleanLine(entry.title.content).trim()
+          .replace(/^\*\*/, '').replace(/\*\*:?$/, '')
+          .replace(/^###?\s+/, '');
+        return (
+          <div key={entry.title.id} className="rounded-xl px-3 py-2 transition-colors hover:bg-muted/30">
+            <p className="text-sm font-semibold text-foreground/80 pb-1">
+              {parseInlineContent(titleText)}
+            </p>
+            {entry.children.length > 0 && (
+              <div className="ml-2 space-y-0.5 pb-1">
+                {renderSubItems(entry.children)}
+              </div>
+            )}
+          </div>
+        );
+      }
 
       const { parent, children, nearMiss } = entry;
       const isNearMissItem = nearMiss && parent.type === 'bullet';
@@ -1033,7 +1087,7 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
           key={parent.id}
           ref={(el) => { itemRefs.current[parent.id] = el; }}
           className={cn(
-            "rounded-xl px-3 py-1 transition-colors group/act",
+            "rounded-xl px-3 py-1 transition-colors group",
             "hover:bg-muted/30",
             parent.isUpdating && "opacity-60",
             isNearMissItem && "bg-amber-500/5 border-l-2 border-amber-500/30"
@@ -1052,13 +1106,13 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
                 </div>
               )}
             </div>
-            {/* Actions reveal on group hover */}
-            <div className="shrink-0 self-start pt-1 opacity-0 group-hover/act:opacity-100 transition-opacity flex items-center gap-1">
+            {/* Actions — revealed by group-hover on the outer card */}
+            <div className="shrink-0 self-start pt-1 flex items-center gap-1">
               {isNearMissItem ? (
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-7 px-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700"
+                  className="h-7 px-2 opacity-0 group-hover:opacity-100 transition-opacity bg-amber-500/10 hover:bg-amber-500/20 text-amber-700"
                   onClick={() => handleAddNearMiss(parent)}
                   disabled={addingNearMiss === parent.id}
                 >
@@ -1082,18 +1136,7 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
           {/* Sub-bullets — no individual hover/feedback */}
           {children.length > 0 && (
             <div className="ml-5 pb-2 space-y-0.5">
-              {children.map(child => {
-                const childLine = cleanLine(child.content).trim().replace(/^[-•]\s*/, '');
-                if (!childLine || /^\[source:/i.test(childLine)) return null;
-                return (
-                  <div key={child.id} className="flex items-start gap-2 py-0.5">
-                    <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 bg-muted-foreground/40" />
-                    <p className="text-sm text-muted-foreground leading-relaxed">
-                      {parseInlineContent(childLine)}
-                    </p>
-                  </div>
-                );
-              })}
+              {renderSubItems(children)}
             </div>
           )}
         </div>
