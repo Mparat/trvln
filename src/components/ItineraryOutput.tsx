@@ -977,21 +977,37 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
   // Render items for a section — groups a top-level bullet with its indented children
   // so the whole entity highlights together and feedback appears at the group level.
   const renderSectionItems = (sectionItems: typeof items) => {
-    type GroupEntry =
+    type SubEntry =
       | { kind: 'header'; item: typeof items[0]; nearMiss: boolean }
-      | { kind: 'activity'; parent: typeof items[0]; children: typeof items[0][]; nearMiss: boolean }
-      | { kind: 'titled-group'; title: typeof items[0]; children: typeof items[0][]; nearMiss: boolean };
+      | { kind: 'activity'; parent: typeof items[0]; children: typeof items[0][]; nearMiss: boolean };
+
+    type GroupEntry =
+      | SubEntry
+      | { kind: 'titled-group'; title: typeof items[0]; entries: SubEntry[]; nearMiss: boolean };
 
     const groups: GroupEntry[] = [];
     let currentGroup: { parent: typeof items[0]; children: typeof items[0][] } | null = null;
     let currentGroupIndentLevel = Infinity;
-    // Titled groups collect bullets under a bold section header (e.g. Transportation, Budget)
-    let currentTitledGroupChildren: typeof items | null = null;
+    // When set, new sub-entries go inside this titled-group instead of the top-level list
+    let activeTitledGroupEntries: SubEntry[] | null = null;
     let inNearMiss = false;
+
+    const pushSubEntry = (entry: SubEntry) => {
+      if (activeTitledGroupEntries !== null) {
+        activeTitledGroupEntries.push(entry);
+      } else {
+        groups.push(entry);
+      }
+    };
 
     const flushActivity = () => {
       if (currentGroup) {
-        groups.push({ kind: 'activity', parent: currentGroup.parent, children: currentGroup.children, nearMiss: inNearMiss });
+        pushSubEntry({
+          kind: 'activity',
+          parent: currentGroup.parent,
+          children: currentGroup.children,
+          nearMiss: inNearMiss,
+        });
         currentGroup = null;
         currentGroupIndentLevel = Infinity;
       }
@@ -1008,30 +1024,27 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
 
       if (!isBullet) {
         flushActivity();
-        currentTitledGroupChildren = null;
 
-        // Bold (or ##) subheaders that are NOT time-period headers become titled groups
-        // that collect their following bullets as sub-items (Transportation, Budget, etc.)
-        const isBoldHeader = !!(line.match(/^\*\*([^*]+)\*\*:?$/) || line.match(/^###?\s+/));
+        // Only **bold** (not ###) non-period/day headers become titled-groups
+        const isBoldHeader = !!(line.match(/^\*\*([^*]+)\*\*:?$/));
         const isPeriodHeader = /^\*?\*?(Morning|Afternoon|Evening|Night)/i.test(line);
         const isDayHdr = /Day\s+\d+/i.test(line);
 
         if (isBoldHeader && !isPeriodHeader && !isDayHdr) {
-          const childrenArr: typeof items = [];
-          groups.push({ kind: 'titled-group', title: item, children: childrenArr, nearMiss: inNearMiss });
-          currentTitledGroupChildren = childrenArr;
+          // Close any active titled-group and start a new one
+          activeTitledGroupEntries = null;
+          const entries: SubEntry[] = [];
+          groups.push({ kind: 'titled-group', title: item, entries, nearMiss: inNearMiss });
+          activeTitledGroupEntries = entries;
         } else {
+          // Period headers, day headers, ### headers all close any active titled-group
+          activeTitledGroupEntries = null;
           groups.push({ kind: 'header', item, nearMiss: inNearMiss });
         }
         return;
       }
 
-      // Bullets: route into titled group if one is active, else normal activity grouping
-      if (currentTitledGroupChildren !== null) {
-        currentTitledGroupChildren.push(item);
-        return;
-      }
-
+      // Bullets: same parent-child grouping regardless of titled-group context
       if (!currentGroup || item.indentLevel <= currentGroupIndentLevel) {
         flushActivity();
         currentGroup = { parent: item, children: [] };
@@ -1042,6 +1055,7 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
     });
     flushActivity();
 
+    // Sub-bullet renderer (no feedback, muted)
     const renderSubItems = (children: typeof items) =>
       children.map(child => {
         const childLine = cleanLine(child.content).trim().replace(/^[-•]\s*/, '');
@@ -1056,29 +1070,13 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
         );
       });
 
-    return groups.map(entry => {
-      if (entry.kind === 'header') return renderItem(entry.item, entry.nearMiss);
-
-      // Titled group: bold section header (Transportation, Budget, etc.) + sub-items
-      if (entry.kind === 'titled-group') {
-        const titleText = cleanLine(entry.title.content).trim()
-          .replace(/^\*\*/, '').replace(/\*\*:?$/, '')
-          .replace(/^###?\s+/, '');
-        return (
-          <div key={entry.title.id} className="rounded-xl px-3 py-2 transition-colors hover:bg-muted/30">
-            <p className="text-sm font-semibold text-foreground/80 pb-1">
-              {parseInlineContent(titleText)}
-            </p>
-            {entry.children.length > 0 && (
-              <div className="ml-2 space-y-0.5 pb-1">
-                {renderSubItems(entry.children)}
-              </div>
-            )}
-          </div>
-        );
-      }
-
-      const { parent, children, nearMiss } = entry;
+    // Activity card renderer — shared by top-level activities and entries inside titled-groups
+    const renderActivityEntry = (
+      parent: typeof items[0],
+      children: typeof items[0][],
+      nearMiss: boolean,
+      compact = false,
+    ) => {
       const isNearMissItem = nearMiss && parent.type === 'bullet';
       const parentContent = cleanLine(parent.content).trim().replace(/^[-•]\s*/, '');
 
@@ -1093,11 +1091,10 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
             isNearMissItem && "bg-amber-500/5 border-l-2 border-amber-500/30"
           )}
         >
-          {/* Parent bullet + actions */}
           <div className="flex items-start gap-3 py-1.5">
             <div className="w-2 h-2 rounded-full mt-2.5 shrink-0 bg-primary/60" />
             <div className="flex-1 min-w-0">
-              <p className="text-foreground/90 leading-relaxed">
+              <p className={cn("text-foreground/90 leading-relaxed", compact && "text-sm")}>
                 {parseInlineContent(parentContent)}
               </p>
               {parent.comment && !parent.isUpdating && (
@@ -1106,7 +1103,6 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
                 </div>
               )}
             </div>
-            {/* Actions — revealed by group-hover on the outer card */}
             <div className="shrink-0 self-start pt-1 flex items-center gap-1">
               {isNearMissItem ? (
                 <Button
@@ -1133,12 +1129,35 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
             </div>
           </div>
 
-          {/* Sub-bullets — no individual hover/feedback */}
           {children.length > 0 && (
             <div className="ml-5 pb-2 space-y-0.5">
               {renderSubItems(children)}
             </div>
           )}
+        </div>
+      );
+    };
+
+    return groups.map(entry => {
+      if (entry.kind === 'header') return renderItem(entry.item, entry.nearMiss);
+
+      if (entry.kind === 'activity') {
+        return renderActivityEntry(entry.parent, entry.children, entry.nearMiss);
+      }
+
+      // Titled-group: bold section header with activity cards inside (proper hierarchy)
+      const titleText = cleanLine(entry.title.content).trim()
+        .replace(/^\*\*/, '').replace(/\*\*:?$/, '')
+        .replace(/^###?\s+/, '');
+      return (
+        <div key={entry.title.id} className="rounded-xl border border-muted/40 px-1 py-2 space-y-0.5">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-3 pb-1">
+            {parseInlineContent(titleText)}
+          </p>
+          {entry.entries.map(subEntry => {
+            if (subEntry.kind === 'header') return renderItem(subEntry.item, subEntry.nearMiss);
+            return renderActivityEntry(subEntry.parent, subEntry.children, subEntry.nearMiss, true);
+          })}
         </div>
       );
     });
