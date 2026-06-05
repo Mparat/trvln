@@ -751,6 +751,21 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
     );
   }
 
+  // JSON was detected but failed to parse — don't render raw JSON as markdown
+  if (!isStreaming && !structuredData && itinerary.trimStart().startsWith('{')) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 gap-4 text-center">
+        <div className="w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center">
+          <X className="w-6 h-6 text-destructive" />
+        </div>
+        <div>
+          <p className="font-semibold text-foreground">Itinerary generation incomplete</p>
+          <p className="text-sm text-muted-foreground mt-1">The response was cut off before finishing. Please regenerate.</p>
+        </div>
+      </div>
+    );
+  }
+
   // When structured JSON data is available, render the beautiful UI
   if (structuredData) {
     return (
@@ -966,26 +981,16 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
       | { kind: 'header'; item: typeof items[0]; nearMiss: boolean }
       | { kind: 'activity'; parent: typeof items[0]; children: typeof items[0][]; nearMiss: boolean };
 
-    // Find the minimum indent level among bullets so we treat them as top-level
-    // regardless of how the parser counted section depth offsets.
-    let minBulletIndent = Infinity;
-    for (const item of sectionItems) {
-      const line = cleanLine(item.content).trim();
-      if (!line || isMainSectionHeader(line)) continue;
-      if ((line.startsWith('-') || line.startsWith('•')) && item.indentLevel < minBulletIndent) {
-        minBulletIndent = item.indentLevel;
-      }
-    }
-    if (minBulletIndent === Infinity) minBulletIndent = 0;
-
     const groups: GroupEntry[] = [];
     let currentGroup: { parent: typeof items[0]; children: typeof items[0][] } | null = null;
+    let currentGroupIndentLevel = Infinity;
     let inNearMiss = false;
 
     const flush = () => {
       if (currentGroup) {
         groups.push({ kind: 'activity', parent: currentGroup.parent, children: currentGroup.children, nearMiss: inNearMiss });
         currentGroup = null;
+        currentGroupIndentLevel = Infinity;
       }
     };
 
@@ -1004,10 +1009,13 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
         return;
       }
 
-      if (item.indentLevel === minBulletIndent) {
+      // Start a new group when there's no current group, or this bullet is at
+      // the same or lower indent level as the current group's parent.
+      if (!currentGroup || item.indentLevel <= currentGroupIndentLevel) {
         flush();
         currentGroup = { parent: item, children: [] };
-      } else if (currentGroup) {
+        currentGroupIndentLevel = item.indentLevel;
+      } else {
         currentGroup.children.push(item);
       }
     });
