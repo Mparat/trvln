@@ -473,30 +473,9 @@ The user inputs are organized into four main categories:
 - This may clarify, override, or add nuance to the structured inputs above
 - Pay close attention to any specific requests or concerns mentioned here
 
-## Research and Citation Requirements
+## Research Requirements
 
-Conduct thorough research for each destination and activity. Search for information from these sources:
-
-1. Travel blogs and vlogs - Recent, detailed experiences from travelers
-2. Official tourism websites - Opening hours, prices, seasonal information
-3. Travel guides (Lonely Planet, Rick Steves, etc.) - Expert recommendations
-4. Activity booking platforms (Viator, GetYourGuide, Airbnb Experiences) - Specific tours and activities with pricing
-5. Google Maps - Locations, distances, travel times between points
-6. Google Flights - Flight information, prices, booking links
-7. Transportation websites - Bus, train, or ferry schedules from official sources
-8. Local forums and Reddit - Insider tips and recent traveler experiences
-9. Restaurant review sites - Highly-rated dining options matching the user's vibe
-
-**IMPORTANT: You must cite your source for every single recommendation you make.**
-
-**Citation Format:**
-
-Use these formats for citations:
-- \`[Source: Blog Name - "Article Title" - URL]\` for blogs/articles
-- \`[Source: Platform Name - URL]\` for booking platforms
-- \`[Source: Official Website - URL]\` for official sources
-- \`[Source: Google Flights - Date searched]\` for flight information
-- \`[Source: Google Maps]\` for distances/times
+Use the grounded research data below to find real establishment names, accurate prices, and working URLs. For every activity, hotel, restaurant, and booking link, use URLs from the research — falling back to the search URL patterns if a direct URL is not available. Do not invent establishment names or fabricate URLs.
 
 ## GROUNDED RESEARCH (CRITICAL - READ BEFORE PROCEEDING)
 
@@ -756,7 +735,7 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
         model: "claude-sonnet-4-6",
         system: systemMessage?.content,
         messages: nonSystemMessages,
-        max_tokens: 16000,
+        max_tokens: 32000,
         stream: true,
       }),
     });
