@@ -1030,14 +1030,14 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
         const isPeriodHeader = /^\*?\*?(Morning|Afternoon|Evening|Night)/i.test(line);
         const isDayHdr = /Day\s+\d+/i.test(line);
 
-        if (isBoldHeader && !isPeriodHeader && !isDayHdr) {
-          // Close any active titled-group and start a new one
+        // Both bold section headers AND period headers (Morning/Afternoon/Evening)
+        // become titled-group containers — day headers stay as standalone big headers.
+        if ((isBoldHeader || isPeriodHeader) && !isDayHdr) {
           activeTitledGroupEntries = null;
           const entries: SubEntry[] = [];
           groups.push({ kind: 'titled-group', title: item, entries, nearMiss: inNearMiss });
           activeTitledGroupEntries = entries;
         } else {
-          // Period headers, day headers, ### headers all close any active titled-group
           activeTitledGroupEntries = null;
           groups.push({ kind: 'header', item, nearMiss: inNearMiss });
         }
@@ -1148,7 +1148,8 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
       // Titled-group: bold section header with activity cards inside (proper hierarchy)
       const titleText = cleanLine(entry.title.content).trim()
         .replace(/^\*\*/, '').replace(/\*\*:?$/, '')
-        .replace(/^###?\s+/, '');
+        .replace(/^###?\s+/, '')
+        .replace(/:$/, '');
       return (
         <div key={entry.title.id} className="rounded-xl border border-muted/40 px-1 py-2 space-y-0.5">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-3 pb-1">
