@@ -819,3 +819,4 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
     });
   }
 });
+
