@@ -1045,6 +1045,25 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
       }
 
       // Bullets: same parent-child grouping regardless of titled-group context
+      // Exception: bullets whose entire content is a bold/emoji label (no prose text)
+      // are section-header bullets (e.g. "- 🚌 **Transportation:**") and should open
+      // a new titled-group just like non-bullet bold headers do.
+      const bulletContent = line.replace(/^[-•]\s*/, '');
+      const bulletStripped = bulletContent
+        .replace(/\*\*[^*]+\*\*/g, '')   // remove **bold** spans
+        .replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{1F300}-\u{1F9FF}]/gu, '') // remove emoji
+        .replace(/\s/g, '');             // remove whitespace
+      const isSectionHeaderBullet = bulletStripped === '' || bulletStripped === ':';
+
+      if (isSectionHeaderBullet) {
+        flushActivity();
+        activeTitledGroupEntries = null;
+        const entries: SubEntry[] = [];
+        groups.push({ kind: 'titled-group', title: item, entries, nearMiss: inNearMiss });
+        activeTitledGroupEntries = entries;
+        return;
+      }
+
       if (!currentGroup || item.indentLevel <= currentGroupIndentLevel) {
         flushActivity();
         currentGroup = { parent: item, children: [] };
@@ -1147,9 +1166,11 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
 
       // Titled-group: bold section header with activity cards inside (proper hierarchy)
       const titleText = cleanLine(entry.title.content).trim()
-        .replace(/^\*\*/, '').replace(/\*\*:?$/, '')
-        .replace(/^###?\s+/, '')
-        .replace(/:$/, '');
+        .replace(/^[-•]\s*/, '')  // strip bullet prefix if this came from a bullet
+        .replace(/\*\*/g, '')     // strip all bold markers
+        .replace(/^#+\s*/, '')    // strip ### prefixes
+        .replace(/:$/, '')        // strip trailing colon
+        .trim();
       return (
         <div key={entry.title.id} className="rounded-xl border border-muted/40 px-1 py-2 space-y-0.5">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-3 pb-1">
