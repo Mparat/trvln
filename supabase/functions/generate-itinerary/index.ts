@@ -586,11 +586,17 @@ Use this exact schema. Every field shown is required unless marked optional. All
           "activities": [
             {
               "name": "Arrive at PDL Airport",
-              "description": "Land, clear customs, and pick up your rental car. The drive to the city center takes about 20 minutes.",
+              "description": "Clear customs and pick up your rental car; city center is 20 minutes away.",
               "duration": "2 hours",
               "cost": "Free",
-              "tags": ["transit"],
-              "bookingUrl": ""
+              "tags": ["transit"]
+            },
+            {
+              "name": "Check in and explore PDL",
+              "description": "Drop bags, grab a coffee, and wander the black-and-white mosaic streets near your hotel.",
+              "duration": "1.5 hours",
+              "cost": "Free",
+              "tags": ["walking", "cultural"]
             }
           ],
           "dining": null
@@ -599,26 +605,26 @@ Use this exact schema. Every field shown is required unless marked optional. All
           "label": "Afternoon",
           "activities": [
             {
-              "name": "Explore Ponta Delgada Old Town",
-              "description": "Walk the historic center — see the iconic black-and-white mosaic sidewalks, Portas da Cidade gates, and the main square.",
-              "duration": "2–3 hours",
+              "name": "Portas da Cidade and main square",
+              "description": "Walk through the iconic city gates and admire the baroque church facade on the main square.",
+              "duration": "1.5 hours",
               "cost": "Free",
-              "tags": ["cultural", "walking", "photo-worthy"],
-              "bookingUrl": ""
+              "tags": ["cultural", "photo-worthy"]
+            },
+            {
+              "name": "Mercado da Graça market",
+              "description": "Browse local produce, cheeses, and Azorean crafts at this lively covered market.",
+              "duration": "1 hour",
+              "cost": "Free",
+              "tags": ["cultural", "food"]
             }
           ],
           "dining": [
             {
               "name": "Restaurante A Tasca",
-              "description": "Traditional Azorean dishes — try the alcatra beef stew or fresh tuna",
+              "description": "Traditional Azorean alcatra stew and fresh tuna in a cozy family-run spot.",
               "priceRange": "$15–$25/person",
               "url": "https://www.google.com/maps/search/?api=1&query=Restaurante+A+Tasca+Ponta+Delgada"
-            },
-            {
-              "name": "Cafe Alianca",
-              "description": "Historic cafe, great for a light lunch and coffee",
-              "priceRange": "$8–$15/person",
-              "url": "https://www.google.com/maps/search/?api=1&query=Cafe+Alianca+Ponta+Delgada"
             }
           ]
         },
@@ -626,18 +632,24 @@ Use this exact schema. Every field shown is required unless marked optional. All
           "label": "Evening",
           "activities": [
             {
-              "name": "Sunset walk along the marina",
-              "description": "The Ponta Delgada marina offers beautiful sunset views with the city backdrop.",
+              "name": "Sunset at PDL marina",
+              "description": "Watch the sun set over the Atlantic from the marina boardwalk — stunning on clear evenings.",
               "duration": "1 hour",
               "cost": "Free",
-              "tags": ["nature", "photo-worthy", "walking"],
-              "bookingUrl": ""
+              "tags": ["nature", "photo-worthy"]
+            },
+            {
+              "name": "Evening stroll, Rua de Lisboa",
+              "description": "Explore the pedestrian shopping street lined with cafes and local boutiques.",
+              "duration": "45 minutes",
+              "cost": "Free",
+              "tags": ["walking", "shopping"]
             }
           ],
           "dining": [
             {
               "name": "Tony's Restaurant",
-              "description": "Beloved local seafood spot, known for fresh fish and friendly service",
+              "description": "Beloved local seafood spot known for the freshest fish on the island.",
               "priceRange": "$20–$35/person",
               "url": "https://www.google.com/maps/search/?api=1&query=Tonys+restaurant+Ponta+Delgada"
             }
@@ -649,7 +661,8 @@ Use this exact schema. Every field shown is required unless marked optional. All
   "alternatives": [
     {
       "title": "Add a Day Trip to Flores Island",
-      "description": "If you have an extra 2 days, Flores is one of the most dramatic Azorean islands with waterfalls and hydrangea-lined roads."
+      "description": "Flores has the most dramatic scenery in the Azores — waterfalls, crater lakes, hydrangeas.",
+      "url": "https://www.google.com/search?q=Flores+island+Azores+day+trip"
     }
   ]
 }

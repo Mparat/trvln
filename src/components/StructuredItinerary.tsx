@@ -299,12 +299,32 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences }: Pro
             <div>
               <h4 className="text-sm font-semibold text-foreground mb-3">Also Consider</h4>
               <div className="space-y-2">
-                {data.alternatives.map((alt, i) => (
-                  <div key={i} className="p-3.5 bg-muted/30 rounded-xl border border-border/40">
-                    <p className="text-sm font-medium text-foreground">{alt.title}</p>
-                    <p className="text-sm text-muted-foreground mt-0.5">{alt.description}</p>
-                  </div>
-                ))}
+                {data.alternatives.map((alt, i) => {
+                  const inner = (
+                    <>
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-medium text-foreground">{alt.title}</p>
+                        {alt.url && <ExternalLink className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-0.5" />}
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-0.5">{alt.description}</p>
+                    </>
+                  );
+                  return alt.url ? (
+                    <a
+                      key={i}
+                      href={alt.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block p-3.5 bg-muted/30 rounded-xl border border-border/40 hover:bg-muted/60 transition-colors"
+                    >
+                      {inner}
+                    </a>
+                  ) : (
+                    <div key={i} className="p-3.5 bg-muted/30 rounded-xl border border-border/40">
+                      {inner}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

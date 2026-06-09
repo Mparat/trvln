@@ -77,5 +77,5 @@ export interface ItineraryData {
   accommodation: AccommodationLocation[];
   bookingChecklist: BookingItem[];
   days: ItineraryDay[];
-  alternatives?: { title: string; description: string }[];
+  alternatives?: { title: string; description: string; url?: string }[];
 }
