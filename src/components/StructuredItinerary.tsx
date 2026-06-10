@@ -177,84 +177,135 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences }: Pro
 
       {/* ── Overview ── */}
       {activeTab === 'overview' && (
-        <div className="space-y-6">
-          {/* Hero summary */}
-          <div className="bg-gradient-to-br from-primary/10 to-primary/5 rounded-2xl p-5">
-            <div className="flex flex-wrap gap-2 mb-3">
-              <span className="text-xs font-medium text-primary bg-primary/15 px-2.5 py-1 rounded-full">
+        <div className="space-y-8">
+          {/* Summary pills + destination */}
+          <div>
+            <div className="flex flex-wrap gap-2 mb-4">
+              <span className="flex items-center gap-1.5 text-sm text-foreground border border-border rounded-full px-3 py-1">
+                <Clock className="w-3.5 h-3.5 text-muted-foreground" />
                 {data.summary.duration}
               </span>
-              <span className="text-xs text-muted-foreground bg-background/70 px-2.5 py-1 rounded-full flex items-center gap-1">
-                <Calendar className="w-3 h-3" /> {data.summary.recommendedDates}
+              <span className="flex items-center gap-1.5 text-sm text-foreground border border-border rounded-full px-3 py-1">
+                <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
+                {data.summary.recommendedDates}
               </span>
-              <span className="text-xs font-semibold text-foreground bg-background/70 px-2.5 py-1 rounded-full">
+              <span className="flex items-center gap-1.5 text-sm font-semibold text-foreground border border-border rounded-full px-3 py-1">
+                <DollarSign className="w-3.5 h-3.5 text-muted-foreground" />
                 {data.summary.totalBudget}
               </span>
             </div>
-            <h3 className="text-xl font-display font-bold text-foreground mb-3">
+            <h2 className="text-3xl font-bold text-foreground leading-tight mb-2">
               {data.summary.destination}
-            </h3>
-            <div className="flex flex-wrap gap-2">
-              {data.summary.highlights.map((h, i) => (
-                <span key={i} className="text-sm bg-background/70 px-2.5 py-1.5 rounded-lg text-foreground/80">
-                  ✦ {h}
-                </span>
-              ))}
-            </div>
+            </h2>
+            {data.summary.bestTimeNote && (
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                {data.summary.bestTimeNote}
+              </p>
+            )}
           </div>
+
+          {/* Highlights */}
+          <div className="space-y-3">
+            {data.summary.highlights.map((h, i) => (
+              <div key={i} className="flex items-start gap-3">
+                <span className="text-primary font-bold text-base mt-0.5 leading-none">+</span>
+                <p className="text-sm text-foreground leading-relaxed">{h}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Getting there / Flights */}
+          {!data.flights.skip && data.flights.options.length > 0 && (
+            <div>
+              <h4 className="flex items-center gap-2 text-base font-bold text-foreground mb-1">
+                <Plane className="w-4 h-4 text-primary" />
+                Getting there
+              </h4>
+              {data.flights.context && (
+                <p className="text-sm text-muted-foreground mb-3">{data.flights.context}</p>
+              )}
+              <div className="space-y-2 mt-3">
+                {data.flights.options.map((f, i) => {
+                  const isStructured = !!f.airlineCode;
+                  return (
+                    <a
+                      key={i}
+                      href={f.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-start gap-3 p-4 border border-border rounded-xl hover:bg-muted/30 transition-colors group"
+                    >
+                      {isStructured ? (
+                        <>
+                          <div className="w-9 h-9 bg-muted rounded-lg flex items-center justify-center shrink-0 text-xs font-bold text-foreground">
+                            {f.airlineCode}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-semibold text-foreground">
+                                  {f.route}
+                                  {f.viaCity && <span className="font-normal text-muted-foreground"> · via {f.viaCity}</span>}
+                                </p>
+                                <p className="text-xs text-muted-foreground mt-0.5">
+                                  {[f.airline, f.stops, f.duration, f.departureTime ? `departs ${f.departureTime}` : ''].filter(Boolean).join(' · ')}
+                                </p>
+                              </div>
+                              <div className="flex flex-col items-end shrink-0 gap-1">
+                                {f.badge && (
+                                  <span className="text-[10px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full font-medium">
+                                    {f.badge}
+                                  </span>
+                                )}
+                                <span className="text-base font-bold text-foreground">{f.price}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-foreground">{f.description}</p>
+                            <p className="text-sm font-semibold text-primary mt-0.5">{f.price}</p>
+                          </div>
+                          <ExternalLink className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0 mt-0.5" />
+                        </>
+                      )}
+                    </a>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Budget breakdown */}
           <div>
-            <h4 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+            <h4 className="flex items-center gap-2 text-base font-bold text-foreground mb-4">
               <DollarSign className="w-4 h-4 text-primary" />
-              Budget Breakdown
+              Budget breakdown
             </h4>
-            <div className="rounded-xl border border-border/60 overflow-hidden">
+            <div>
               {data.budget.items.map((item, i) => (
-                <div
-                  key={i}
-                  className={cn(
-                    "flex items-center justify-between px-4 py-2.5 text-sm",
-                    i % 2 === 0 ? "bg-muted/20" : "bg-transparent"
-                  )}
-                >
-                  <span className="text-muted-foreground">{item.category}</span>
-                  <span className="font-medium text-foreground">{item.range}</span>
+                <div key={i}>
+                  {i > 0 && <div className="border-t border-border/40" />}
+                  <div className="flex items-start justify-between py-3 gap-4">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-foreground">{item.category}</p>
+                      {item.description && (
+                        <p className="text-xs text-muted-foreground mt-0.5">{item.description}</p>
+                      )}
+                    </div>
+                    <span className="text-sm font-semibold text-foreground whitespace-nowrap shrink-0">{item.range}</span>
+                  </div>
                 </div>
               ))}
-              <div className="flex items-center justify-between px-4 py-3 bg-primary/5 border-t border-border/60">
-                <span className="text-sm font-semibold text-foreground">Total estimate</span>
+              <div className="border-t border-foreground/15" />
+              <div className="flex items-center justify-between pt-3">
+                <span className="text-sm font-bold text-foreground">Total estimate</span>
                 <span className="text-sm font-bold text-primary">{data.budget.total}</span>
               </div>
             </div>
           </div>
-
-          {/* Flights */}
-          {!data.flights.skip && data.flights.options.length > 0 && (
-            <div>
-              <h4 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
-                <Plane className="w-4 h-4 text-primary" />
-                Flights
-              </h4>
-              <div className="space-y-2">
-                {data.flights.options.map((f, i) => (
-                  <a
-                    key={i}
-                    href={f.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-between p-3.5 bg-muted/30 rounded-xl hover:bg-muted/60 transition-colors group border border-transparent hover:border-border/50"
-                  >
-                    <div>
-                      <p className="text-sm font-medium text-foreground">{f.description}</p>
-                      <p className="text-sm text-primary font-semibold mt-0.5">{f.price}</p>
-                    </div>
-                    <ExternalLink className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
-                  </a>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* Accommodation */}
           {data.accommodation.length > 0 && (
@@ -611,8 +662,8 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences }: Pro
                         className={cn(
                           "flex items-center gap-3 p-3 rounded-xl border transition-colors group",
                           dining.isPrimary !== false
-                            ? "bg-orange-50/60 dark:bg-orange-950/20 border-orange-200 dark:border-orange-900/40 hover:bg-orange-50"
-                            : "bg-muted/30 border-transparent hover:bg-muted/50"
+                            ? "border-orange-300 dark:border-orange-700 hover:bg-orange-50/30 dark:hover:bg-orange-950/10"
+                            : "border-border hover:bg-muted/30"
                         )}
                       >
                         <div className="flex-1 min-w-0">

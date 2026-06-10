@@ -512,26 +512,36 @@ Use this exact schema. Every field shown is required unless marked optional. All
     "recommendedDates": "e.g. May–September",
     "totalBudget": "e.g. $1,265–$1,780",
     "highlights": ["Top experience 1", "Top experience 2", "Top experience 3"],
-    "assumptions": ["Assumption 1"]
+    "assumptions": ["Assumption 1"],
+    "bestTimeNote": "Best in May or October for fewer crowds and pleasant weather."
   },
   "budget": {
     "items": [
-      { "category": "Flights", "range": "$400–$580" },
-      { "category": "Accommodation", "range": "$325–$450" },
-      { "category": "Activities", "range": "$100–$165" },
-      { "category": "Food & Dining", "range": "$175–$250" },
-      { "category": "Transportation", "range": "$150–$200" },
-      { "category": "Contingency", "range": "$75" }
+      { "category": "Flights", "range": "$400–$580", "description": "Round trip · per person · NYC → PDL" },
+      { "category": "Accommodation", "range": "$325–$450", "description": "5 nights at $65–$90 / night" },
+      { "category": "Activities", "range": "$100–$165", "description": "Whale watching, hiking tours, thermal pools" },
+      { "category": "Food & Dining", "range": "$175–$250", "description": "≈ $35–$50 / day for two" },
+      { "category": "Transportation", "range": "$150–$200", "description": "Rental car + fuel, 5 days" },
+      { "category": "Contingency", "range": "$75", "description": "Buffer for the unexpected" }
     ],
     "total": "$1,265–$1,780"
   },
   "flights": {
     "skip": false,
+    "context": "Round-trip from New York to Ponta Delgada (PDL) · typical 1–2 stops · ~10–12h door to gate.",
     "options": [
       {
         "description": "JFK to PDL via Lisbon — TAP Air Portugal, approx 10h total",
-        "price": "$380–$520",
-        "url": "https://www.google.com/travel/flights?q=..."
+        "price": "$420",
+        "url": "https://www.google.com/travel/flights?q=...",
+        "airlineCode": "TP",
+        "route": "JFK → PDL",
+        "viaCity": "Lisbon",
+        "airline": "TAP Air Portugal",
+        "stops": "1 stop",
+        "duration": "10h 30m",
+        "departureTime": "7:15 PM",
+        "badge": "Best value"
       }
     ]
   },
@@ -713,6 +723,10 @@ STRICT RULES:
 - Keep activity names under 6 words
 - Omit bookingUrl entirely if it would be an empty string
 - If noFlight is true, set flights.skip to true and flights.options to []
+- Always populate summary.bestTimeNote with 1 sentence about the best time to visit and why
+- Always populate flights.context with a summary of the routing (e.g. "Round-trip from City to Destination (IATA) · N stops · ~Xh door to gate.")
+- Always populate all structured flight fields: airlineCode, route, viaCity, airline, stops, duration, departureTime. Set badge to "Best value", "Fastest", or omit for others.
+- Always populate budget items with a description field explaining what the cost covers
 
 ## Guidelines
 
