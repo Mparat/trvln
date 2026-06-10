@@ -29,6 +29,15 @@ const TAG_COLORS: Record<string, string> = {
 
 const PERIOD_ICONS = { Morning: Sunrise, Afternoon: Sun, Evening: Moon };
 
+const stripMarkdown = (text: string): string =>
+  text
+    .replace(/^[-•]\s*/, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
 type ActivityKey = string; // "d{dayIdx}-p{periodIdx}-a{actIdx}"
 
 interface FeedbackState {
@@ -419,7 +428,9 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences }: Pro
                 const key = activityKey(activeDayIdx, activePeriodIdx, actIdx);
                 const fb = getFeedback(key);
                 const isOpen = openComment === key;
-                const description = fb.updatedDescription ?? activity.description;
+                const description = fb.updatedDescription
+                  ? stripMarkdown(fb.updatedDescription)
+                  : activity.description;
 
                 return (
                   <div

@@ -107,14 +107,12 @@ If there's a clearly better option available, suggest it. Otherwise, keep the cu
 Your job is to provide an updated version of JUST that one item.
 
 RULES:
-1. Return ONLY the updated line item - no explanations, no extra text
-2. Keep the same format (bullet point, bold names, links, etc.)
-3. Use ONLY verified URL patterns:
-   - Places: https://www.google.com/maps/search/?api=1&query=PLACE+NAME+CITY
-   - Tours: https://www.getyourguide.com/s/?q=TOUR+CITY
-   - Hotels: https://www.booking.com/searchresults.html?ss=HOTEL+CITY
-4. Match the style and detail level of the original
-5. Keep it contextually appropriate for: ${itemContext}`;
+1. Return ONLY the updated description text - no explanations, no extra text
+2. Do NOT add markdown formatting: no bullet points (- or •), no **bold**, no URLs in the text
+3. Write plain prose: a 1-2 sentence description of the activity, similar in length to the original
+4. Do not include the activity name in the description (it is shown separately)
+5. Match the style and detail level of the original
+6. Keep it contextually appropriate for: ${itemContext}`;
 
     // Build budget label
     const getBudgetLabel = (value?: number) => {
