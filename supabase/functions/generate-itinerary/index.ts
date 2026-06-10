@@ -600,7 +600,14 @@ Use this exact schema. Every field shown is required unless marked optional. All
               "tags": ["walking", "cultural"]
             }
           ],
-          "dining": null
+          "dining": [
+            {
+              "name": "Café do Mar",
+              "description": "Sunny terrace café with fresh pastries, local cheese toasts, and strong Azorean coffee.",
+              "priceRange": "$5–$10/person",
+              "url": "https://www.google.com/maps/search/?api=1&query=Cafe+do+Mar+Ponta+Delgada"
+            }
+          ]
         },
         {
           "label": "Afternoon",
@@ -674,7 +681,7 @@ STRICT RULES:
 - No markdown code fences in the actual output — the above \`\`\` are just for illustration
 - Every day must have exactly 3 periods: Morning, Afternoon, Evening
 - Each period must have EXACTLY 2 activities (no more, no fewer)
-- Include EXACTLY 1 dining option for Afternoon and Evening periods; Morning dining must be null
+- Include EXACTLY 1 dining option for ALL periods: Morning (breakfast), Afternoon (lunch), Evening (dinner)
 - Tags must only be from: transit, cultural, nature, hiking, beach, food, photo-worthy, walking, adventure, relaxation, shopping, nightlife
 - priority must be exactly "high", "medium", or "low"
 - Use real URLs from the grounded research — fallback to search URL patterns listed above
