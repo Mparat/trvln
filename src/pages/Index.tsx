@@ -542,7 +542,7 @@ const Index = () => {
               {/* Detailed Itinerary */}
               <div className="bg-card rounded-2xl shadow-medium">
                 {/* Sticky header — overflow-hidden on parent breaks sticky, so rounded-t-2xl is on the header instead */}
-                <div className="sticky top-0 z-20 bg-card/95 backdrop-blur-sm px-6 py-5 md:px-8 border-b border-border rounded-t-2xl">
+                <div className="sticky top-0 z-20 bg-card/95 backdrop-blur-sm px-6 py-5 md:px-8 rounded-t-2xl">
                   <div className="min-w-0">
                     <h2 className="font-display text-xl font-bold text-foreground leading-tight">
                       {currentItinerary ? `${currentItinerary.emoji} ${currentItinerary.name}` : "Your Personalized Itinerary"}
