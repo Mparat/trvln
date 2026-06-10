@@ -1,11 +1,13 @@
 import { useState, useCallback } from "react";
-import { Sparkles, MapPin, Plane, ScanSearch } from "lucide-react";
+import { Sparkles, MapPin, Plane, ScanSearch, ChevronLeft, Plus } from "lucide-react";
 import { TripInputForm, TripPreferences } from "@/components/TripInputForm";
 import { ItineraryOutput } from "@/components/ItineraryOutput";
 import { TripSummaryCard } from "@/components/TripSummaryCard";
 import { ItinerarySwitcher } from "@/components/ItinerarySwitcher";
 import { toast } from "@/hooks/use-toast";
 import { ItineraryData } from "@/types/itinerary";
+
+type View = 'input' | 'results';
 
 const defaultPreferences: TripPreferences = {
   media: [],
@@ -62,6 +64,7 @@ const stripPlanningSection = (content: string): string => {
 };
 
 const Index = () => {
+  const [view, setView] = useState<View>('input');
   const [preferences, setPreferences] = useState<TripPreferences>(defaultPreferences);
   const [itineraries, setItineraries] = useState<ItineraryVariant[]>([]);
   const [activeVariant, setActiveVariant] = useState(0);
@@ -70,6 +73,14 @@ const Index = () => {
   const [isSuggestingThemes, setIsSuggestingThemes] = useState(false);
   const [isAnalyzingMedia, setIsAnalyzingMedia] = useState(false);
   const [isIdentifyingLocations, setIsIdentifyingLocations] = useState(false);
+
+  const handleNewSearch = useCallback(() => {
+    setPreferences(defaultPreferences);
+    setItineraries([]);
+    setActiveVariant(0);
+    setLoadingVariants({});
+    setView('input');
+  }, []);
 
   // Get headers for API calls
   const getHeaders = useCallback(() => {
@@ -205,6 +216,7 @@ const Index = () => {
     setIsGenerating(true);
     setItineraries([]);
     setActiveVariant(0);
+    setView('results');
 
     try {
       // Step 1: Analyze media for location recognition (if media exists)
@@ -409,176 +421,200 @@ const Index = () => {
 
   const currentItinerary = itineraries[activeVariant];
 
+  // ── Input screen ──────────────────────────────────────────────────────────
+  if (view === 'input') {
+    return (
+      <div className="min-h-screen gradient-hero">
+        {/* Hero */}
+        <header className="relative overflow-hidden">
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            <div className="absolute top-20 left-10 w-72 h-72 bg-primary/5 rounded-full blur-3xl animate-float" />
+            <div className="absolute bottom-10 right-20 w-96 h-96 bg-olive/5 rounded-full blur-3xl animate-float" style={{ animationDelay: '-3s' }} />
+          </div>
+          <div className="container relative pt-12 pb-8 md:pt-20 md:pb-12">
+            <div className="flex items-center justify-center gap-2 mb-6">
+              <img src="/favicon.svg" alt="Travellin'" className="w-8 h-8" />
+              <span className="font-display text-lg text-primary">Travellin'</span>
+            </div>
+            <h1 className="text-4xl md:text-6xl lg:text-7xl font-display font-bold text-center leading-tight text-balance max-w-4xl mx-auto bg-gradient-to-r from-foreground via-primary to-foreground bg-clip-text text-transparent">
+              Where to next?
+            </h1>
+            <p className="mt-6 text-lg md:text-xl text-muted-foreground text-center max-w-2xl mx-auto text-balance">
+              Drop your saved TikToks, tell us your vibe, and let AI craft the perfect itinerary — complete with flights, hidden gems, and local favorites.
+            </p>
+            <div className="flex items-center justify-center gap-6 mt-8 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2">
+                <MapPin className="w-4 h-4" />
+                <span>Hidden gems included</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Plane className="w-4 h-4" />
+                <span>Flight suggestions</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4" />
+                <span>Local knowledge</span>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        {/* Form */}
+        <main className="container pb-20">
+          <div className="max-w-4xl mx-auto space-y-8">
+            <TripInputForm
+              preferences={preferences}
+              onPreferencesChange={setPreferences}
+              onGenerate={handleGenerate}
+              isGenerating={isGenerating}
+              isIdentifyingLocations={isIdentifyingLocations}
+              onFramesReady={async (frameUrls) => {
+                setIsIdentifyingLocations(true);
+                try {
+                  const identified = await analyzeInspiration(frameUrls);
+                  const newLocations = identified
+                    .filter(d => d.confidence === 'high' || d.confidence === 'medium')
+                    .map(d => d.location)
+                    .filter(loc => !preferences.cities.some(c =>
+                      c.toLowerCase().includes(loc.toLowerCase()) || loc.toLowerCase().includes(c.toLowerCase())
+                    ));
+                  if (newLocations.length > 0) {
+                    setPreferences(prev => ({ ...prev, cities: [...prev.cities, ...newLocations] }));
+                    toast({
+                      title: `📍 Found ${newLocations.length} destination${newLocations.length > 1 ? 's' : ''}!`,
+                      description: newLocations.join(', '),
+                    });
+                  } else {
+                    toast({
+                      title: "No locations identified",
+                      description: "Try a video with clearer landmarks or add cities manually",
+                    });
+                  }
+                } finally {
+                  setIsIdentifyingLocations(false);
+                }
+              }}
+            />
+          </div>
+        </main>
+
+        <footer className="border-t border-border py-8">
+          <div className="container text-center text-sm text-muted-foreground">
+            <p>Powered by AI. Made personally for you. For travelers everywhere.</p>
+          </div>
+        </footer>
+      </div>
+    );
+  }
+
+  // ── Results screen ─────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen gradient-hero">
-      {/* Hero Section */}
-      <header className="relative overflow-hidden">
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute top-20 left-10 w-72 h-72 bg-primary/5 rounded-full blur-3xl animate-float" />
-          <div className="absolute bottom-10 right-20 w-96 h-96 bg-olive/5 rounded-full blur-3xl animate-float" style={{ animationDelay: '-3s' }} />
-        </div>
-
-        <div className="container relative pt-12 pb-8 md:pt-20 md:pb-12">
-          <div className="flex items-center justify-center gap-2 mb-6">
-            <img src="/favicon.svg" alt="Travellin'" className="w-8 h-8" />
-            <span className="font-display text-lg text-primary">Travellin'</span>
+      {/* Top nav */}
+      <div className="sticky top-0 z-30 bg-background/95 backdrop-blur-sm border-b border-border">
+        <div className="container max-w-4xl mx-auto flex items-center justify-between px-4 py-3">
+          <button
+            onClick={() => setView('input')}
+            className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ChevronLeft className="w-4 h-4" />
+            Back
+          </button>
+          <div className="flex items-center gap-2">
+            <img src="/favicon.svg" alt="Travellin'" className="w-5 h-5" />
+            <span className="font-display text-sm text-primary">Travellin'</span>
           </div>
-
-          <h1 className="text-4xl md:text-6xl lg:text-7xl font-display font-bold text-center leading-tight text-balance max-w-4xl mx-auto bg-gradient-to-r from-foreground via-primary to-foreground bg-clip-text text-transparent">
-            Where to next?
-          </h1>
-          
-          <p className="mt-6 text-lg md:text-xl text-muted-foreground text-center max-w-2xl mx-auto text-balance">
-            Drop your saved TikToks, tell us your vibe, and let AI craft the perfect itinerary — complete with flights, hidden gems, and local favorites.
-          </p>
-
-          <div className="flex items-center justify-center gap-6 mt-8 text-sm text-muted-foreground">
-            <div className="flex items-center gap-2">
-              <MapPin className="w-4 h-4" />
-              <span>Hidden gems included</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Plane className="w-4 h-4" />
-              <span>Flight suggestions</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4" />
-              <span>Local knowledge</span>
-            </div>
-          </div>
+          <button
+            onClick={handleNewSearch}
+            className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            New Search
+          </button>
         </div>
-      </header>
+      </div>
 
-      {/* Main Content */}
       <main className="container pb-20">
-        <div className="max-w-4xl mx-auto space-y-8">
-          {/* Input Form */}
-          <TripInputForm
-            preferences={preferences}
-            onPreferencesChange={setPreferences}
-            onGenerate={handleGenerate}
-            isGenerating={isGenerating}
-            isIdentifyingLocations={isIdentifyingLocations}
-            onFramesReady={async (frameUrls) => {
-              setIsIdentifyingLocations(true);
-              try {
-                const identified = await analyzeInspiration(frameUrls);
-                const newLocations = identified
-                  .filter(d => d.confidence === 'high' || d.confidence === 'medium')
-                  .map(d => d.location)
-                  .filter(loc => !preferences.cities.some(c =>
-                    c.toLowerCase().includes(loc.toLowerCase()) || loc.toLowerCase().includes(c.toLowerCase())
-                  ));
-                if (newLocations.length > 0) {
-                  setPreferences(prev => ({ ...prev, cities: [...prev.cities, ...newLocations] }));
-                  toast({
-                    title: `📍 Found ${newLocations.length} destination${newLocations.length > 1 ? 's' : ''}!`,
-                    description: newLocations.join(', '),
-                  });
-                } else {
-                  toast({
-                    title: "No locations identified",
-                    description: "Try a video with clearer landmarks or add cities manually",
-                  });
-                }
-              } finally {
-                setIsIdentifyingLocations(false);
-              }
-            }}
-          />
+        <div className="max-w-4xl mx-auto pt-6 space-y-6">
+          {/* Loading state */}
+          {isGenerating && itineraries.length === 0 && (
+            <div className="bg-card rounded-2xl shadow-medium p-6 flex items-center gap-4 animate-slide-up">
+              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center animate-pulse">
+                {isAnalyzingMedia ? (
+                  <ScanSearch className="w-5 h-5 text-primary" />
+                ) : (
+                  <Sparkles className="w-5 h-5 text-primary" />
+                )}
+              </div>
+              <div>
+                <p className="font-medium text-foreground">
+                  {isAnalyzingMedia
+                    ? "Analyzing your inspiration photos..."
+                    : isSuggestingThemes
+                      ? "Crafting unique theme ideas..."
+                      : "Preparing your itineraries..."}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {isAnalyzingMedia
+                    ? "AI is identifying travel destinations from your images"
+                    : "This usually takes a few seconds"}
+                </p>
+              </div>
+            </div>
+          )}
 
-          {/* Results */}
+          {/* Variant switcher */}
+          {itineraries.length > 0 && (
+            <ItinerarySwitcher
+              variants={itineraries}
+              activeIndex={activeVariant}
+              onSelect={setActiveVariant}
+              loadingVariants={loadingVariants}
+            />
+          )}
+
+          {/* Summary Card — markdown fallback only */}
+          {currentItinerary?.content && !loadingVariants[currentItinerary.id] && !currentItinerary.structuredData && (
+            <TripSummaryCard
+              itinerary={currentItinerary.content}
+              departureCity={preferences.departureCity}
+              startDate={preferences.startDate}
+              endDate={preferences.endDate}
+              durationDays={preferences.durationDays}
+            />
+          )}
+
+          {/* Itinerary card */}
           {(itineraries.length > 0 || isGenerating) && (
-            <div className="space-y-6 animate-slide-up" style={{ animationDelay: '0.1s' }}>
-              {/* Status indicator during analysis/theme suggestion */}
-              {isGenerating && itineraries.length === 0 && (
-                <div className="bg-card rounded-2xl shadow-medium p-6 flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center animate-pulse">
-                    {isAnalyzingMedia ? (
-                      <ScanSearch className="w-5 h-5 text-primary" />
-                    ) : (
-                      <Sparkles className="w-5 h-5 text-primary" />
-                    )}
-                  </div>
-                  <div>
-                    <p className="font-medium text-foreground">
-                      {isAnalyzingMedia 
-                        ? "Analyzing your inspiration photos..." 
-                        : isSuggestingThemes 
-                          ? "Crafting unique theme ideas..." 
-                          : "Preparing your itineraries..."}
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      {isAnalyzingMedia 
-                        ? "AI is identifying travel destinations from your images" 
-                        : "This usually takes a few seconds"}
-                    </p>
-                  </div>
+            <div className="bg-card rounded-2xl shadow-medium">
+              <div className="sticky top-[57px] z-20 bg-card/95 backdrop-blur-sm px-6 py-5 md:px-8 rounded-t-2xl">
+                <div className="min-w-0">
+                  <h2 className="font-display text-xl font-bold text-foreground leading-tight">
+                    {currentItinerary ? `${currentItinerary.emoji} ${currentItinerary.name}` : "Your Personalized Itinerary"}
+                  </h2>
+                  <p className="text-sm text-muted-foreground mt-1 leading-snug">
+                    {currentItinerary?.structuredData?.summary?.vibeSummary
+                      || currentItinerary?.tagline
+                      || "Crafted based on your preferences"}
+                  </p>
                 </div>
-              )}
-              
-              {/* Itinerary Switcher */}
-              {itineraries.length > 0 && (
-                <ItinerarySwitcher
-                  variants={itineraries}
-                  activeIndex={activeVariant}
-                  onSelect={setActiveVariant}
-                  loadingVariants={loadingVariants}
+              </div>
+              <div className="p-6 md:p-8">
+                <ItineraryOutput
+                  itinerary={currentItinerary?.content || ""}
+                  structuredData={currentItinerary?.structuredData}
+                  isLoading={isGenerating && !currentItinerary?.content}
+                  isStreaming={!!(currentItinerary?.content && loadingVariants[currentItinerary?.id])}
+                  isEditing={currentItinerary ? loadingVariants[currentItinerary.id] && !isGenerating : false}
+                  onEdit={handleEdit}
+                  themeTitle={currentItinerary ? `${currentItinerary.emoji} ${currentItinerary.name}` : undefined}
+                  tripPreferences={preferences}
                 />
-              )}
-
-              {/* Summary Card — only shown in markdown fallback mode */}
-              {currentItinerary?.content && !loadingVariants[currentItinerary.id] && !currentItinerary.structuredData && (
-                <TripSummaryCard
-                  itinerary={currentItinerary.content}
-                  departureCity={preferences.departureCity}
-                  startDate={preferences.startDate}
-                  endDate={preferences.endDate}
-                  durationDays={preferences.durationDays}
-                />
-              )}
-
-
-              {/* Detailed Itinerary */}
-              <div className="bg-card rounded-2xl shadow-medium">
-                {/* Sticky header — overflow-hidden on parent breaks sticky, so rounded-t-2xl is on the header instead */}
-                <div className="sticky top-0 z-20 bg-card/95 backdrop-blur-sm px-6 py-5 md:px-8 rounded-t-2xl">
-                  <div className="min-w-0">
-                    <h2 className="font-display text-xl font-bold text-foreground leading-tight">
-                      {currentItinerary ? `${currentItinerary.emoji} ${currentItinerary.name}` : "Your Personalized Itinerary"}
-                    </h2>
-                    <p className="text-sm text-muted-foreground mt-1 leading-snug">
-                      {currentItinerary?.structuredData?.summary?.vibeSummary
-                        || currentItinerary?.tagline
-                        || "Crafted based on your preferences"}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="p-6 md:p-8">
-                  <ItineraryOutput
-                    itinerary={currentItinerary?.content || ""}
-                    structuredData={currentItinerary?.structuredData}
-                    isLoading={isGenerating && !currentItinerary?.content}
-                    isStreaming={!!(currentItinerary?.content && loadingVariants[currentItinerary?.id])}
-                    isEditing={currentItinerary ? loadingVariants[currentItinerary.id] && !isGenerating : false}
-                    onEdit={handleEdit}
-                    themeTitle={currentItinerary ? `${currentItinerary.emoji} ${currentItinerary.name}` : undefined}
-                    tripPreferences={preferences}
-                  />
-                </div>
               </div>
             </div>
           )}
         </div>
       </main>
-
-      {/* Footer */}
-      <footer className="border-t border-border py-8">
-        <div className="container text-center text-sm text-muted-foreground">
-          <p>Powered by AI. Made personally for you. For travelers everywhere.</p>
-        </div>
-      </footer>
     </div>
   );
 };
