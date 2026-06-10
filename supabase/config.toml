@@ -1,4 +1,4 @@
-project_id = "hcqiyuaynvwqwvsjpfzl"
+project_id = "asblzlmpmyxrzbxcuiob"
 
 [functions.generate-itinerary]
 verify_jwt = false
@@ -19,4 +19,7 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.analyze-inspiration]
+verify_jwt = false
+
+[functions.extract-social-video]
 verify_jwt = false

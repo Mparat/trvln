@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { 
+import {
   Clock, DollarSign, Sparkles, ExternalLink, Edit3, Send,
   X, Plus, Loader2, ChevronDown, Share2
 } from "lucide-react";
@@ -13,13 +13,17 @@ import { cn } from "@/lib/utils";
 import { ItemFeedbackControls } from "./ItemFeedbackControls";
 import { useItineraryItems, type ItineraryItem } from "@/hooks/useItineraryItems";
 import { toast } from "@/hooks/use-toast";
+import { StructuredItinerary } from "./StructuredItinerary";
+import { ItineraryData } from "@/types/itinerary";
 
 interface ItineraryOutputProps {
   itinerary: string;
   isLoading: boolean;
+  isStreaming?: boolean;
   isEditing?: boolean;
   onEdit?: (editRequest: string) => void;
   themeTitle?: string;
+  structuredData?: ItineraryData;
   tripPreferences?: {
     cities?: string[];
     atmosphere?: string[];
@@ -34,7 +38,7 @@ const stripEmojis = (text: string): string => {
   return text.replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{1F000}-\u{1FFFF}]/gu, '').replace(/\s+/g, ' ').trim();
 };
 
-export function ItineraryOutput({ itinerary, isLoading, isEditing, onEdit, themeTitle, tripPreferences }: ItineraryOutputProps) {
+export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, onEdit, themeTitle, structuredData, tripPreferences }: ItineraryOutputProps) {
   const [editMode, setEditMode] = useState(false);
   const [editRequest, setEditRequest] = useState("");
   const [addingNearMiss, setAddingNearMiss] = useState<string | null>(null);
@@ -720,7 +724,108 @@ export function ItineraryOutput({ itinerary, isLoading, isEditing, onEdit, theme
     );
   }
 
-  if (!itinerary) return null;
+  if (!itinerary && !structuredData) return null;
+
+  // Only intercept streaming when content looks like JSON (starts with '{').
+  // Markdown content should fall through and render as it streams in.
+  if (isStreaming && !structuredData && itinerary.trimStart().startsWith('{')) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 gap-5 text-center">
+        <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
+          <Sparkles className="w-7 h-7 text-primary animate-pulse" />
+        </div>
+        <div>
+          <p className="font-semibold text-foreground">Building your itinerary…</p>
+          <p className="text-sm text-muted-foreground mt-1">Researching destinations, hotels, and activities</p>
+        </div>
+        <div className="flex gap-1.5">
+          {[0, 1, 2].map(i => (
+            <div
+              key={i}
+              className="w-2 h-2 rounded-full bg-primary/50 animate-bounce"
+              style={{ animationDelay: `${i * 0.18}s` }}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // JSON was detected but failed to parse — don't render raw JSON as markdown
+  if (!isStreaming && !structuredData && itinerary.trimStart().startsWith('{')) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 gap-4 text-center">
+        <div className="w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center">
+          <X className="w-6 h-6 text-destructive" />
+        </div>
+        <div>
+          <p className="font-semibold text-foreground">Itinerary generation incomplete</p>
+          <p className="text-sm text-muted-foreground mt-1">The response was cut off before finishing. Please regenerate.</p>
+        </div>
+      </div>
+    );
+  }
+
+  // When structured JSON data is available, render the beautiful UI
+  if (structuredData) {
+    return (
+      <div className="space-y-5">
+        {/* Edit mode card */}
+        {onEdit && (
+          <Card className="p-4 bg-muted/30 border-dashed">
+            {editMode ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-medium text-foreground flex items-center gap-2">
+                    <Edit3 className="w-4 h-4" />
+                    Request changes
+                  </h4>
+                  <Button variant="ghost" size="sm" onClick={() => setEditMode(false)}>
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+                <Textarea
+                  value={editRequest}
+                  onChange={(e) => setEditRequest(e.target.value)}
+                  placeholder="e.g., 'Add more food options' or 'Replace day 2 with beach activities'"
+                  className="min-h-[80px] resize-none"
+                />
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" size="sm" onClick={() => !isEditing && setEditMode(false)} disabled={isEditing}>
+                    Cancel
+                  </Button>
+                  <Button size="sm" onClick={handleSubmitEdit} disabled={!editRequest.trim() || isEditing}>
+                    {isEditing ? (
+                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Updating...</>
+                    ) : (
+                      <><Send className="w-4 h-4 mr-2" />Submit</>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setEditMode(true)}
+                className="w-full flex items-center justify-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors py-2"
+              >
+                <Edit3 className="w-4 h-4" />
+                <span>Want to make changes? Click here to request edits</span>
+              </button>
+            )}
+          </Card>
+        )}
+
+        {isEditing && (
+          <div className="flex items-center justify-center gap-3 py-4 text-muted-foreground bg-muted/30 rounded-xl">
+            <Loader2 className="w-5 h-5 animate-spin text-primary" />
+            <span className="text-sm font-medium">Applying changes...</span>
+          </div>
+        )}
+
+        <StructuredItinerary key={structuredData.summary.destination + structuredData.summary.duration + (structuredData.summary.recommendedDates || '')} data={structuredData} rawItinerary={itinerary} tripPreferences={tripPreferences} />
+      </div>
+    );
+  }
 
   const toggleSection = (section: string) => {
     setOpenSections(prev => ({ ...prev, [section]: !prev[section] }));
@@ -839,7 +944,7 @@ export function ItineraryOutput({ itinerary, isLoading, isEditing, onEdit, theme
             </Button>
           )}
 
-          {item.type === 'bullet' && !isNearMissItem && (
+          {item.type === 'bullet' && !isNearMissItem && item.indentLevel === 0 && (
             <div className="shrink-0 self-center">
               <ItemFeedbackControls
                 item={item}
@@ -869,24 +974,214 @@ export function ItineraryOutput({ itinerary, isLoading, isEditing, onEdit, theme
     );
   };
 
-  // Render items for a section
+  // Render items for a section — groups a top-level bullet with its indented children
+  // so the whole entity highlights together and feedback appears at the group level.
   const renderSectionItems = (sectionItems: typeof items) => {
-    let currentInNearMiss = false;
-    
-    return sectionItems.map((item) => {
-      const cleanedLine = cleanLine(item.content);
-      const trimmedLine = cleanedLine.trim();
-      
-      if (!trimmedLine) return null;
-      
-      // Track near miss section
-      if (isNearMissHeader(trimmedLine)) {
-        currentInNearMiss = true;
-      } else if (isNewMajorSection(trimmedLine)) {
-        currentInNearMiss = false;
+    type SubEntry =
+      | { kind: 'header'; item: typeof items[0]; nearMiss: boolean }
+      | { kind: 'activity'; parent: typeof items[0]; children: typeof items[0][]; nearMiss: boolean };
+
+    type GroupEntry =
+      | SubEntry
+      | { kind: 'titled-group'; title: typeof items[0]; entries: SubEntry[]; nearMiss: boolean };
+
+    const groups: GroupEntry[] = [];
+    let currentGroup: { parent: typeof items[0]; children: typeof items[0][] } | null = null;
+    let currentGroupIndentLevel = Infinity;
+    // When set, new sub-entries go inside this titled-group instead of the top-level list
+    let activeTitledGroupEntries: SubEntry[] | null = null;
+    let inNearMiss = false;
+
+    const pushSubEntry = (entry: SubEntry) => {
+      if (activeTitledGroupEntries !== null) {
+        activeTitledGroupEntries.push(entry);
+      } else {
+        groups.push(entry);
       }
-      
-      return renderItem(item, currentInNearMiss);
+    };
+
+    const flushActivity = () => {
+      if (currentGroup) {
+        pushSubEntry({
+          kind: 'activity',
+          parent: currentGroup.parent,
+          children: currentGroup.children,
+          nearMiss: inNearMiss,
+        });
+        currentGroup = null;
+        currentGroupIndentLevel = Infinity;
+      }
+    };
+
+    sectionItems.forEach(item => {
+      const line = cleanLine(item.content).trim();
+      if (!line) return;
+      if (isMainSectionHeader(line)) return;
+      if (isNearMissHeader(line)) inNearMiss = true;
+      else if (isNewMajorSection(line)) inNearMiss = false;
+
+      const isBullet = line.startsWith('-') || line.startsWith('•');
+
+      if (!isBullet) {
+        flushActivity();
+
+        // Only **bold** (not ###) non-period/day headers become titled-groups
+        const isBoldHeader = !!(line.match(/^\*\*([^*]+)\*\*:?$/));
+        const isPeriodHeader = /^\*?\*?(Morning|Afternoon|Evening|Night)/i.test(line);
+        const isDayHdr = /Day\s+\d+/i.test(line);
+
+        // Both bold section headers AND period headers (Morning/Afternoon/Evening)
+        // become titled-group containers — day headers stay as standalone big headers.
+        if ((isBoldHeader || isPeriodHeader) && !isDayHdr) {
+          activeTitledGroupEntries = null;
+          const entries: SubEntry[] = [];
+          groups.push({ kind: 'titled-group', title: item, entries, nearMiss: inNearMiss });
+          activeTitledGroupEntries = entries;
+        } else {
+          activeTitledGroupEntries = null;
+          groups.push({ kind: 'header', item, nearMiss: inNearMiss });
+        }
+        return;
+      }
+
+      // Bullets: same parent-child grouping regardless of titled-group context
+      // Exception: bullets whose entire content is a bold/emoji label (no prose text)
+      // are section-header bullets (e.g. "- 🚌 **Transportation:**") and should open
+      // a new titled-group just like non-bullet bold headers do.
+      const bulletContent = line.replace(/^[-•]\s*/, '');
+      const bulletStripped = bulletContent
+        .replace(/\*\*[^*]+\*\*/g, '')   // remove **bold** spans
+        .replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{1F300}-\u{1F9FF}]/gu, '') // remove emoji
+        .replace(/\s/g, '');             // remove whitespace
+      const isSectionHeaderBullet = bulletStripped === '' || bulletStripped === ':';
+
+      if (isSectionHeaderBullet) {
+        flushActivity();
+        activeTitledGroupEntries = null;
+        const entries: SubEntry[] = [];
+        groups.push({ kind: 'titled-group', title: item, entries, nearMiss: inNearMiss });
+        activeTitledGroupEntries = entries;
+        return;
+      }
+
+      if (!currentGroup || item.indentLevel <= currentGroupIndentLevel) {
+        flushActivity();
+        currentGroup = { parent: item, children: [] };
+        currentGroupIndentLevel = item.indentLevel;
+      } else {
+        currentGroup.children.push(item);
+      }
+    });
+    flushActivity();
+
+    // Sub-bullet renderer (no feedback, muted)
+    const renderSubItems = (children: typeof items) =>
+      children.map(child => {
+        const childLine = cleanLine(child.content).trim().replace(/^[-•]\s*/, '');
+        if (!childLine || /^\[source:/i.test(childLine)) return null;
+        return (
+          <div key={child.id} className="flex items-start gap-2 py-0.5">
+            <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 bg-muted-foreground/40" />
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              {parseInlineContent(childLine)}
+            </p>
+          </div>
+        );
+      });
+
+    // Activity card renderer — shared by top-level activities and entries inside titled-groups
+    const renderActivityEntry = (
+      parent: typeof items[0],
+      children: typeof items[0][],
+      nearMiss: boolean,
+      compact = false,
+    ) => {
+      const isNearMissItem = nearMiss && parent.type === 'bullet';
+      const parentContent = cleanLine(parent.content).trim().replace(/^[-•]\s*/, '');
+
+      return (
+        <div
+          key={parent.id}
+          ref={(el) => { itemRefs.current[parent.id] = el; }}
+          className={cn(
+            "rounded-xl px-3 py-1 transition-colors group",
+            "hover:bg-muted/30",
+            parent.isUpdating && "opacity-60",
+            isNearMissItem && "bg-amber-500/5 border-l-2 border-amber-500/30"
+          )}
+        >
+          <div className="flex items-start gap-3 py-1.5">
+            <div className="w-2 h-2 rounded-full mt-2.5 shrink-0 bg-primary/60" />
+            <div className="flex-1 min-w-0">
+              <p className={cn("text-foreground/90 leading-relaxed", compact && "text-sm")}>
+                {parseInlineContent(parentContent)}
+              </p>
+              {parent.comment && !parent.isUpdating && (
+                <div className="mt-2 text-xs text-muted-foreground bg-muted/50 px-2 py-1 rounded">
+                  💬 {parent.comment}
+                </div>
+              )}
+            </div>
+            <div className="shrink-0 self-start pt-1 flex items-center gap-1">
+              {isNearMissItem ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 opacity-0 group-hover:opacity-100 transition-opacity bg-amber-500/10 hover:bg-amber-500/20 text-amber-700"
+                  onClick={() => handleAddNearMiss(parent)}
+                  disabled={addingNearMiss === parent.id}
+                >
+                  {addingNearMiss === parent.id
+                    ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Adding...</>
+                    : <><Plus className="w-3 h-3 mr-1" />Add to trip</>}
+                </Button>
+              ) : parent.type === 'bullet' && (
+                <ItemFeedbackControls
+                  item={parent}
+                  canUndo={canUndo(parent.id)}
+                  onVote={(vote) => setVote(parent.id, vote)}
+                  onComment={(comment) => setComment(parent.id, comment)}
+                  onSubmitFeedback={(overrides) => handleSubmitFeedback(parent.id, overrides)}
+                  onUndo={() => undoItem(parent.id)}
+                />
+              )}
+            </div>
+          </div>
+
+          {children.length > 0 && (
+            <div className="ml-5 pb-2 space-y-0.5">
+              {renderSubItems(children)}
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    return groups.map(entry => {
+      if (entry.kind === 'header') return renderItem(entry.item, entry.nearMiss);
+
+      if (entry.kind === 'activity') {
+        return renderActivityEntry(entry.parent, entry.children, entry.nearMiss);
+      }
+
+      // Titled-group: bold section header with activity cards inside (proper hierarchy)
+      const titleText = cleanLine(entry.title.content).trim()
+        .replace(/^[-•]\s*/, '')  // strip bullet prefix if this came from a bullet
+        .replace(/\*\*/g, '')     // strip all bold markers
+        .replace(/^#+\s*/, '')    // strip ### prefixes
+        .replace(/:$/, '')        // strip trailing colon
+        .trim();
+      return (
+        <div key={entry.title.id} className="rounded-xl border border-muted/40 px-1 py-2 space-y-0.5">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-3 pb-1">
+            {parseInlineContent(titleText)}
+          </p>
+          {entry.entries.map(subEntry => {
+            if (subEntry.kind === 'header') return renderItem(subEntry.item, subEntry.nearMiss);
+            return renderActivityEntry(subEntry.parent, subEntry.children, subEntry.nearMiss, true);
+          })}
+        </div>
+      );
     });
   };
 

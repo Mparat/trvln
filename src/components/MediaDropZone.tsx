@@ -16,9 +16,10 @@ export interface MediaItem {
 interface MediaDropZoneProps {
   media: MediaItem[];
   onMediaChange: (media: MediaItem[]) => void;
+  onFramesReady?: (frameUrls: string[]) => void;
 }
 
-export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
+export function MediaDropZone({ media, onMediaChange, onFramesReady }: MediaDropZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [socialUrl, setSocialUrl] = useState("");
   const [isExtractingUrl, setIsExtractingUrl] = useState(false);
@@ -193,31 +194,17 @@ export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to extract video");
 
-      const videoUrl: string = data.url;
-
-      // Extract frames from the uploaded video for AI analysis
-      let frameUrls: string[] = [];
-      try {
-        const frames = await extractVideoFramesFromUrl(videoUrl);
-        const frameUploadPromises = frames.map(async (blob) => {
-          const frameFile = new File([blob], `frame_${crypto.randomUUID()}.jpg`, { type: 'image/jpeg' });
-          return await uploadToStorage(frameFile);
-        });
-        const uploaded = await Promise.allSettled(frameUploadPromises);
-        frameUrls = uploaded
-          .filter((r): r is PromiseFulfilledResult<string | null> => r.status === 'fulfilled')
-          .map(r => r.value)
-          .filter((u): u is string => u !== null);
-      } catch {
-        // Frame extraction failure is non-fatal
-      }
+      // Server returns frames directly — no client-side extraction needed
+      const frameUrls: string[] = data.frameUrls || [];
+      const thumbnailUrl: string = data.thumbnailUrl || frameUrls[0] || "";
 
       const completed = mediaWithPlaceholder.map((item, idx) =>
         idx === placeholderIndex
-          ? { type: 'video' as const, url: videoUrl, preview: videoUrl, uploading: false, frameUrls: frameUrls.length > 0 ? frameUrls : undefined }
+          ? { type: 'video' as const, url: thumbnailUrl, preview: thumbnailUrl, uploading: false, frameUrls: frameUrls.length > 0 ? frameUrls : undefined }
           : item
       );
       onMediaChange(completed);
+      if (frameUrls.length > 0) onFramesReady?.(frameUrls);
 
       setSocialUrl("");
       toast({ title: "Video added!", description: `${isTikTok ? "TikTok" : "Instagram"} video imported successfully` });
@@ -435,11 +422,19 @@ export function MediaDropZone({ media, onMediaChange }: MediaDropZoneProps) {
               )}
               {item.type === 'video' && item.preview && (
                 <div className="relative w-full h-full">
-                  <video
-                    src={item.preview}
-                    className="w-full h-full object-cover"
-                    muted
-                  />
+                  {item.file ? (
+                    <video
+                      src={item.preview}
+                      className="w-full h-full object-cover"
+                      muted
+                    />
+                  ) : (
+                    <img
+                      src={item.preview}
+                      alt={`Video ${index + 1}`}
+                      className="w-full h-full object-cover"
+                    />
+                  )}
                   <div className="absolute inset-0 flex items-center justify-center bg-foreground/10">
                     <Video className="w-8 h-8 text-background" />
                   </div>

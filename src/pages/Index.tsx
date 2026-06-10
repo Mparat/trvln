@@ -5,6 +5,7 @@ import { ItineraryOutput } from "@/components/ItineraryOutput";
 import { TripSummaryCard } from "@/components/TripSummaryCard";
 import { ItinerarySwitcher } from "@/components/ItinerarySwitcher";
 import { toast } from "@/hooks/use-toast";
+import { ItineraryData } from "@/types/itinerary";
 
 const defaultPreferences: TripPreferences = {
   media: [],
@@ -33,6 +34,7 @@ export type ItineraryVariant = {
   name: string;
   emoji: string;
   content: string;
+  structuredData?: ItineraryData;
 };
 
 type IdentifiedDestination = {
@@ -66,12 +68,13 @@ const Index = () => {
   const [loadingVariants, setLoadingVariants] = useState<Record<string, boolean>>({});
   const [isSuggestingThemes, setIsSuggestingThemes] = useState(false);
   const [isAnalyzingMedia, setIsAnalyzingMedia] = useState(false);
-  const [identifiedDestinations, setIdentifiedDestinations] = useState<IdentifiedDestination[]>([]);
+  const [isIdentifyingLocations, setIsIdentifyingLocations] = useState(false);
 
   // Get headers for API calls
   const getHeaders = useCallback(() => {
     return {
       "Content-Type": "application/json",
+      "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
     };
   }, []);
 
@@ -201,7 +204,6 @@ const Index = () => {
     setIsGenerating(true);
     setItineraries([]);
     setActiveVariant(0);
-    setIdentifiedDestinations([]);
 
     try {
       // Step 1: Analyze media for location recognition (if media exists)
@@ -222,7 +224,6 @@ const Index = () => {
         if (allImageUrls.length > 0) {
           console.log(`Analyzing ${allImageUrls.length} images for location recognition...`);
           const identified = await analyzeInspiration(allImageUrls);
-          setIdentifiedDestinations(identified);
           
           // Merge high/medium confidence locations with user-specified cities
           const newLocations = identified
@@ -268,21 +269,60 @@ const Index = () => {
             effectivePreferences,
             theme,
             (updatedContent) => {
-              // Strip the planning section before displaying
               const displayContent = stripPlanningSection(updatedContent);
               contentMap[theme.id] = displayContent;
-              
-              // Use functional update to ensure we're working with latest state
               setItineraries(prev => {
-                const newState = prev.map(it => 
-                  contentMap[it.id] !== undefined 
-                    ? { ...it, content: contentMap[it.id] } 
+                return prev.map(it =>
+                  contentMap[it.id] !== undefined
+                    ? { ...it, content: contentMap[it.id] }
                     : it
                 );
-                return newState;
               });
             }
           );
+
+          // Parse the completed JSON response into structured data.
+          // If truncated, attempt to salvage by tracking open bracket stack.
+          let structuredData: ItineraryData | undefined;
+          try {
+            const jsonMatch = content.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              let raw = jsonMatch[0];
+              try {
+                structuredData = JSON.parse(raw) as ItineraryData;
+              } catch {
+                // Repair truncated JSON using a proper bracket stack
+                const repairJson = (s: string): string => {
+                  let t = s.trimEnd().replace(/,\s*$/, '');
+                  const stack: string[] = [];
+                  let inStr = false;
+                  let esc = false;
+                  for (const ch of t) {
+                    if (esc) { esc = false; continue; }
+                    if (ch === '\\' && inStr) { esc = true; continue; }
+                    if (ch === '"') { inStr = !inStr; continue; }
+                    if (inStr) continue;
+                    if (ch === '{') stack.push('}');
+                    else if (ch === '[') stack.push(']');
+                    else if (ch === '}' || ch === ']') stack.pop();
+                  }
+                  if (inStr) t += '"';
+                  while (stack.length > 0) t += stack.pop()!;
+                  return t;
+                };
+                structuredData = JSON.parse(repairJson(raw)) as ItineraryData;
+              }
+            }
+          } catch (e) {
+            console.error(`Failed to parse structured itinerary for ${theme.id}:`, e);
+          }
+
+          // Batch: set structuredData and mark loading done in same render cycle
+          if (structuredData) {
+            setItineraries(prev => prev.map(it =>
+              it.id === theme.id ? { ...it, structuredData } : it
+            ));
+          }
           setLoadingVariants(prev => ({ ...prev, [theme.id]: false }));
           return { id: theme.id, success: true, content };
         } catch (error) {
@@ -343,10 +383,10 @@ const Index = () => {
 
       const data = await response.json();
       
-      // Update only the current itinerary variant
-      setItineraries(prev => prev.map((it, idx) => 
-        idx === activeVariant 
-          ? { ...it, content: stripPlanningSection(data.updatedItinerary) }
+      // Update only the current itinerary variant; clear structuredData so fallback markdown renders
+      setItineraries(prev => prev.map((it, idx) =>
+        idx === activeVariant
+          ? { ...it, content: stripPlanningSection(data.updatedItinerary), structuredData: undefined }
           : it
       ));
 
@@ -417,6 +457,33 @@ const Index = () => {
             onPreferencesChange={setPreferences}
             onGenerate={handleGenerate}
             isGenerating={isGenerating}
+            isIdentifyingLocations={isIdentifyingLocations}
+            onFramesReady={async (frameUrls) => {
+              setIsIdentifyingLocations(true);
+              try {
+                const identified = await analyzeInspiration(frameUrls);
+                const newLocations = identified
+                  .filter(d => d.confidence === 'high' || d.confidence === 'medium')
+                  .map(d => d.location)
+                  .filter(loc => !preferences.cities.some(c =>
+                    c.toLowerCase().includes(loc.toLowerCase()) || loc.toLowerCase().includes(c.toLowerCase())
+                  ));
+                if (newLocations.length > 0) {
+                  setPreferences(prev => ({ ...prev, cities: [...prev.cities, ...newLocations] }));
+                  toast({
+                    title: `📍 Found ${newLocations.length} destination${newLocations.length > 1 ? 's' : ''}!`,
+                    description: newLocations.join(', '),
+                  });
+                } else {
+                  toast({
+                    title: "No locations identified",
+                    description: "Try a video with clearer landmarks or add cities manually",
+                  });
+                }
+              } finally {
+                setIsIdentifyingLocations(false);
+              }
+            }}
           />
 
           {/* Results */}
@@ -459,9 +526,9 @@ const Index = () => {
                 />
               )}
 
-              {/* Summary Card */}
-              {currentItinerary?.content && !loadingVariants[currentItinerary.id] && (
-                <TripSummaryCard 
+              {/* Summary Card — only shown in markdown fallback mode */}
+              {currentItinerary?.content && !loadingVariants[currentItinerary.id] && !currentItinerary.structuredData && (
+                <TripSummaryCard
                   itinerary={currentItinerary.content}
                   departureCity={preferences.departureCity}
                   startDate={preferences.startDate}
@@ -472,29 +539,34 @@ const Index = () => {
 
 
               {/* Detailed Itinerary */}
-              <div className="bg-card rounded-2xl shadow-medium p-6 md:p-8">
-                <div className="flex items-center gap-3 pb-4 border-b border-border mb-6">
-                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                    <Sparkles className="w-5 h-5 text-primary" />
+              <div className="bg-card rounded-2xl shadow-medium">
+                {/* Sticky header — overflow-hidden on parent breaks sticky, so rounded-t-2xl is on the header instead */}
+                <div className="sticky top-0 z-20 bg-card/95 backdrop-blur-sm flex items-center gap-3 px-6 py-4 md:px-8 border-b border-border rounded-t-2xl">
+                  <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                    <Sparkles className="w-4 h-4 text-primary" />
                   </div>
-                  <div>
-                    <h2 className="font-display text-xl font-semibold text-foreground">
+                  <div className="min-w-0">
+                    <h2 className="font-display text-lg font-semibold text-foreground truncate">
                       {currentItinerary ? `${currentItinerary.emoji} ${currentItinerary.name}` : "Your Personalized Itinerary"}
                     </h2>
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-xs text-muted-foreground">
                       {currentItinerary ? "Swipe between themes above" : "Crafted based on your preferences"}
                     </p>
                   </div>
                 </div>
-                
-                <ItineraryOutput 
-                  itinerary={currentItinerary?.content || ""} 
-                  isLoading={isGenerating && !currentItinerary?.content}
-                  isEditing={currentItinerary ? loadingVariants[currentItinerary.id] : false}
-                  onEdit={handleEdit}
-                  themeTitle={currentItinerary ? `${currentItinerary.emoji} ${currentItinerary.name}` : undefined}
-                  tripPreferences={preferences}
-                />
+
+                <div className="p-6 md:p-8">
+                  <ItineraryOutput
+                    itinerary={currentItinerary?.content || ""}
+                    structuredData={currentItinerary?.structuredData}
+                    isLoading={isGenerating && !currentItinerary?.content}
+                    isStreaming={!!(currentItinerary?.content && loadingVariants[currentItinerary?.id])}
+                    isEditing={currentItinerary ? loadingVariants[currentItinerary.id] && !isGenerating : false}
+                    onEdit={handleEdit}
+                    themeTitle={currentItinerary ? `${currentItinerary.emoji} ${currentItinerary.name}` : undefined}
+                    tripPreferences={preferences}
+                  />
+                </div>
               </div>
             </div>
           )}

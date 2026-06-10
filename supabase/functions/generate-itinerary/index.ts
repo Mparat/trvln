@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+// deploy-v3
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -62,7 +63,7 @@ async function searchWithPerplexity(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'sonar-pro',
+        model: 'sonar',
         messages: [
           { 
             role: 'system', 
@@ -340,31 +341,28 @@ ${additionalNotes || "None provided"}
       
       // Build focused search queries based on user preferences
       const searchQueries: string[] = [
-        // Query 1: Activities and things to do (this drives the itinerary structure)
+        // Query 1: Activities and things to do
         `Best things to do in ${destinationStr} for ${interestsStr} travelers. Include specific activity names, tour recommendations, must-visit attractions, hidden gems, and neighborhoods to explore.${themeStr ? ` Focus on ${themeStr} experiences.` : ''} ${budgetInfo.label} budget level.`,
-        
-        // Query 2: Restaurants and food scene (contextual to the destination)
+
+        // Query 2: Restaurants and food scene
         `Best ${foodStr} restaurants and food experiences in ${destinationStr}. Include specific restaurant names, neighborhoods known for food, price ranges, and local specialties. ${budgetInfo.label} budget.`,
-        
-        // Query 3: Accommodation and practical logistics (with date-specific pricing)
-        `Best ${budgetInfo.label} hotels and accommodation in ${destinationStr} priced ${budgetInfo.accommodation}. ${startDate && endDate ? `For dates: check-in ${startDate}, check-out ${endDate}.` : targetMonth ? `For travel in ${targetMonth}.` : ''} Include specific hotel names with current nightly rates, neighborhoods to stay in, and whether the prices shown are for the requested dates or general averages. Also include transportation tips and getting around.`,
-        
-        // Query 4: Nearby destinations & multi-city options (critical for long trips)
+
+        // Query 3: Accommodation with date-specific pricing
+        `Best ${budgetInfo.label} hotels in ${destinationStr} priced ${budgetInfo.accommodation}. ${startDate && endDate ? `For dates: check-in ${startDate}, check-out ${endDate}.` : targetMonth ? `For travel in ${targetMonth}.` : ''} Include specific hotel names with nightly rates and neighborhoods to stay.`,
+
+        // Query 4: Nearby destinations + transportation (combined)
         isSingleCity && isLongTrip
-          ? `For a ${tripDaysNum}-day trip to ${primaryCity}, what other cities and destinations should I also visit? Include nearby cities worth visiting, recommended number of days for each city, day trip options from ${primaryCity}, and why each destination is worth including. Consider travel time between cities.`
-          : `Best day trips and nearby destinations from ${destinationStr}. Include travel time, recommended duration, and why each is worth visiting for a ${tripDaysNum}-day trip.`,
-        
-        // Query 5: Inter-city transportation & routing
-        `How to travel between cities near ${destinationStr}. Include train times and prices (e.g., Shinkansen for Japan, Eurostar for Europe, high-speed rail), bus options, domestic flights if relevant. Best route to visit multiple cities in the region. Travel time and cost between major destinations.`,
-        
-        // Query 6: Seasonal & practical information (with hotel price seasonality)
-        `${destinationStr} travel in ${targetMonth || 'the travel season'}. Include weather conditions, peak vs off-season pricing differences (especially for hotels - how much more expensive are hotels during this period compared to off-season?), festivals or events happening, typical crowd levels, and any seasonal closures or considerations.`
+          ? `For a ${tripDaysNum}-day trip based in ${primaryCity}: what other cities should I visit, how to travel between them (trains, buses, flights with prices and times), and how many days to spend in each? Include day trips and overnight options.`
+          : `Best day trips and nearby destinations from ${destinationStr} for a ${tripDaysNum}-day trip. Include travel time, transport options with prices, and why each is worth visiting.`,
+
+        // Query 5: Seasonal & practical information
+        `${destinationStr} travel in ${targetMonth || 'the travel season'}. Include weather, peak vs off-season pricing, festivals or events, crowd levels, and any seasonal closures.`
       ];
-      
-      // Query 7: Flight estimates (conditional - only if origin is provided and flights needed)
+
+      // Query 6: Flight estimates (conditional)
       if (!noFlight && departureCity) {
         searchQueries.push(
-          `Flights from ${departureCity} to ${primaryCity} in ${targetMonth || 'upcoming months'}. Include typical price ranges, best airlines, flight duration, whether nonstop options exist, and best time to book.`
+          `Flights from ${departureCity} to ${primaryCity} in ${targetMonth || 'upcoming months'}. Include typical price ranges, best airlines, flight duration, and whether nonstop options exist.`
         );
       }
       
@@ -379,46 +377,32 @@ ${additionalNotes || "None provided"}
       const activitiesResearch = results[0];
       const restaurantsResearch = results[1];
       const accommodationResearch = results[2];
-      const nearbyDestinationsResearch = results[3];
-      const transportationResearch = results[4];
-      const seasonalResearch = results[5];
-      const flightResearch = results[6]; // May be undefined if no flight query
-      
+      const nearbyAndTransportResearch = results[3];
+      const seasonalResearch = results[4];
+      const flightResearch = results[5]; // May be undefined if no flight query
+
       groundedResearchContext = `
 ## GROUNDED RESEARCH DATA (From Live Web Search)
 
-**CRITICAL INSTRUCTIONS - READ CAREFULLY:**
-
-You are a reasoning model. The following content is retrieved from live web search and should be treated as FACTUAL GROUNDING, not speculation.
-
-- Do NOT introduce new facts beyond what is provided in this research
-- Do NOT hallucinate restaurant names, tour companies, hotel names, or URLs
-- ONLY recommend places, activities, and restaurants that appear in this research data
-- When you cite a source, use the actual URLs provided in the citations below
-- If something specific isn't in the research, use the fallback URL patterns (Google Maps search, GetYourGuide search, etc.)
+**CRITICAL INSTRUCTIONS:** The following is retrieved from live web search — treat it as FACTUAL GROUNDING.
+- ONLY recommend places, activities, and restaurants that appear in this research
+- Do NOT hallucinate establishment names or URLs
+- For anything not in the research, use the fallback URL patterns in the system prompt
 
 ---
 
-### 🗺️ NEARBY DESTINATIONS & MULTI-CITY OPTIONS
-${nearbyDestinationsResearch?.content || 'No nearby destinations research available.'}
+### 🗺️ NEARBY DESTINATIONS, DAY TRIPS & TRANSPORTATION
+${nearbyAndTransportResearch?.content || 'No nearby destinations/transport research available.'}
 
-**Source Citations:**
-${nearbyDestinationsResearch?.citations?.length > 0 ? nearbyDestinationsResearch.citations.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
-
----
-
-### 🚄 INTER-CITY TRANSPORTATION & ROUTING
-${transportationResearch?.content || 'No transportation research available - use Google Maps for transit options.'}
-
-**Source Citations:**
-${transportationResearch?.citations?.length > 0 ? transportationResearch.citations.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
+**Citations:**
+${nearbyAndTransportResearch?.citations?.length > 0 ? nearbyAndTransportResearch.citations.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
 
 ---
 
 ### 📅 SEASONAL & PRACTICAL INFORMATION
 ${seasonalResearch?.content || 'No seasonal research available.'}
 
-**Source Citations:**
+**Citations:**
 ${seasonalResearch?.citations?.length > 0 ? seasonalResearch.citations.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
 
 ---
@@ -426,39 +410,35 @@ ${seasonalResearch?.citations?.length > 0 ? seasonalResearch.citations.map((c: s
 ### ✈️ FLIGHT INFORMATION
 ${flightResearch?.content || 'No flight research available - use Google Flights for accurate pricing.'}
 
-**Source Citations:**
+**Citations:**
 ${flightResearch?.citations?.length > 0 ? flightResearch.citations.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
 
 ---
 
-### 🎯 ACTIVITIES & THINGS TO DO RESEARCH
-${activitiesResearch.content || 'No activity research available - use Google Maps and GetYourGuide search URLs for recommendations.'}
+### 🎯 ACTIVITIES & THINGS TO DO
+${activitiesResearch.content || 'No activity research available.'}
 
-**Source Citations:**
+**Citations:**
 ${activitiesResearch.citations?.length > 0 ? activitiesResearch.citations.map((c, i) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
 
 ---
 
-### 🍽️ RESTAURANTS & FOOD RESEARCH
-${restaurantsResearch.content || 'No restaurant research available - use Google Maps search URLs for restaurant recommendations.'}
+### 🍽️ RESTAURANTS & FOOD
+${restaurantsResearch.content || 'No restaurant research available.'}
 
-**Source Citations:**
+**Citations:**
 ${restaurantsResearch.citations?.length > 0 ? restaurantsResearch.citations.map((c, i) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
 
 ---
 
-### 🏨 ACCOMMODATION & LOGISTICS RESEARCH
-${accommodationResearch.content || 'No accommodation research available - use Booking.com search URLs for hotel recommendations.'}
+### 🏨 ACCOMMODATION
+${accommodationResearch.content || 'No accommodation research available.'}
 
-**User's Accommodation Budget Target:** ${budgetInfo.accommodation}
-**If researched prices exceed this range, the AI MUST note this and suggest alternatives or explain the budget tradeoff.**
+**User's Accommodation Budget:** ${budgetInfo.accommodation}
+**If prices exceed this range, note why and provide a budget alternative.**
 
-**Source Citations:**
+**Citations:**
 ${accommodationResearch.citations?.length > 0 ? accommodationResearch.citations.map((c, i) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
-
----
-
-**REMEMBER:** Only recommend places that appear in the research above. For any place/restaurant/activity mentioned in the research, create proper URLs using the patterns specified in the system prompt.
 `;
     } else {
       console.log("PERPLEXITY_API_KEY not configured - skipping grounded research");
@@ -494,30 +474,9 @@ The user inputs are organized into four main categories:
 - This may clarify, override, or add nuance to the structured inputs above
 - Pay close attention to any specific requests or concerns mentioned here
 
-## Research and Citation Requirements
+## Research Requirements
 
-Conduct thorough research for each destination and activity. Search for information from these sources:
-
-1. Travel blogs and vlogs - Recent, detailed experiences from travelers
-2. Official tourism websites - Opening hours, prices, seasonal information
-3. Travel guides (Lonely Planet, Rick Steves, etc.) - Expert recommendations
-4. Activity booking platforms (Viator, GetYourGuide, Airbnb Experiences) - Specific tours and activities with pricing
-5. Google Maps - Locations, distances, travel times between points
-6. Google Flights - Flight information, prices, booking links
-7. Transportation websites - Bus, train, or ferry schedules from official sources
-8. Local forums and Reddit - Insider tips and recent traveler experiences
-9. Restaurant review sites - Highly-rated dining options matching the user's vibe
-
-**IMPORTANT: You must cite your source for every single recommendation you make.**
-
-**Citation Format:**
-
-Use these formats for citations:
-- \`[Source: Blog Name - "Article Title" - URL]\` for blogs/articles
-- \`[Source: Platform Name - URL]\` for booking platforms
-- \`[Source: Official Website - URL]\` for official sources
-- \`[Source: Google Flights - Date searched]\` for flight information
-- \`[Source: Google Maps]\` for distances/times
+Use the grounded research data below to find real establishment names, accurate prices, and working URLs. For every activity, hotel, restaurant, and booking link, use URLs from the research — falling back to the search URL patterns if a direct URL is not available. Do not invent establishment names or fabricate URLs.
 
 ## GROUNDED RESEARCH (CRITICAL - READ BEFORE PROCEEDING)
 
@@ -539,617 +498,208 @@ You have been provided with LIVE WEB SEARCH RESULTS in the assistant message bel
 - Hotels: https://www.booking.com/searchresults.html?ss=HOTEL+NAME+CITY${startDate ? `&checkin=${formatDateForBooking(startDate)}` : ''}${endDate ? `&checkout=${formatDateForBooking(endDate)}` : ''}
 - Flights: https://www.google.com/travel/flights?q=flights+from+${departureCity ? departureCity.replace(/\s+/g, '+') : 'ORIGIN'}+to+DESTINATION${startDate ? `+departing+${formatDateForBooking(startDate)}` : ''}${endDate ? `+returning+${formatDateForBooking(endDate)}` : ''}
 
-## Planning Your Itinerary
+## Output Format — JSON Only
 
-Before writing your final itinerary, work through your planning systematically in <itinerary_planning> tags. This section will likely be quite long - that's expected and encouraged for thorough planning. It's OK for this section to be very detailed with extensive research notes and calculations.
+Output ONLY a single valid JSON object. No markdown, no prose, no code fences — raw JSON starting with \`{\` and ending with \`}\`.
 
-Address these steps in order:
+Use this exact schema. Every field shown is required unless marked optional. All string values must be plain text (no markdown asterisks, no HTML).
 
-**Step 0: Extract and Quote Key User Preferences**
-
-Quote verbatim the most important preferences from the user inputs. Write out the exact text as it appears:
-- Write out their exact inspiration destinations (copy the text word-for-word)
-- Write out their exact budget and duration constraints (copy the text word-for-word)
-- Write out their exact vibe preferences - atmosphere, adventure level, interests ranking (copy the text word-for-word)
-- Write out any critical statements from the open text section (copy the text word-for-word)
-- After quoting each category, note which preferences might conflict with each other
-
-**Step 1: Extract Hard Constraints**
-
-List all non-negotiable constraints from the user inputs:
-- Total budget (and calculate daily budget if possible)
-- Trip duration (minimum and maximum days)
-- Must-visit destinations
-- Specific dates or date constraints
-- Any dealbreakers mentioned in open text
-
-**Step 2: Research Additional Destinations**
-
-Given the number of destinations the user mentioned and the trip duration, research and list 3-5 potential additional nearby destinations that an expert would recommend. For each, write down:
-- Name of destination
-- Key research findings (quote highlights from your research about why it's recommended)
-- Why it's worth including based on the user's interests ranking
-- How many days it would need
-- Rough daily cost estimate with source
-
-Then decide which (if any) to include in the itinerary and explain why.
-
-**Step 3: Optimal Routing**
-
-Map out the geographic order to visit all locations (user-specified plus any additions). For each potential routing:
-- List the order of destinations
-- Note the distance/time between each stop (with citations)
-- Calculate total transportation time and cost
-- Identify any backtracking
-
-Then select the most efficient route and explain why.
-
-**Step 4: Time Allocation**
-
-For each destination in your chosen route, calculate:
-- Number of major activities/sights to cover (list them out)
-- Days needed based on user's interests ranking
-- Travel time to arrive and depart
-- Recommended number of days with justification
-
-Note: A well-paced itinerary includes breathing room. Not every time block needs a specific attraction - sometimes the best travel experiences come from wandering a neighborhood, sitting in a local cafe, or stumbling upon something unexpected. For trips of 5+ days, include at least 1-2 "exploration" blocks rather than back-to-back structured activities.
-
-**Step 5: Budget Breakdown Math**
-
-Calculate explicitly whether everything fits within budget. Show ALL your arithmetic step-by-step with explicit numbers:
-
-- First, calculate total available budget: Write out "Total trip days × daily budget = total available" then substitute the actual numbers: "X days × $Y/day = $Z total"
-- For each destination, calculate the subtotal showing each component:
-  - Write: "Location 1: (accommodation cost per night × nights) + (estimated activities) + (estimated food) + (transport to/from)"
-  - Then substitute numbers: "Location 1: ($X × Y nights) + $A activities + $B food + $C transport = $D"
-  - Do this calculation for every single location, writing out each one
-- Calculate flights separately: "Flights: $X"
-- Now sum everything: Write out the addition: "$D1 + $D2 + $D3 + ... + $Flights" then calculate: "= $Total"
-- Compare to budget: "$Total vs $Budget_Available"
-- Calculate the difference explicitly: "Difference: $Total - $Budget_Available = $X (over/under)"
-- If over budget, identify specific line items to cut, recalculate each affected location's subtotal, and show the new total
-
-**Step 5b: Accommodation Price Verification**
-
-For each hotel you recommend, verify pricing against the user's budget:
-- User's accommodation budget target: ${budgetInfo.accommodation}
-- Calculate: "User budget: ${budgetInfo.accommodation} × [number of nights] nights = $X total for accommodation"
-- For each recommended hotel: "[Hotel name]: $Y/night × [nights] = $Z total"
-- Compare: If $Z > $X, explicitly note this is over budget
-- If prices exceed the user's accommodation budget due to seasonal factors or high demand:
-  - Explain WHY prices are higher (peak season, event, high-demand area, etc.)
-  - Provide at least one budget-friendly alternative hotel
-  - Calculate the savings: "Alternative hotel: $A/night saves $B vs. primary recommendation"
-
-**Step 6: Seasonal Considerations**
-
-Research and note seasonal factors:
-- Weather during travel dates (with citations)
-- Peak/shoulder/off-season pricing implications
-- Any closures or festivals (with citations)
-- Crowd levels
-
-**Step 7: Feasibility Check**
-
-Based on all the above, can you visit all of the user's inspiration locations? If not, which must be cut and why?
-
-**Step 8: Research Activities for Each Day**
-
-For each day of your itinerary, research and list 3-5 potential activities. Activities can include:
-- Specific attractions, museums, tours, or experiences
-- **Neighborhood exploration** (e.g., "Walk around Shimokitazawa and browse vintage shops")
-- **Unstructured discovery time** (e.g., "Explore the backstreets of Yanaka")
-
-For each activity, note:
-- What it is and key details
-- Why it matches user's interests and vibe
-- Time required and cost (exploration activities can be $0 or minimal)
-- Source citation (for exploration, cite a travel blog recommending the neighborhood, or use [Neighborhood exploration - no booking required])
-
-**Step 9: Cross-Check and Compare Activities**
-
-This is a critical verification step. For each activity you researched in Step 8, conduct a second comparative search and create a structured comparison:
-
-For each time slot, create a comparison in this format:
-- **Time Slot:** [Day X, Morning/Afternoon/Evening]
-- **Options identified:**
-  - Option A: [Activity name]
-  - Option B: [Activity name]
-  - Option C: [Activity name]
-- **Comparison criteria:**
-  - Match to user's interests ranking: [Rate each option]
-  - Cost-effectiveness: [Compare costs and value]
-  - Time efficiency: [Compare time requirements]
-  - User's vibe preferences: [How each matches atmosphere/adventure level]
-  - Unique value offered: [What makes each special]
-- **Decision:** [Which option wins and why - be explicit]
-- **Near-tie alternatives:** [Note any options that were very close for inclusion in alternatives section]
-
-Do this structured comparison for every significant activity in your itinerary.
-
-**Step 10: Assumptions Summary**
-
-List all key assumptions you're making (e.g., "assuming mid-range accommodation," "assuming shoulder season pricing," etc.)
-
-**Step 11: Citation Verification**
-
-Before moving to the output, verify you have sources ready for:
-- All flight information
-- All accommodation recommendations
-- All activities and attractions
-- All restaurant recommendations
-- All transportation between cities
-- All practical information (visa, weather, etc.)
-
-Note any gaps where you'll need to indicate that up-to-date research is needed.
-
-**Step 12: Output Structure Planning**
-
-Review your planning and determine the final structure for your itinerary. The output must follow this specific ordering:
-1. Executive summary first
-2. Key things to book and budget information second
-3. Day-by-day itinerary third
-4. Alternative options and extras at the end
-
-## Output Structure
-
-After your </itinerary_planning> closing tag, present your complete itinerary following this structure exactly:
-
-### SECTION 1: EXECUTIVE SUMMARY
-
-Include:
-- Trip duration and dates (or recommended dates if flexible)
-- Key highlights (top 3-5 experiences)
-- Total estimated budget breakdown showing major categories
-- Any important assumptions you made
-- Brief description of what a route map should show
-
-**Example structure:**
 \`\`\`
-## Executive Summary
-
-**Trip Duration:** [X days, Date Range or "Flexible: recommended dates"]
-
-**Key Highlights:**
-- [Highlight 1]
-- [Highlight 2]
-- [Highlight 3]
-
-**Total Estimated Budget:**
-- Flights: $XX
-- Accommodation: $XX
-- Activities: $XX
-- Food & Dining: $XX
-- Transportation: $XX
-- Contingency: $XX
-- **Total: $XXX**
-
-**Key Assumptions:**
-- [Assumption 1]
-- [Assumption 2]
-
-**Route Overview:**
-[Brief description of geographic routing]
+{
+  "summary": {
+    "destination": "e.g. Azores, Portugal",
+    "duration": "e.g. 5 days",
+    "recommendedDates": "e.g. May–September",
+    "totalBudget": "e.g. $1,265–$1,780",
+    "highlights": ["Top experience 1", "Top experience 2", "Top experience 3"],
+    "assumptions": ["Assumption 1"]
+  },
+  "budget": {
+    "items": [
+      { "category": "Flights", "range": "$400–$580" },
+      { "category": "Accommodation", "range": "$325–$450" },
+      { "category": "Activities", "range": "$100–$165" },
+      { "category": "Food & Dining", "range": "$175–$250" },
+      { "category": "Transportation", "range": "$150–$200" },
+      { "category": "Contingency", "range": "$75" }
+    ],
+    "total": "$1,265–$1,780"
+  },
+  "flights": {
+    "skip": false,
+    "options": [
+      {
+        "description": "JFK to PDL via Lisbon — TAP Air Portugal, approx 10h total",
+        "price": "$380–$520",
+        "url": "https://www.google.com/travel/flights?q=..."
+      }
+    ]
+  },
+  "accommodation": [
+    {
+      "location": "Ponta Delgada",
+      "nights": 5,
+      "options": [
+        {
+          "name": "Hotel Name",
+          "type": "Hotel",
+          "pricePerNight": "$65–$90",
+          "why": "Central location, walking distance to restaurants",
+          "url": "https://www.booking.com/searchresults.html?ss=Hotel+Name+City",
+          "isPrimary": true
+        },
+        {
+          "name": "Budget Alternative",
+          "type": "Guesthouse",
+          "pricePerNight": "$45–$65",
+          "why": "More affordable, good reviews",
+          "url": "https://www.booking.com/searchresults.html?ss=Budget+Alternative+City",
+          "isPrimary": false
+        }
+      ]
+    }
+  ],
+  "bookingChecklist": [
+    {
+      "item": "Flights (JFK to PDL)",
+      "leadTime": "Book 3–4 months in advance",
+      "estimatedCost": "$350–$600",
+      "url": "https://www.google.com/travel/flights?q=...",
+      "priority": "high"
+    },
+    {
+      "item": "Rental Car at PDL Airport",
+      "leadTime": "Book 4–6 weeks in advance",
+      "estimatedCost": "$150–$200 for 5 days",
+      "url": "https://www.rentalcars.com/en/airport/sjz/",
+      "priority": "high"
+    }
+  ],
+  "days": [
+    {
+      "dayNumber": 1,
+      "title": "Arrival and Ponta Delgada",
+      "location": "Ponta Delgada",
+      "transitNote": "Pick up rental car at PDL Airport",
+      "periods": [
+        {
+          "label": "Morning",
+          "activities": [
+            {
+              "name": "Arrive at PDL Airport",
+              "description": "Clear customs and pick up your rental car; city center is 20 minutes away.",
+              "duration": "2 hours",
+              "cost": "Free",
+              "tags": ["transit"]
+            },
+            {
+              "name": "Check in and explore PDL",
+              "description": "Drop bags, grab a coffee, and wander the black-and-white mosaic streets near your hotel.",
+              "duration": "1.5 hours",
+              "cost": "Free",
+              "tags": ["walking", "cultural"]
+            }
+          ],
+          "dining": [
+            {
+              "name": "Café do Mar",
+              "description": "Sunny terrace café with fresh pastries, local cheese toasts, and strong Azorean coffee.",
+              "priceRange": "$5–$10/person",
+              "url": "https://www.google.com/maps/search/?api=1&query=Cafe+do+Mar+Ponta+Delgada"
+            }
+          ]
+        },
+        {
+          "label": "Afternoon",
+          "activities": [
+            {
+              "name": "Portas da Cidade and main square",
+              "description": "Walk through the iconic city gates and admire the baroque church facade on the main square.",
+              "duration": "1.5 hours",
+              "cost": "Free",
+              "tags": ["cultural", "photo-worthy"]
+            },
+            {
+              "name": "Mercado da Graça market",
+              "description": "Browse local produce, cheeses, and Azorean crafts at this lively covered market.",
+              "duration": "1 hour",
+              "cost": "Free",
+              "tags": ["cultural", "food"]
+            }
+          ],
+          "dining": [
+            {
+              "name": "Restaurante A Tasca",
+              "description": "Traditional Azorean alcatra stew and fresh tuna in a cozy family-run spot.",
+              "priceRange": "$15–$25/person",
+              "url": "https://www.google.com/maps/search/?api=1&query=Restaurante+A+Tasca+Ponta+Delgada"
+            }
+          ]
+        },
+        {
+          "label": "Evening",
+          "activities": [
+            {
+              "name": "Sunset at PDL marina",
+              "description": "Watch the sun set over the Atlantic from the marina boardwalk — stunning on clear evenings.",
+              "duration": "1 hour",
+              "cost": "Free",
+              "tags": ["nature", "photo-worthy"]
+            },
+            {
+              "name": "Evening stroll, Rua de Lisboa",
+              "description": "Explore the pedestrian shopping street lined with cafes and local boutiques.",
+              "duration": "45 minutes",
+              "cost": "Free",
+              "tags": ["walking", "shopping"]
+            }
+          ],
+          "dining": [
+            {
+              "name": "Tony's Restaurant",
+              "description": "Beloved local seafood spot known for the freshest fish on the island.",
+              "priceRange": "$20–$35/person",
+              "url": "https://www.google.com/maps/search/?api=1&query=Tonys+restaurant+Ponta+Delgada"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "alternatives": [
+    {
+      "title": "Add a Day Trip to Flores Island",
+      "description": "Flores has the most dramatic scenery in the Azores — waterfalls, crater lakes, hydrangeas.",
+      "url": "https://www.google.com/search?q=Flores+island+Azores+day+trip"
+    }
+  ]
+}
 \`\`\`
 
-### SECTION 2: KEY BOOKINGS & BUDGET
-
-#### Flight Information
-
-Provide detailed flight options:
-
-**Outbound Flight Options:**
-For each option include:
-- Airlines, departure/arrival times, total duration, number of stops
-- Current price range
-- Direct link to book on Google Flights
-- Source citation
-
-**Return Flight Options:**
-Use the same format as outbound flights
-
-**Alternative Flight Options:**
-If relevant (different dates, airports, etc.), provide alternatives with same details
-
-**Example structure:**
-\`\`\`
-**Outbound Flight Options:**
-
-✈️ **Option 1:** [Airline] - [Departure City] to [Arrival City]
-- Departure: [Date] at [Time]
-- Arrival: [Date] at [Time]
-- Duration: [X hours], [X stops/Nonstop]
-- Price: $XXX-XXX
-- Book: [Search on Google Flights](https://www.google.com/travel/flights?q=flights+from+DEPARTURE_CITY+to+DESTINATION${startDate ? `+departing+${formatDateForBooking(startDate)}` : ''}${endDate ? `+returning+${formatDateForBooking(endDate)}` : ''})
-- [Source citation]
-\`\`\`
-
-#### Accommodation Recommendations
-
-For each location:
-
-**[Location Name]:**
-- **Primary Recommendation:**
-  - Name and type (hotel, hostel, Airbnb, etc.)
-  - Price per night
-  - Why it fits their vibe and budget
-  - Direct booking link
-  - Source citation
-- **Alternative Options (1-2):**
-  - Use same format as primary recommendation
-
-**Example structure:**
-\`\`\`
-**[Location Name]:**
-
-🏨 **Primary Recommendation:** [Name of Property]
-- Type: [Hotel/Hostel/Airbnb/etc.]
-- Price: $XX per night
-- Why: [Explanation of fit with user's vibe and budget]
-- Book: [URL]
-- [Source citation]
-
-🏨 **Alternative:** [Name of Property]
-[Same format as primary]
-\`\`\`
-
-#### Booking Checklist & Timeline
-
-Create an organized list with:
-- Item to book
-- When to book it (how far in advance)
-- Direct link
-- Estimated cost
-
-Format as: \`[ ] Item to book - Book [timing] - [Link] - Est. $[cost]\`
-
-**Example structure:**
-\`\`\`
-**Booking Checklist & Timeline:**
-
-[ ] Flights - Book [X weeks/months in advance] - [URL] - Est. $XXX
-[ ] [Location 1] Accommodation - Book [timing] - [URL] - Est. $XXX
-[ ] [Major Activity] - Book [timing] - [URL] - Est. $XX
-\`\`\`
-
-#### Complete Budget Breakdown
-
-Provide a detailed breakdown:
-\`\`\`
-**Complete Budget Breakdown:**
-
-- Flights: $XX
-- Accommodation: $XX (broken down by location if helpful)
-  - [Location 1]: $XX
-  - [Location 2]: $XX
-- Activities: $XX
-- Food & Dining: $XX
-- Transportation (intercity): $XX
-- Contingency/Miscellaneous: $XX
-- **Total: $XXX**
-
-[Compare to user's budget and note whether within range or explain tradeoffs]
-\`\`\`
-
-### SECTION 3: DAY-BY-DAY ITINERARY
-
-For each day, use this structure:
-
-**Day X: [Location] - [Theme/Focus]**
-
-**Morning:**
-- Activity/sight with time estimate
-- Why you recommend this (tie to user interests)
-- Practical details (address, opening hours, cost)
-- Source citation
-
-**Afternoon:**
-- Use same format as morning
-
-**Evening:**
-- Use same format as morning
-
-**Dining Options for Day X:**
-
-**CRITICAL REQUIREMENT: You MUST provide 2-3 options for each meal type.**
-
-- **Breakfast:**
-  - [Option 1 Name] - [tags: casual/romantic/local/etc.] - Price range: $X-XX - [Source citation]
-  - [Option 2 Name] - [tags] - Price range: $X-XX - [Source citation]
-  - [Option 3 Name if applicable] - [tags] - Price range: $X-XX - [Source citation]
-
-- **Lunch:**
-  - Use same format (2-3 options)
-
-- **Dinner:**
-  - Use same format (2-3 options)
-
-- **Bars/Nightlife** (if relevant to user's preferences):
-  - [Option 1] - Vibe description - [Source citation]
-  - [Option 2] - Vibe description - [Source citation]
-
-**Transportation:**
-- How to get between locations this day
-- Estimated time and cost
-- Booking information if needed
-- Source citation
-
-**Daily Budget Estimate:**
-\`\`\`
-- Accommodation: $XX
-- Activities: $XX
-- Food: $XX
-- Transport: $XX
-- Total: $XX
-\`\`\`
-
-**Activity Tags:** [Include relevant tags: nature, cultural, food & drink, adventure, educational, photo-worthy, romantic, family-friendly, wandering, local-vibe]
-
-**Example structure for a day:**
-\`\`\`
-**Day 1: Tokyo - Arrival & Traditional Culture**
-
-**Morning:**
-🏯 Senso-ji Temple (9:00 AM - 11:00 AM)
-Why: Perfect introduction to Tokyo's traditional side, aligns with your interest in cultural experiences
-Details: 2-3-1 Asakusa, Taito City. Open 6 AM-5 PM. Free entry.
-[Source citation]
-
-**Afternoon:**
-🚶 Explore Shimokitazawa (2:00 PM - 5:00 PM) [wandering] [local-vibe] [shopping]
-Why: This bohemian neighborhood is perfect for unstructured exploration - vintage shops, indie cafes, and local street life
-Details: No tickets needed. Wander the backstreets, pop into shops that catch your eye, grab coffee when you're tired
-[Shimokitazawa area](https://www.google.com/maps/search/?api=1&query=Shimokitazawa+Tokyo)
-[Source: Time Out Tokyo - "Shimokitazawa neighborhood guide"]
-
-**Evening:**
-[Similar format]
-
-🍽️ **Dining Options for Day 1:**
-
-**Breakfast:**
-- [Restaurant 1] - [tags] - Price: $X-XX - [Source]
-- [Restaurant 2] - [tags] - Price: $X-XX - [Source]
-
-**Lunch:**
-- [Restaurant 1] - [tags] - Price: $X-XX - [Source]
-- [Restaurant 2] - [tags] - Price: $X-XX - [Source]
-- [Restaurant 3] - [tags] - Price: $X-XX - [Source]
-
-**Dinner:**
-- [Restaurant 1] - [tags] - Price: $X-XX - [Source]
-- [Restaurant 2] - [tags] - Price: $X-XX - [Source]
-
-**Bars/Nightlife:**
-- [Bar 1] - [Vibe description] - [Source]
-- [Bar 2] - [Vibe description] - [Source]
-
-🚌 **Transportation:**
-Airport to hotel via [method]: [X minutes], $XX. [Booking info if needed]. [Source]
-
-💰 **Daily Budget Estimate:**
-- Accommodation: $XX
-- Activities: $XX
-- Food: $XX
-- Transport: $XX
-- Total: $XX
-
-**Activity Tags:** [cultural] [photo-worthy] [educational]
-\`\`\`
-
-Continue this format for each day of the trip.
-
-### SECTION 4: ALTERNATIVES & ADDITIONAL OPTIONS
-
-#### Near-Miss Activities & Places
-
-List activities/places that almost made it into the main itinerary (including those identified as near-ties in your comparative analysis). For each:
-- What it is and where
-- Why it's worth considering
-- What it could replace in the main itinerary
-- Time and cost estimates
-- Source citation
-
-**Example structure:**
-\`\`\`
-**Near-Miss Activities & Places:**
-
-**[Activity Name] - [Location]**
-What: [Description]
-Why worth considering: [Explanation based on user interests]
-Could replace: [Day X morning/afternoon/evening activity]
-Time: [X hours], Cost: $XX
-[Source citation]
-\`\`\`
-
-#### Constraint Explanations
-
-If any constraints created conflicts, address them here:
-- Clearly explain the tradeoff
-- Present options if applicable (e.g., "To stay in budget, choose Option A with hostel accommodation OR Option B with fewer days")
-
-#### Practical Information
-
-Include with source citations:
-- **Visa requirements:** [Details with citations]
-- **Currency and typical costs:** [Local currency, exchange rate, tipping customs]
-- **Local transportation tips:** [How to get around, costs, booking info with citations]
-- **Weather expectations:** [What to expect during travel dates with citations]
-- **Safety considerations:** [Any relevant safety information]
-- **Packing suggestions:** [Based on planned activities and weather]
-- **Useful phrases:** [If visiting non-English speaking destinations]
-- **Emergency contacts:** [Relevant phone numbers, embassy info]
-
-All practical information must include source citations.
-
-## URL FORMATTING RULES (CRITICAL):
-
-EVERY activity, tour, restaurant, cafe, bar, or experience MUST include a clickable URL. ONLY use these EXACT URL patterns:
-
-**FOR RESTAURANTS/CAFES/BARS/DINING** - ALWAYS use SPECIFIC restaurant names with Google Maps:
-- ❌ NEVER use generic searches like "restaurants near X" or "cafes in Y neighborhood"
-- ✅ ALWAYS name the SPECIFIC restaurant/cafe/bar (e.g., "Narisawa", "Gonpachi Nishi-Azabu", "Bar High Five")
-- Format: https://www.google.com/maps/search/?api=1&query=SPECIFIC+RESTAURANT+NAME+CITY
-- Example: [Narisawa](https://www.google.com/maps/search/?api=1&query=Narisawa+Tokyo)
-- Example: [Ichiran Shibuya](https://www.google.com/maps/search/?api=1&query=Ichiran+Shibuya+Tokyo)
-- Example: [Bar High Five](https://www.google.com/maps/search/?api=1&query=Bar+High+Five+Ginza+Tokyo)
-
-**FOR PLACES/ATTRACTIONS** - Use Google Maps search:
-- Format: https://www.google.com/maps/search/?api=1&query=PLACE+NAME+CITY+COUNTRY
-- Example: [Mercado Roma](https://www.google.com/maps/search/?api=1&query=Mercado+Roma+Mexico+City)
-
-**FOR GUIDED TOURS** - Use GetYourGuide SEARCH:
-- Format: https://www.getyourguide.com/s/?q=TOUR+DESCRIPTION+CITY
-- Example: [Teotihuacan Day Tour](https://www.getyourguide.com/s/?q=Teotihuacan+day+tour+Mexico+City)
-
-**FOR FLIGHTS** - Use Google Flights with dates and route:
-- Format: https://www.google.com/travel/flights?q=flights+from+ORIGIN+to+DESTINATION+departing+YYYY-MM-DD+returning+YYYY-MM-DD
-${departureCity ? `- User's departure city: ${departureCity} (use this as the flight origin)` : '- No departure city specified (use a reasonable origin based on context)'}
-${startDate ? `- User's start date: ${formatDateForBooking(startDate)} (use as departing date)` : ''}
-${endDate ? `- User's end date: ${formatDateForBooking(endDate)} (use as returning date)` : ''}
-- Example: [Search Flights](https://www.google.com/travel/flights?q=flights+from+${departureCity ? departureCity.replace(/\s+/g, '+') : 'New+York'}+to+Tokyo${startDate ? `+departing+${formatDateForBooking(startDate)}` : ''}${endDate ? `+returning+${formatDateForBooking(endDate)}` : ''})
-- If no specific dates: https://www.google.com/travel/flights?q=flights+from+ORIGIN+to+DESTINATION
-
-**FOR HOTELS/ACCOMMODATION** - Use Booking.com SEARCH:
-- Format: https://www.booking.com/searchresults.html?ss=HOTEL+NAME+CITY
-- Example: [Hotel Nima](https://www.booking.com/searchresults.html?ss=Hotel+Nima+Mexico+City)
-
-**FOR GENERAL INFO** - Use Google search:
-- Format: https://www.google.com/search?q=SEARCH+TERMS
-
-❌ NEVER use:
-- Made-up domains (cultured-foodie.com, tokyo-eats.com)
-- Deep links you're not 100% sure exist
-- Short URLs (goo.gl, bit.ly, maps.app.goo.gl)
-- Viator or TripAdvisor deep links (use search URLs instead)
-
-## Formatting Requirements (CRITICAL - FOLLOW EXACTLY)
-
-### Header Hierarchy (use these EXACT patterns):
-- **## SECTION TITLE** - Main sections (EXECUTIVE SUMMARY, KEY BOOKINGS, etc.) - ALL CAPS
-- **## Day X: Location - Theme** - Day headers, always "Day" + number + colon + location
-- **### Sub-section Title** - Sub-sections within main sections (Flights, Accommodation, Budget Breakdown)
-- **#### Time Period** - Time-of-day headers within days (Morning, Afternoon, Evening)
-
-### Bullet Point Rules (MANDATORY):
-- ALL content that is not a header MUST be a bullet point using "-" (hyphen)
-- Top-level bullets: "- Content here" (no leading spaces)
-- Nested bullets level 1: "  - Content here" (exactly 2 spaces before hyphen)
-- Nested bullets level 2: "    - Content here" (exactly 4 spaces before hyphen)
-- NEVER use "*" for bullets - ONLY use "-"
-- NEVER write loose paragraph text - ALWAYS use bullets
-- Every piece of information must be a bullet point
-
-### Content Structure Examples:
-
-**CORRECT - Day Structure:**
-\`\`\`
-## Day 1: Tokyo - Arrival & Traditional Culture
-
-#### Morning
-- 🏯 **Senso-ji Temple** (9:00 AM - 11:00 AM) [cultural] [photo-worthy]
-  - Why: Perfect introduction to Tokyo's traditional side
-  - Details: 2-3-1 Asakusa, Taito City. Open 6 AM-5 PM. Free entry
-  - [Senso-ji Temple](https://www.google.com/maps/search/?api=1&query=Senso-ji+Temple+Tokyo)
-
-#### Afternoon
-- 🎨 **TeamLab Borderless** (1:00 PM - 4:00 PM) [cultural] [photo-worthy]
-  - Why: Immersive digital art experience
-  - Details: Book in advance. ~$30 entry
-  - [TeamLab Borderless](https://www.google.com/maps/search/?api=1&query=TeamLab+Borderless+Tokyo)
-\`\`\`
-
-**CORRECT - Budget Breakdown:**
-\`\`\`
-### Complete Budget Breakdown
-- **Flights:** $850 round trip
-  - Outbound: Delta, $425
-  - Return: United, $425
-- **Accommodation:** $1,200 total
-  - Tokyo (4 nights): $200/night = $800
-  - Kyoto (2 nights): $200/night = $400
-- **Activities:** $350
-- **Food & Dining:** $500 (~$70/day)
-- **Total: $2,900**
-\`\`\`
-
-**CORRECT - Restaurant Options:**
-\`\`\`
-#### Dinner Options
-- **Narisawa** - [fine dining, innovative] - $$$$ - [Google Maps](URL)
-  - Michelin 2-star, reservation required months in advance
-- **Gonpachi Nishi-Azabu** - [izakaya, atmospheric] - $$$ - [Google Maps](URL)
-  - Famous "Kill Bill" restaurant, great for groups
-- **Ichiran Ramen** - [ramen, quick] - $$ - [Google Maps](URL)
-  - Perfect for a quick, delicious meal
-\`\`\`
-
-**WRONG - Do NOT do these:**
-\`\`\`
-❌ Loose paragraph without bullet:
-The temple is beautiful and worth visiting in the morning.
-
-✅ CORRECT:
-- The temple is beautiful and worth visiting in the morning
-
-❌ Using asterisks for bullets:
-* Visit the temple
-
-✅ CORRECT:
-- Visit the temple
-
-❌ Inconsistent nesting (3 or 5 spaces):
-- Main item
-   - Nested with 3 spaces
-     - Another with 5 spaces
-
-✅ CORRECT (2 or 4 spaces only):
-- Main item
-  - Nested with 2 spaces
-    - Another with 4 spaces
-\`\`\`
-
-### Emoji Usage:
-- ✈️ for flights/travel
-- 🏨 for accommodation
-- 🍽️ for dining sections
-- 🚌 for transportation
-- 💰 for budget/costs
-- 🏯🎨🌳🏖️ etc. for specific activities (at start of activity name only)
-
-### Bold Text Rules:
-- **Bold** important names: restaurant names, hotel names, activity names
-- **Bold** prices and totals
-- **Bold** time slots within activities
-- Do NOT bold entire sentences or paragraphs
-
-### Activity Tags:
-- Include in brackets after activity name: [nature] [cultural] [adventure] [food & drink] [educational] [photo-worthy] [romantic] [family-friendly]
-
-### CRITICAL REMINDER:
-- Every single piece of content must be a bullet point with "-"
-- The ONLY non-bulleted content should be headers (##, ###, ####)
-- If you find yourself writing a paragraph, convert it to bullet points
-- Sub-details should be nested bullets under their parent item
-
-## Important Guidelines
-
-Keep these guidelines in mind throughout your work:
-
-- **Food and dining is the ONE area where you must ALWAYS provide multiple options** (2-3 per meal type for every day)
-- Cite sources for every single recommendation - flights, hotels, activities, restaurants, transportation, practical information
-- If the user left something open-ended (like exact duration), recommend the optimal choice based on their other inputs and explain why
-- Always explain if you had to skip any inspiration locations
-- Verify transportation schedules and costs from official sources when possible
-- Ensure the itinerary flows logically and efficiently without unnecessary backtracking
-- Stay within budget or clearly explain why that's not possible and what tradeoffs are available
-- Match the user's desired vibe and atmosphere throughout all recommendations
-- When the user mentions relatively few destinations for a long trip duration, research and suggest additional nearby destinations that a local expert or experienced travel planner would recommend
-- Pay special attention to the user's interests ranking when choosing between competing options
-- Ensure the adventure level matches user preferences (don't suggest extreme activities for low-adventure preferences)
-- **Critical verification step:** After researching activities, conduct a second comparative search to cross-check each option against alternatives. Compare the top 2-3 options explicitly before committing to your final choice. Document near-tie alternatives for the alternatives section.
-
-Begin by working through your systematic planning in <itinerary_planning> tags, then present your complete itinerary following the structure outlined above.`;
+STRICT RULES:
+- Output ONLY the JSON object — nothing before or after it
+- No markdown code fences in the actual output — the above \`\`\` are just for illustration
+- Every day must have exactly 3 periods: Morning, Afternoon, Evening
+- Each period must have EXACTLY 2 activities (no more, no fewer)
+- Include EXACTLY 1 dining option for ALL periods: Morning (breakfast), Afternoon (lunch), Evening (dinner)
+- Tags must only be from: transit, cultural, nature, hiking, beach, food, photo-worthy, walking, adventure, relaxation, shopping, nightlife
+- priority must be exactly "high", "medium", or "low"
+- Use real URLs from the grounded research — fallback to search URL patterns listed above
+- Keep ALL descriptions to 1 short sentence (25 words maximum) — be ruthlessly concise
+- Keep activity names under 6 words
+- Omit bookingUrl entirely if it would be an empty string
+- If noFlight is true, set flights.skip to true and flights.options to []
+
+## Guidelines
+
+- Stay within budget or clearly explain tradeoffs
+- Always include destinations from the user's inspiration
+- Match adventure level and vibe throughout
+- For trips with few destinations and long duration, suggest nearby additions
+- Prioritize by the user's interests ranking
+- Include real, actionable URLs from the research above
+
+Output ONLY the JSON object. No text before or after it.`;
 
     const userPrompt = `Here are my travel planning inputs:
 
@@ -1206,7 +756,7 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
         model: "claude-sonnet-4-6",
         system: systemMessage?.content,
         messages: nonSystemMessages,
-        max_tokens: 16000,
+        max_tokens: 32000,
         stream: true,
       }),
     });
@@ -1277,3 +827,4 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
     });
   }
 });
+

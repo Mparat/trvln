@@ -29,19 +29,20 @@ export function ItemFeedbackControls({
   const handleVote = (vote: 'up' | 'down' | 'neutral', e: MouseEvent) => {
     e.stopPropagation();
     onVote(vote);
-    // Auto-submit for upvote (no changes needed)
     if (vote === 'up') {
       onSubmitFeedback({ vote });
+    } else if (vote === 'down') {
+      // Open comment box so user can optionally explain before submitting
+      setShowCommentInput(true);
     }
   };
 
   const handleSubmitComment = (e: MouseEvent) => {
     e.stopPropagation();
-    const nextComment = commentText.trim();
-    onComment(nextComment);
+    const nextComment = commentText.trim() || null;
+    if (nextComment) onComment(nextComment);
     setShowCommentInput(false);
-    // Ensure submit sees the latest comment even before state propagation
-    onSubmitFeedback({ comment: nextComment });
+    onSubmitFeedback({ vote: item.vote, comment: nextComment });
   };
 
   const handleUndo = (e: MouseEvent) => {
@@ -124,10 +125,13 @@ export function ItemFeedbackControls({
           onClick={(e) => e.stopPropagation()}
         >
           <div className="space-y-2">
+            {item.vote === 'down' && (
+              <p className="text-xs text-muted-foreground">What would you change? <span className="opacity-60">(optional)</span></p>
+            )}
             <Textarea
               value={commentText}
               onChange={(e) => setCommentText(e.target.value)}
-              placeholder="Add your note..."
+              placeholder={item.vote === 'down' ? "e.g. Too expensive, prefer a different style..." : "Add your note..."}
               className="min-h-[60px] text-sm resize-none"
               autoFocus
             />
@@ -146,7 +150,7 @@ export function ItemFeedbackControls({
                 disabled={!commentText.trim() && !item.vote}
               >
                 <Send className="w-3 h-3 mr-1" />
-                Submit
+                {item.vote === 'down' ? 'Replace this' : 'Submit'}
               </Button>
             </div>
           </div>
