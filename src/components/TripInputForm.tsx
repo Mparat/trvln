@@ -213,8 +213,7 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
               type="button"
               onClick={() => i < currentStep && setCurrentStep(i)}
               className={cn(
-                "flex items-center gap-2 text-sm transition-colors",
-                i === 1 ? "justify-center" : i === 2 ? "justify-end" : "justify-start",
+                "flex items-center gap-2 text-sm transition-colors justify-start",
                 isActive ? "text-foreground font-semibold" : isDone ? "text-primary cursor-pointer" : "text-muted-foreground"
               )}
             >
