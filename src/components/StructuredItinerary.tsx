@@ -72,6 +72,7 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
   const activePeriod = activeDay?.periods[activePeriodIdx];
 
   const activityKey = (d: number, p: number, a: number) => `d${d}-p${p}-a${a}`;
+  const diningKey = (d: number, p: number, i: number) => `d${d}-p${p}-dine${i}`;
 
   const getFeedback = (key: ActivityKey): FeedbackState =>
     feedbacks[key] ?? { vote: null, comment: '', isSubmitting: false };
@@ -92,21 +93,13 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
     }
   }, [openComment]);
 
-  const handleSubmitFeedback = useCallback(async (
+  const submitItemFeedback = useCallback(async (
     key: ActivityKey,
-    dayIdx: number,
-    periodIdx: number,
-    actIdx: number
+    itemContent: string,
+    itemContext: string,
+    itemType: 'structured-activity' | 'structured-dining',
   ) => {
     const state = feedbacks[key] ?? { vote: null, comment: '', isSubmitting: false };
-    const activity = data.days[dayIdx].periods[periodIdx].activities[actIdx];
-    const day = data.days[dayIdx];
-    const period = data.days[dayIdx].periods[periodIdx];
-
-    // Use already-updated content as the base for re-submissions
-    const currentName = state.updatedName ?? activity.name;
-    const currentDescription = state.updatedDescription ?? activity.description;
-
     setFeedback(key, { isSubmitting: true });
 
     try {
@@ -119,9 +112,9 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
             Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
           },
           body: JSON.stringify({
-            itemContent: `${currentName}: ${currentDescription}`,
-            itemContext: `Day ${day.dayNumber}: ${day.title} > ${period.label}`,
-            itemType: 'structured-activity',
+            itemContent,
+            itemContext,
+            itemType,
             feedback: { vote: state.vote, comment: state.comment },
             fullItinerary: rawItinerary || JSON.stringify(data),
             tripPreferences: tripPreferences || {},
@@ -156,6 +149,47 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
       toast({ title: "Couldn't update", description: "Please try again", variant: "destructive" });
     }
   }, [data, rawItinerary, tripPreferences, feedbacks]);
+
+  const handleSubmitFeedback = useCallback((
+    key: ActivityKey,
+    dayIdx: number,
+    periodIdx: number,
+    actIdx: number
+  ) => {
+    const state = feedbacks[key] ?? { vote: null, comment: '', isSubmitting: false };
+    const activity = data.days[dayIdx].periods[periodIdx].activities[actIdx];
+    const day = data.days[dayIdx];
+    const period = data.days[dayIdx].periods[periodIdx];
+    const currentName = state.updatedName ?? activity.name;
+    const currentDescription = state.updatedDescription ?? activity.description;
+    return submitItemFeedback(
+      key,
+      `${currentName}: ${currentDescription}`,
+      `Day ${day.dayNumber}: ${day.title} > ${period.label}`,
+      'structured-activity',
+    );
+  }, [data, feedbacks, submitItemFeedback]);
+
+  const handleSubmitDiningFeedback = useCallback((
+    key: ActivityKey,
+    dayIdx: number,
+    periodIdx: number,
+    dineIdx: number
+  ) => {
+    const state = feedbacks[key] ?? { vote: null, comment: '', isSubmitting: false };
+    const dining = data.days[dayIdx].periods[periodIdx].dining?.[dineIdx];
+    if (!dining) return;
+    const day = data.days[dayIdx];
+    const period = data.days[dayIdx].periods[periodIdx];
+    const currentName = state.updatedName ?? dining.name;
+    const currentDescription = state.updatedDescription ?? dining.description;
+    return submitItemFeedback(
+      key,
+      `${currentName}: ${currentDescription}`,
+      `Day ${day.dayNumber}: ${day.title} > ${period.label}`,
+      'structured-dining',
+    );
+  }, [data, feedbacks, submitItemFeedback]);
 
   return (
     <div className="space-y-5">
@@ -664,36 +698,120 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
                     <span className="text-xs font-semibold text-foreground uppercase tracking-wide">Dining nearby</span>
                   </div>
                   <div className="space-y-2">
-                    {activePeriod.dining.map((dining, i) => (
-                      <a
-                        key={i}
-                        href={dining.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={cn(
-                          "flex items-center gap-3 p-3 rounded-xl border transition-colors group",
-                          dining.isPrimary !== false
-                            ? "border-orange-300 dark:border-orange-700 hover:bg-orange-50/30 dark:hover:bg-orange-950/10"
-                            : "border-border hover:bg-muted/30"
-                        )}
-                      >
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className="text-sm font-medium text-foreground">{dining.name}</p>
-                            {dining.isPrimary !== false && (
-                              <span className="text-[10px] bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-400 px-1.5 py-0.5 rounded-full font-medium">
-                                Top pick
-                              </span>
-                            )}
+                    {activePeriod.dining.map((dining, i) => {
+                      const key = diningKey(activeDayIdx, activePeriodIdx, i);
+                      const fb = getFeedback(key);
+                      const isOpen = openComment === key;
+                      const displayName = fb.updatedName ?? dining.name;
+                      const description = fb.updatedDescription
+                        ? stripMarkdown(fb.updatedDescription)
+                        : dining.description;
+                      return (
+                        <div
+                          key={i}
+                          className={cn(
+                            "p-3 rounded-xl border transition-colors",
+                            fb.updatedDescription
+                              ? "border-green-200 bg-green-50/30"
+                              : dining.isPrimary !== false
+                                ? "border-orange-300 dark:border-orange-700"
+                                : "border-border"
+                          )}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="text-sm font-medium text-foreground">{displayName}</p>
+                                {dining.isPrimary !== false && (
+                                  <span className="text-[10px] bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-400 px-1.5 py-0.5 rounded-full font-medium">
+                                    Top pick
+                                  </span>
+                                )}
+                                {fb.updatedDescription && (
+                                  <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium">
+                                    updated
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{description}</p>
+                              {dining.priceRange && (
+                                <p className="text-xs text-orange-600 font-medium mt-0.5">{dining.priceRange}</p>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                onClick={() => handleVote(key, 'up')}
+                                className={cn(
+                                  "p-1.5 rounded-lg transition-colors",
+                                  fb.vote === 'up'
+                                    ? "bg-green-100 text-green-600"
+                                    : "text-muted-foreground hover:text-green-600 hover:bg-green-50"
+                                )}
+                                title="Keep this"
+                              >
+                                <ThumbsUp className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleVote(key, 'down')}
+                                className={cn(
+                                  "p-1.5 rounded-lg transition-colors",
+                                  fb.vote === 'down'
+                                    ? "bg-red-100 text-red-600"
+                                    : "text-muted-foreground hover:text-red-600 hover:bg-red-50"
+                                )}
+                                title="Suggest another"
+                              >
+                                <ThumbsDown className="w-3.5 h-3.5" />
+                              </button>
+                              {dining.url && (
+                                <a
+                                  href={dining.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="p-1.5 rounded-lg bg-orange-100/70 text-orange-600 hover:bg-orange-100 transition-colors"
+                                >
+                                  <ExternalLink className="w-3.5 h-3.5" />
+                                </a>
+                              )}
+                            </div>
                           </div>
-                          <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{dining.description}</p>
-                          {dining.priceRange && (
-                            <p className="text-xs text-orange-600 font-medium mt-0.5">{dining.priceRange}</p>
+
+                          {isOpen && (
+                            <div className="mt-3 pt-3 border-t border-border/50 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <p className="text-xs font-medium text-foreground">What would you change?</p>
+                                <button
+                                  onClick={() => setOpenComment(null)}
+                                  className="text-muted-foreground hover:text-foreground"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                              <Textarea
+                                value={fb.comment}
+                                onChange={(e) => setFeedback(key, { comment: e.target.value })}
+                                placeholder="e.g. 'Somewhere more casual' or 'I'd prefer seafood'"
+                                className="min-h-[64px] resize-none text-sm"
+                                disabled={fb.isSubmitting}
+                              />
+                              <div className="flex justify-end">
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleSubmitDiningFeedback(key, activeDayIdx, activePeriodIdx, i)}
+                                  disabled={fb.isSubmitting}
+                                >
+                                  {fb.isSubmitting ? (
+                                    <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Updating...</>
+                                  ) : (
+                                    <><Send className="w-3.5 h-3.5 mr-1.5" />Submit</>
+                                  )}
+                                </Button>
+                              </div>
+                            </div>
                           )}
                         </div>
-                        <ExternalLink className="w-3.5 h-3.5 text-muted-foreground group-hover:text-orange-600 shrink-0 transition-colors" />
-                      </a>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
