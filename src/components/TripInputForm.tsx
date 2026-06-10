@@ -238,17 +238,17 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
     const rawLabel = item.file?.name || (item.url ? item.url.replace(/^https?:\/\//, '') : 'Media');
     const label = rawLabel.length > 10 ? rawLabel.slice(0, 10) + '…' : rawLabel;
     return (
-      <div className="relative w-[90px] flex-shrink-0 rounded-2xl border border-primary/20 bg-primary/8 overflow-hidden flex flex-col items-center justify-center pt-4 pb-2 gap-2">
+      <div className="relative w-[90px] flex-shrink-0 rounded-2xl border border-primary/20 bg-primary/10 flex flex-col items-center justify-center pt-5 pb-2.5 px-2 gap-2.5">
         {/* Icon or thumbnail */}
         {item.uploading ? (
           <Loader2 className="w-8 h-8 animate-spin text-primary/60" />
         ) : isImage ? (
-          <img src={item.preview} alt="" className="w-full h-[60px] object-cover" />
+          <img src={item.preview} alt="" className="w-10 h-10 rounded-lg object-cover" />
         ) : (
-          <LinkIcon className="w-9 h-9 text-primary/70" />
+          <LinkIcon className="w-8 h-8 text-primary/70" />
         )}
         {/* Label */}
-        <span className="text-[11px] font-semibold text-foreground/80 text-center px-1 truncate w-full text-center">
+        <span className="text-[11px] font-semibold text-foreground/80 bg-background rounded-md px-2 py-1 truncate max-w-full">
           {label}
         </span>
         {/* Remove button */}
