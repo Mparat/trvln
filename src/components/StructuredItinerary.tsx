@@ -282,7 +282,7 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
                     >
                       {isStructured ? (
                         <>
-                          <div className="w-9 h-9 bg-muted rounded-lg flex items-center justify-center shrink-0 text-xs font-bold text-foreground">
+                          <div className="w-9 h-9 bg-muted/20 rounded-lg flex items-center justify-center shrink-0 text-xs font-bold text-foreground">
                             {f.airlineCode}
                           </div>
                           <div className="flex-1 min-w-0">
@@ -298,7 +298,7 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
                               </div>
                               <div className="flex flex-col items-end shrink-0 gap-1">
                                 {f.badge && (
-                                  <span className="text-[10px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full font-medium">
+                                  <span className="text-[10px] bg-muted/20 text-muted-foreground px-2 py-0.5 rounded-full font-medium">
                                     {f.badge}
                                   </span>
                                 )}
@@ -387,7 +387,7 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
                                   </span>
                                 )}
                                 {opt.type && (
-                                  <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
+                                  <span className="text-[10px] text-muted-foreground bg-muted/20 px-1.5 py-0.5 rounded-full">
                                     {opt.type}
                                   </span>
                                 )}
