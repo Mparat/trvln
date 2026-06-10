@@ -30,7 +30,7 @@ export function ItinerarySwitcher({
               "flex-1 min-w-fit flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl text-sm font-semibold border transition-all whitespace-nowrap",
               isActive
                 ? "bg-background text-foreground border-primary shadow-sm"
-                : "bg-muted/40 text-muted-foreground border-transparent hover:bg-muted/60 hover:text-foreground"
+                : "bg-muted/20 text-muted-foreground border-transparent hover:bg-muted/40 hover:text-foreground"
             )}
           >
             <span className="text-base leading-none">{variant.emoji}</span>
