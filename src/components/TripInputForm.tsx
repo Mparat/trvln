@@ -369,7 +369,7 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
       )}
 
       {/* Separator */}
-      <div className="border-t border-border mx-0" />
+      <div className="border-t border-border mx-5" />
 
       {/* Bottom action row */}
       <div className="flex items-center justify-between px-5 py-3">
