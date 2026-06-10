@@ -828,7 +828,6 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
     <div className="space-y-3">
       <div className="bg-card rounded-2xl shadow-medium overflow-hidden animate-slide-up">
         <StepIndicator />
-        <div className="border-t border-border" />
         {currentStep === 0 && renderStep0()}
         {currentStep === 1 && renderStep1()}
         {currentStep === 2 && renderStep2()}
