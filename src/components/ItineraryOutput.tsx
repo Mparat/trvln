@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   Clock, DollarSign, Sparkles, ExternalLink, Edit3, Send,
-  X, Plus, Loader2, ChevronDown, Share2
+  X, Plus, Loader2, ChevronDown, Share2, MessagesSquare
 } from "lucide-react";
 import { jsPDF } from "jspdf";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -769,15 +769,18 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
   // When structured JSON data is available, render the beautiful UI
   if (structuredData) {
     const editButton = onEdit ? (
-      <Button
-        variant="outline"
-        size="sm"
-        className="gap-1.5 rounded-lg"
+      <button
+        type="button"
         onClick={() => setEditMode(v => !v)}
+        aria-label="Edit the itinerary"
+        title="Edit the itinerary"
+        className="group flex items-center justify-center h-9 w-9 hover:w-auto px-0 hover:px-3.5 rounded-full border border-border bg-background text-muted-foreground hover:text-primary hover:border-primary transition-all duration-300 overflow-hidden"
       >
-        <Edit3 className="w-3.5 h-3.5" />
-        Request edits
-      </Button>
+        <MessagesSquare className="w-4 h-4 shrink-0" />
+        <span className="max-w-0 group-hover:max-w-[160px] group-hover:ml-2 overflow-hidden whitespace-nowrap text-sm font-semibold transition-all duration-300">
+          Edit the itinerary
+        </span>
+      </button>
     ) : undefined;
 
     const editPanel = onEdit && editMode ? (
