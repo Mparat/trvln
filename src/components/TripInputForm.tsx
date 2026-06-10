@@ -341,28 +341,26 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
       )}
 
       {/* Textarea */}
-      <div className="relative">
-        <textarea
-          value={preferences.additionalNotes}
-          onChange={(e) => updatePreferences({ additionalNotes: e.target.value })}
-          onPaste={handlePaste}
-          placeholder={isIdentifyingLocations ? "" : "Describe your dream trip, paste a TikTok / Reel / listing link, or drop in a screenshot..."}
-          className="w-full h-[120px] px-6 py-4 bg-transparent text-base text-foreground placeholder:text-muted-foreground/60 resize-none focus:outline-none"
-        />
-        {isIdentifyingLocations && !preferences.additionalNotes && (
-          <div className="absolute top-4 left-6 flex items-center gap-2 text-primary pointer-events-none">
-            <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-            </svg>
-            <span className="text-lg">Identifying locations…</span>
-          </div>
-        )}
-      </div>
+      <textarea
+        value={preferences.additionalNotes}
+        onChange={(e) => updatePreferences({ additionalNotes: e.target.value })}
+        onPaste={handlePaste}
+        placeholder="Describe your dream trip, paste a TikTok / Reel / listing link, or drop in a screenshot..."
+        className="w-full h-[120px] px-6 py-4 bg-transparent text-base text-foreground placeholder:text-muted-foreground/60 resize-none focus:outline-none"
+      />
 
       {/* City pills */}
-      {preferences.cities.length > 0 && (
+      {(preferences.cities.length > 0 || isIdentifyingLocations) && (
         <div className="px-6 pb-3 flex flex-wrap gap-2 items-center">
+          {isIdentifyingLocations && (
+            <span className="flex items-center gap-1.5 text-xs text-primary">
+              <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+              </svg>
+              Identifying locations…
+            </span>
+          )}
           {preferences.cities.map((city) => (
             <span key={city} className="flex items-center gap-1.5 bg-primary/10 text-primary text-[12px] rounded-full px-3 py-1.5 font-medium">
               <MapPin className="w-3.5 h-3.5 shrink-0" />
