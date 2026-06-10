@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, forwardRef, useImperativeHandle } from "react";
 import { Upload, X, Image as ImageIcon, Video, Loader2, Link } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
@@ -19,7 +19,13 @@ interface MediaDropZoneProps {
   onFramesReady?: (frameUrls: string[]) => void;
 }
 
-export function MediaDropZone({ media, onMediaChange, onFramesReady }: MediaDropZoneProps) {
+export interface MediaDropZoneHandle {
+  processFiles: (files: File[]) => Promise<void>;
+  addUrl: (url: string) => Promise<void>;
+}
+
+export const MediaDropZone = forwardRef<MediaDropZoneHandle, MediaDropZoneProps & { compact?: boolean }>(
+  ({ media, onMediaChange, onFramesReady, compact }, ref) => {
   const [isDragging, setIsDragging] = useState(false);
   const [socialUrl, setSocialUrl] = useState("");
   const [isExtractingUrl, setIsExtractingUrl] = useState(false);
@@ -53,7 +59,7 @@ export function MediaDropZone({ media, onMediaChange, onFramesReady }: MediaDrop
       video.preload = 'metadata';
       video.muted = true;
       video.playsInline = true;
-      
+
       const frames: Blob[] = [];
       const timestamps = [0.1, 0.25, 0.5, 0.75, 0.9]; // Extract 5 frames at these percentages
       let currentIndex = 0;
@@ -164,8 +170,8 @@ export function MediaDropZone({ media, onMediaChange, onFramesReady }: MediaDrop
     });
   };
 
-  const handleSocialUrl = useCallback(async () => {
-    const url = socialUrl.trim();
+  const handleSocialUrl = useCallback(async (urlOverride?: string) => {
+    const url = (urlOverride ?? socialUrl).trim();
     if (!url) return;
 
     const isTikTok = url.includes('tiktok.com');
@@ -206,7 +212,7 @@ export function MediaDropZone({ media, onMediaChange, onFramesReady }: MediaDrop
       onMediaChange(completed);
       if (frameUrls.length > 0) onFramesReady?.(frameUrls);
 
-      setSocialUrl("");
+      if (!urlOverride) setSocialUrl("");
       toast({ title: "Video added!", description: `${isTikTok ? "TikTok" : "Instagram"} video imported successfully` });
     } catch (error) {
       onMediaChange(mediaWithPlaceholder.filter((_, idx) => idx !== placeholderIndex));
@@ -233,10 +239,10 @@ export function MediaDropZone({ media, onMediaChange, onFramesReady }: MediaDrop
     const processPromises = files.map(async (file, index) => {
       const mediaIndex = media.length + index;
       const isVideo = file.type.startsWith('video/');
-      
+
       // Upload the main file
       const url = await uploadToStorage(file);
-      
+
       // For videos, also extract and upload frames
       let frameUrls: string[] = [];
       if (isVideo && url) {
@@ -244,7 +250,7 @@ export function MediaDropZone({ media, onMediaChange, onFramesReady }: MediaDrop
           console.log('Extracting frames from video...');
           const frames = await extractVideoFrames(file);
           console.log(`Extracted ${frames.length} frames from video`);
-          
+
           // Upload frames in parallel; partial failures are tolerated
           const frameUploadPromises = frames.map(async (blob) => {
             const frameFile = new File([blob], `frame_${crypto.randomUUID()}.jpg`, { type: 'image/jpeg' });
@@ -261,7 +267,7 @@ export function MediaDropZone({ media, onMediaChange, onFramesReady }: MediaDrop
           console.error('Video frame extraction failed:', error);
         }
       }
-      
+
       return { index: mediaIndex, url, frameUrls };
     });
 
@@ -272,9 +278,9 @@ export function MediaDropZone({ media, onMediaChange, onFramesReady }: MediaDrop
       const result = results.find(r => r.index === idx);
       if (result) {
         if (result.url) {
-          return { 
-            ...item, 
-            url: result.url, 
+          return {
+            ...item,
+            url: result.url,
             uploading: false,
             frameUrls: result.frameUrls.length > 0 ? result.frameUrls : undefined,
           };
@@ -293,44 +299,51 @@ export function MediaDropZone({ media, onMediaChange, onFramesReady }: MediaDrop
     onMediaChange(finalMedia);
   }, [media, onMediaChange]);
 
-  const handleDragOver = useCallback((e: React.DragEvent) => {
+  useImperativeHandle(ref, () => ({
+    processFiles,
+    addUrl: (url: string) => handleSocialUrl(url),
+  }), [processFiles, handleSocialUrl]);
+
+  if (compact) return null;
+
+  const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(true);
-  }, []);
+  };
 
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
+  const handleDragLeave = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-  }, []);
+  };
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    
-    const files = Array.from(e.dataTransfer.files).filter(file => 
+
+    const files = Array.from(e.dataTransfer.files).filter(file =>
       file.type.startsWith('image/') || file.type.startsWith('video/')
     );
-    
+
     if (files.length > 0) {
       processFiles(files);
     }
-  }, [processFiles]);
+  };
 
-  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []).filter(file => 
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []).filter(file =>
       file.type.startsWith('image/') || file.type.startsWith('video/')
     );
-    
+
     if (files.length > 0) {
       processFiles(files);
     }
     // Reset input so same file can be selected again
     e.target.value = '';
-  }, [processFiles]);
+  };
 
-  const removeMedia = useCallback((index: number) => {
+  const removeMedia = (index: number) => {
     onMediaChange(media.filter((_, i) => i !== index));
-  }, [media, onMediaChange]);
+  };
 
   return (
     <div className="space-y-4">
@@ -340,8 +353,8 @@ export function MediaDropZone({ media, onMediaChange, onFramesReady }: MediaDrop
         onDrop={handleDrop}
         className={cn(
           "relative border-2 border-dashed rounded-xl p-8 transition-all duration-300 cursor-pointer group block",
-          isDragging 
-            ? "border-primary bg-primary/5 scale-[1.02]" 
+          isDragging
+            ? "border-primary bg-primary/5 scale-[1.02]"
             : "border-border hover:border-primary/50 hover:bg-muted/50 active:bg-muted/70",
           "min-h-[180px] flex flex-col items-center justify-center"
         )}
@@ -353,20 +366,20 @@ export function MediaDropZone({ media, onMediaChange, onFramesReady }: MediaDrop
           onChange={handleFileSelect}
           className="sr-only"
         />
-        
+
         <div className={cn(
           "flex flex-col items-center gap-4 transition-all duration-300 pointer-events-none",
           isDragging ? "scale-110" : "group-hover:scale-105"
         )}>
           <div className={cn(
             "w-16 h-16 rounded-full flex items-center justify-center transition-all duration-300",
-            isDragging 
-              ? "bg-primary text-primary-foreground" 
+            isDragging
+              ? "bg-primary text-primary-foreground"
               : "bg-muted text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary"
           )}>
             <Upload className="w-7 h-7" />
           </div>
-          
+
           <div className="text-center">
             <p className="font-medium text-foreground">
               {isDragging ? "Drop your files here" : "Drop your inspo here"}
@@ -397,7 +410,7 @@ export function MediaDropZone({ media, onMediaChange, onFramesReady }: MediaDrop
           />
         </div>
         <button
-          onClick={handleSocialUrl}
+          onClick={() => handleSocialUrl()}
           disabled={!socialUrl.trim() || isExtractingUrl}
           className="px-4 py-2.5 text-sm font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
         >
@@ -409,8 +422,8 @@ export function MediaDropZone({ media, onMediaChange, onFramesReady }: MediaDrop
       {media.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 animate-fade-in">
           {media.map((item, index) => (
-            <div 
-              key={index} 
+            <div
+              key={index}
               className="relative group aspect-square rounded-lg overflow-hidden shadow-soft hover:shadow-medium transition-all duration-300 bg-muted"
             >
               {item.type === 'image' && item.preview && (
@@ -440,14 +453,14 @@ export function MediaDropZone({ media, onMediaChange, onFramesReady }: MediaDrop
                   </div>
                 </div>
               )}
-              
+
               {/* Upload overlay */}
               {item.uploading && (
                 <div className="absolute inset-0 flex items-center justify-center bg-background/70">
                   <Loader2 className="w-6 h-6 animate-spin text-primary" />
                 </div>
               )}
-              
+
               <div className="absolute inset-0 bg-foreground/0 group-hover:bg-foreground/20 transition-all duration-300" />
               <button
                 onClick={() => removeMedia(index)}
@@ -468,4 +481,6 @@ export function MediaDropZone({ media, onMediaChange, onFramesReady }: MediaDrop
       )}
     </div>
   );
-}
+});
+
+MediaDropZone.displayName = 'MediaDropZone';

@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { Globe, Sparkles, MapPin, Plane, ScanSearch } from "lucide-react";
+import { Sparkles, MapPin, Plane, ScanSearch } from "lucide-react";
 import { TripInputForm, TripPreferences } from "@/components/TripInputForm";
 import { ItineraryOutput } from "@/components/ItineraryOutput";
 import { TripSummaryCard } from "@/components/TripSummaryCard";
@@ -419,12 +419,12 @@ const Index = () => {
 
         <div className="container relative pt-12 pb-8 md:pt-20 md:pb-12">
           <div className="flex items-center justify-center gap-2 mb-6">
-            <Globe className="w-8 h-8 text-primary animate-pulse-soft" />
+            <img src="/favicon.svg" alt="Travellin'" className="w-8 h-8" />
             <span className="font-display text-lg text-primary">Travellin'</span>
           </div>
-          
+
           <h1 className="text-4xl md:text-6xl lg:text-7xl font-display font-bold text-center leading-tight text-balance max-w-4xl mx-auto bg-gradient-to-r from-foreground via-primary to-foreground bg-clip-text text-transparent">
-            the easiest yes
+            Where to next?
           </h1>
           
           <p className="mt-6 text-lg md:text-xl text-muted-foreground text-center max-w-2xl mx-auto text-balance">
@@ -576,7 +576,7 @@ const Index = () => {
       {/* Footer */}
       <footer className="border-t border-border py-8">
         <div className="container text-center text-sm text-muted-foreground">
-          <p>Powered by AI • Made for wanderers everywhere</p>
+          <p>Powered by AI. Made personally for you. For travelers everywhere.</p>
         </div>
       </footer>
     </div>
