@@ -513,7 +513,8 @@ Use this exact schema. Every field shown is required unless marked optional. All
     "totalBudget": "e.g. $1,265–$1,780",
     "highlights": ["Top experience 1", "Top experience 2", "Top experience 3"],
     "assumptions": ["Assumption 1"],
-    "bestTimeNote": "Best in May or October for fewer crowds and pleasant weather."
+    "bestTimeNote": "Best in May or October for fewer crowds and pleasant weather.",
+    "vibeSummary": "Volcanic coastlines, thermal springs, and slow island mornings at an easy pace."
   },
   "budget": {
     "items": [
@@ -727,6 +728,7 @@ STRICT RULES:
 - Omit bookingUrl entirely if it would be an empty string
 - If noFlight is true, set flights.skip to true and flights.options to []
 - Always populate summary.bestTimeNote with 1 sentence about the best time to visit and why
+- Always populate summary.vibeSummary with ONE short evocative sentence (10-16 words) capturing the trip's overall vibe and pace — e.g. "Old towns, sea-captains' palaces, island churches, and centuries of maritime history." No destination name, no markdown.
 - Always populate flights.context with a summary of the routing (e.g. "Round-trip from City to Destination (IATA) · N stops · ~Xh door to gate.")
 - Always populate all structured flight fields: airlineCode, route, viaCity, airline, stops, duration, departureTime. Set badge to "Best value", "Fastest", or omit for others.
 - Always populate budget items with a description field explaining what the cost covers

@@ -74,6 +74,7 @@ export interface ItineraryData {
     highlights: string[];
     assumptions?: string[];
     bestTimeNote?: string;
+    vibeSummary?: string;
   };
   budget: {
     items: { category: string; range: string; description?: string }[];

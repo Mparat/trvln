@@ -548,8 +548,9 @@ const Index = () => {
                       {currentItinerary ? `${currentItinerary.emoji} ${currentItinerary.name}` : "Your Personalized Itinerary"}
                     </h2>
                     <p className="text-sm text-muted-foreground mt-1 leading-snug">
-                      {currentItinerary?.tagline
-                        || (currentItinerary ? "Swipe between themes above" : "Crafted based on your preferences")}
+                      {currentItinerary?.structuredData?.summary?.vibeSummary
+                        || currentItinerary?.tagline
+                        || "Crafted based on your preferences"}
                     </p>
                   </div>
                 </div>

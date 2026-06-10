@@ -355,7 +355,7 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
           {/* Accommodation */}
           {data.accommodation.length > 0 && (
             <div>
-              <h4 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+              <h4 className="flex items-center gap-2 text-base font-bold text-foreground mb-4">
                 <Hotel className="w-4 h-4 text-primary" />
                 Accommodation
               </h4>
@@ -375,12 +375,7 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
                           href={opt.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className={cn(
-                            "block p-3.5 rounded-xl transition-colors group border",
-                            opt.isPrimary
-                              ? "bg-primary/5 border-primary/20 hover:bg-primary/10"
-                              : "bg-muted/30 border-transparent hover:bg-muted/60"
-                          )}
+                          className="block p-4 rounded-xl border border-border hover:bg-muted/30 transition-colors group"
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="flex-1 min-w-0">
@@ -827,22 +822,23 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
             <p className="text-sm text-muted-foreground text-center py-6">No booking items generated.</p>
           )}
           {([
-            { key: 'high', label: 'Book first' },
-            { key: 'medium', label: 'Book soon' },
-            { key: 'low', label: 'Book anytime' },
-          ] as const).map(({ key, label }) => {
+            { key: 'high', label: 'Book first', emoji: '🔴' },
+            { key: 'medium', label: 'Book soon', emoji: '🟡' },
+            { key: 'low', label: 'Book anytime', emoji: '🟢' },
+          ] as const).map(({ key, label, emoji }) => {
             const items = data.bookingChecklist.filter(b => b.priority === key);
             if (items.length === 0) return null;
             return (
               <div key={key}>
-                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 px-1">
+                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 px-1 flex items-center gap-1.5">
+                  <span className="text-[10px]">{emoji}</span>
                   {label}
                 </h4>
                 <div className="space-y-2">
                   {items.map((item, i) => (
                     <div
                       key={i}
-                      className="flex items-start gap-3 p-4 rounded-xl bg-muted/30 border border-border/60"
+                      className="flex items-start gap-3 p-4 rounded-xl border border-border hover:bg-muted/30 transition-colors"
                     >
                       <div className="flex-1 min-w-0">
                         <span className="text-sm font-semibold text-foreground">{item.item}</span>
