@@ -608,10 +608,22 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences }: Pro
                         href={dining.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-3 p-3 bg-orange-50/60 dark:bg-orange-950/20 border border-orange-100 dark:border-orange-900/30 rounded-xl hover:bg-orange-50 transition-colors group"
+                        className={cn(
+                          "flex items-center gap-3 p-3 rounded-xl border transition-colors group",
+                          dining.isPrimary !== false
+                            ? "bg-orange-50/60 dark:bg-orange-950/20 border-orange-200 dark:border-orange-900/40 hover:bg-orange-50"
+                            : "bg-muted/30 border-transparent hover:bg-muted/50"
+                        )}
                       >
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-foreground">{dining.name}</p>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-sm font-medium text-foreground">{dining.name}</p>
+                            {dining.isPrimary !== false && (
+                              <span className="text-[10px] bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-400 px-1.5 py-0.5 rounded-full font-medium">
+                                Top pick
+                              </span>
+                            )}
+                          </div>
                           <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{dining.description}</p>
                           {dining.priceRange && (
                             <p className="text-xs text-orange-600 font-medium mt-0.5">{dining.priceRange}</p>

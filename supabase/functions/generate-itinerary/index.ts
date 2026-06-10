@@ -605,7 +605,15 @@ Use this exact schema. Every field shown is required unless marked optional. All
               "name": "Café do Mar",
               "description": "Sunny terrace café with fresh pastries, local cheese toasts, and strong Azorean coffee.",
               "priceRange": "$5–$10/person",
-              "url": "https://www.google.com/maps/search/?api=1&query=Cafe+do+Mar+Ponta+Delgada"
+              "url": "https://www.google.com/maps/search/?api=1&query=Cafe+do+Mar+Ponta+Delgada",
+              "isPrimary": true
+            },
+            {
+              "name": "Pastelaria Garrett",
+              "description": "Classic Portuguese pastelaria with espresso, pastéis de nata, and fresh sandwiches.",
+              "priceRange": "$4–$8/person",
+              "url": "https://www.google.com/maps/search/?api=1&query=Pastelaria+Garrett+Ponta+Delgada",
+              "isPrimary": false
             }
           ]
         },
@@ -632,7 +640,15 @@ Use this exact schema. Every field shown is required unless marked optional. All
               "name": "Restaurante A Tasca",
               "description": "Traditional Azorean alcatra stew and fresh tuna in a cozy family-run spot.",
               "priceRange": "$15–$25/person",
-              "url": "https://www.google.com/maps/search/?api=1&query=Restaurante+A+Tasca+Ponta+Delgada"
+              "url": "https://www.google.com/maps/search/?api=1&query=Restaurante+A+Tasca+Ponta+Delgada",
+              "isPrimary": true
+            },
+            {
+              "name": "Mercado da Graça food stalls",
+              "description": "Casual lunch at the market — local cheeses, smoked meats, and fresh bread.",
+              "priceRange": "$8–$14/person",
+              "url": "https://www.google.com/maps/search/?api=1&query=Mercado+da+Graca+Ponta+Delgada",
+              "isPrimary": false
             }
           ]
         },
@@ -659,7 +675,15 @@ Use this exact schema. Every field shown is required unless marked optional. All
               "name": "Tony's Restaurant",
               "description": "Beloved local seafood spot known for the freshest fish on the island.",
               "priceRange": "$20–$35/person",
-              "url": "https://www.google.com/maps/search/?api=1&query=Tonys+restaurant+Ponta+Delgada"
+              "url": "https://www.google.com/maps/search/?api=1&query=Tonys+restaurant+Ponta+Delgada",
+              "isPrimary": true
+            },
+            {
+              "name": "Restaurante Muchacho",
+              "description": "Laid-back bistro with grilled catch-of-the-day and good local wine selection.",
+              "priceRange": "$18–$30/person",
+              "url": "https://www.google.com/maps/search/?api=1&query=Restaurante+Muchacho+Ponta+Delgada",
+              "isPrimary": false
             }
           ]
         }
@@ -681,7 +705,7 @@ STRICT RULES:
 - No markdown code fences in the actual output — the above \`\`\` are just for illustration
 - Every day must have exactly 3 periods: Morning, Afternoon, Evening
 - Each period must have EXACTLY 2 activities (no more, no fewer)
-- Include EXACTLY 1 dining option for ALL periods: Morning (breakfast), Afternoon (lunch), Evening (dinner)
+- Include EXACTLY 2 dining options for ALL periods: Morning (breakfast), Afternoon (lunch), Evening (dinner). First must have "isPrimary": true (top pick), second must have "isPrimary": false (alternative). Both must be specific named restaurants — no generic descriptions.
 - Tags must only be from: transit, cultural, nature, hiking, beach, food, photo-worthy, walking, adventure, relaxation, shopping, nightlife
 - priority must be exactly "high", "medium", or "low"
 - Use real URLs from the grounded research — fallback to search URL patterns listed above
