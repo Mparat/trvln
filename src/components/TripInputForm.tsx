@@ -277,14 +277,14 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
       type="button"
       onClick={onClick}
       className={cn(
-        "border rounded-full px-4 py-2 text-sm flex items-center gap-2 transition-colors",
+        "border rounded-full px-3 py-1.5 text-[13px] flex items-center gap-1.5 transition-colors",
         isSelected
           ? "border-primary bg-primary/5"
           : "border-border hover:bg-muted/40"
       )}
     >
       <span className={cn(
-        "w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0",
+        "w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center shrink-0",
         isSelected ? "border-primary" : "border-muted-foreground/30"
       )}>
         {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-primary" />}
@@ -705,6 +705,7 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
               onClick={() => toggleArrayItem('atmosphere', opt.id)}
               icon={opt.icon}
               label={opt.label}
+              compact
             />
           ))}
         </div>
@@ -762,6 +763,7 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
               onClick={() => toggleArrayItem('foodDrink', opt.id)}
               icon={opt.icon}
               label={opt.label}
+              compact
             />
           ))}
         </div>
