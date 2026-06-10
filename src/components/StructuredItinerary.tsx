@@ -704,60 +704,57 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
 
       {/* ── Bookings ── */}
       {activeTab === 'bookings' && (
-        <div className="space-y-2">
+        <div className="space-y-6">
           {data.bookingChecklist.length === 0 && (
             <p className="text-sm text-muted-foreground text-center py-6">No booking items generated.</p>
           )}
-          {data.bookingChecklist.map((item, i) => (
-            <div
-              key={i}
-              className={cn(
-                "flex items-start gap-3 p-4 rounded-xl border-l-[3px]",
-                item.priority === 'high' && "bg-red-50/50 dark:bg-red-950/20 border-red-400",
-                item.priority === 'medium' && "bg-amber-50/50 dark:bg-amber-950/20 border-amber-400",
-                item.priority === 'low' && "bg-green-50/50 dark:bg-green-950/20 border-green-400"
-              )}
-            >
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center flex-wrap gap-2 mb-1">
-                  <span className="text-sm font-semibold text-foreground">{item.item}</span>
-                  <span className={cn(
-                    "text-[10px] px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wide",
-                    item.priority === 'high' && "bg-red-100 text-red-700",
-                    item.priority === 'medium' && "bg-amber-100 text-amber-700",
-                    item.priority === 'low' && "bg-green-100 text-green-700"
-                  )}>
-                    {item.priority}
-                  </span>
-                </div>
-                <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <Clock className="w-3 h-3" />
-                    {item.leadTime}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <DollarSign className="w-3 h-3" />
-                    {item.estimatedCost}
-                  </span>
+          {([
+            { key: 'high', label: 'Book first' },
+            { key: 'medium', label: 'Book soon' },
+            { key: 'low', label: 'Book anytime' },
+          ] as const).map(({ key, label }) => {
+            const items = data.bookingChecklist.filter(b => b.priority === key);
+            if (items.length === 0) return null;
+            return (
+              <div key={key}>
+                <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 px-1">
+                  {label}
+                </h4>
+                <div className="space-y-2">
+                  {items.map((item, i) => (
+                    <div
+                      key={i}
+                      className="flex items-start gap-3 p-4 rounded-xl bg-muted/30 border border-border/60"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm font-semibold text-foreground">{item.item}</span>
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground mt-1">
+                          <span className="flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            {item.leadTime}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <DollarSign className="w-3 h-3" />
+                            {item.estimatedCost}
+                          </span>
+                        </div>
+                      </div>
+                      {item.url && (
+                        <a
+                          href={item.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="shrink-0 flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg bg-background border border-border text-foreground hover:bg-muted transition-colors"
+                        >
+                          Book <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
-              {item.url && (
-                <a
-                  href={item.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={cn(
-                    "shrink-0 flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors",
-                    item.priority === 'high' && "bg-red-100 text-red-700 hover:bg-red-200",
-                    item.priority === 'medium' && "bg-amber-100 text-amber-700 hover:bg-amber-200",
-                    item.priority === 'low' && "bg-green-100 text-green-700 hover:bg-green-200"
-                  )}
-                >
-                  Book <ExternalLink className="w-3 h-3" />
-                </a>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
