@@ -27,10 +27,10 @@ export function ItinerarySwitcher({
             key={variant.id}
             onClick={() => onSelect(index)}
             className={cn(
-              "flex-1 min-w-fit flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl text-sm font-semibold border bg-background shadow-sm transition-all whitespace-nowrap",
+              "flex-1 min-w-fit flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl text-sm font-semibold border transition-all whitespace-nowrap",
               isActive
-                ? "text-foreground border-primary"
-                : "text-muted-foreground border-border hover:text-foreground hover:border-foreground/40"
+                ? "bg-background text-foreground border-primary shadow-sm"
+                : "bg-muted text-muted-foreground border-transparent hover:bg-muted/80 hover:text-foreground"
             )}
           >
             <span className="text-base leading-none">{variant.emoji}</span>
