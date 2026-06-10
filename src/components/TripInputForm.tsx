@@ -202,7 +202,7 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
         ))}
       </div>
       {/* Step labels */}
-      <div className="flex justify-between">
+      <div className="grid grid-cols-3 gap-1.5">
         {stepLabels.map((label, i) => {
           const Icon = stepIcons[i];
           const isActive = i === currentStep;
@@ -214,6 +214,7 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
               onClick={() => i < currentStep && setCurrentStep(i)}
               className={cn(
                 "flex items-center gap-2 text-sm transition-colors",
+                i === 1 ? "justify-center" : i === 2 ? "justify-end" : "justify-start",
                 isActive ? "text-foreground font-semibold" : isDone ? "text-primary cursor-pointer" : "text-muted-foreground"
               )}
             >
@@ -343,7 +344,7 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
         onChange={(e) => updatePreferences({ additionalNotes: e.target.value })}
         onPaste={handlePaste}
         placeholder="Describe your dream trip, paste a TikTok / Reel / listing link, or drop in a screenshot..."
-        className="w-full min-h-[160px] px-6 py-4 bg-transparent text-base text-foreground placeholder:text-muted-foreground/60 resize-none focus:outline-none"
+        className="w-full h-[120px] px-6 py-4 bg-transparent text-base text-foreground placeholder:text-muted-foreground/60 resize-none focus:outline-none"
       />
 
       {/* City pills */}
@@ -359,8 +360,8 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
             </span>
           )}
           {preferences.cities.map((city) => (
-            <span key={city} className="flex items-center gap-1 bg-primary/10 text-primary text-xs rounded-full px-3 py-1.5 font-medium">
-              <MapPin className="w-3 h-3 shrink-0" />
+            <span key={city} className="flex items-center gap-1.5 bg-primary/10 text-primary text-[12px] rounded-full px-3 py-1.5 font-medium">
+              <MapPin className="w-3.5 h-3.5 shrink-0" />
               {city}
               <button type="button" onClick={() => removeCity(city)} className="ml-1 opacity-60 hover:opacity-100">×</button>
             </span>
