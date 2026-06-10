@@ -57,9 +57,11 @@ interface Props {
     interests?: string[];
     budgetAccommodation?: number;
   };
+  editButton?: React.ReactNode;
+  editPanel?: React.ReactNode;
 }
 
-export function StructuredItinerary({ data, rawItinerary, tripPreferences }: Props) {
+export function StructuredItinerary({ data, rawItinerary, tripPreferences, editButton, editPanel }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [activeDayIdx, setActiveDayIdx] = useState(0);
   const [activePeriodIdx, setActivePeriodIdx] = useState(0);
@@ -157,22 +159,31 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences }: Pro
 
   return (
     <div className="space-y-5">
-      {/* Tab navigation */}
-      <div className="flex gap-1 bg-muted/50 rounded-xl p-1">
-        {(['overview', 'days', 'bookings'] as Tab[]).map(tab => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={cn(
-              "flex-1 py-2 px-3 text-sm font-medium rounded-lg transition-all",
-              activeTab === tab
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            {tab === 'overview' ? 'Overview' : tab === 'days' ? `Days (${data.days.length})` : 'Bookings'}
-          </button>
-        ))}
+      {/* Tab navigation — underline style with edit action */}
+      <div>
+        <div className="flex items-end justify-between border-b border-border">
+          <div className="flex gap-6 -mb-px">
+            {(['overview', 'days', 'bookings'] as Tab[]).map(tab => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={cn(
+                  "relative pb-3 text-sm font-semibold transition-colors",
+                  activeTab === tab
+                    ? "text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {tab === 'overview' ? 'Overview' : tab === 'days' ? `Days (${data.days.length})` : 'Bookings'}
+                {activeTab === tab && (
+                  <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-primary rounded-full" />
+                )}
+              </button>
+            ))}
+          </div>
+          {editButton && <div className="pb-2">{editButton}</div>}
+        </div>
+        {editPanel && <div className="mt-4">{editPanel}</div>}
       </div>
 
       {/* ── Overview ── */}

@@ -33,6 +33,7 @@ export type ItineraryVariant = {
   id: string;
   name: string;
   emoji: string;
+  tagline?: string;
   content: string;
   structuredData?: ItineraryData;
 };
@@ -98,7 +99,7 @@ const Index = () => {
     return data.destinations || [];
   }, [getHeaders]);
 
-  const suggestThemes = useCallback(async (prefs: TripPreferences): Promise<{ id: string; name: string; emoji: string }[]> => {
+  const suggestThemes = useCallback(async (prefs: TripPreferences): Promise<{ id: string; name: string; emoji: string; tagline?: string }[]> => {
     const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/suggest-themes`, {
       method: "POST",
       headers: getHeaders(),
@@ -541,16 +542,17 @@ const Index = () => {
               {/* Detailed Itinerary */}
               <div className="bg-card rounded-2xl shadow-medium">
                 {/* Sticky header — overflow-hidden on parent breaks sticky, so rounded-t-2xl is on the header instead */}
-                <div className="sticky top-0 z-20 bg-card/95 backdrop-blur-sm flex items-center gap-3 px-6 py-4 md:px-8 border-b border-border rounded-t-2xl">
-                  <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                    <Sparkles className="w-4 h-4 text-primary" />
+                <div className="sticky top-0 z-20 bg-card/95 backdrop-blur-sm flex items-start gap-3.5 px-6 py-5 md:px-8 border-b border-border rounded-t-2xl">
+                  <div className="w-11 h-11 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                    <Sparkles className="w-5 h-5 text-primary" />
                   </div>
                   <div className="min-w-0">
-                    <h2 className="font-display text-lg font-semibold text-foreground truncate">
+                    <h2 className="font-display text-xl font-bold text-foreground leading-tight">
                       {currentItinerary ? `${currentItinerary.emoji} ${currentItinerary.name}` : "Your Personalized Itinerary"}
                     </h2>
-                    <p className="text-xs text-muted-foreground">
-                      {currentItinerary ? "Swipe between themes above" : "Crafted based on your preferences"}
+                    <p className="text-sm text-muted-foreground mt-1 leading-snug">
+                      {currentItinerary?.tagline
+                        || (currentItinerary ? "Swipe between themes above" : "Crafted based on your preferences")}
                     </p>
                   </div>
                 </div>
