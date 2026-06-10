@@ -41,6 +41,7 @@ const FeedbackSchema = z.object({
 const RequestSchema = z.object({
   itemContent: z.string().min(1).max(2000),
   itemContext: z.string().max(500),
+  itemType: z.enum(['structured-activity', 'markdown-line']).optional().default('markdown-line'),
   feedback: FeedbackSchema,
   fullItinerary: z.string().max(100000),
   tripPreferences: TripPreferencesSchema,
@@ -72,7 +73,8 @@ serve(async (req) => {
       );
     }
 
-    const { itemContent, itemContext, feedback, fullItinerary, tripPreferences } = validationResult.data;
+    const { itemContent, itemContext, itemType, feedback, fullItinerary, tripPreferences } = validationResult.data;
+    const isStructured = itemType === 'structured-activity';
     console.log('Point update request:', { itemContent, itemContext, feedback });
 
     const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
@@ -103,16 +105,24 @@ ${feedback.comment ? `Their note: "${feedback.comment}"` : ''}
 If there's a clearly better option available, suggest it. Otherwise, keep the current recommendation but maybe enhance the description.`;
     }
 
-    const systemPrompt = `You are a travel itinerary editor. You will be given a single itinerary item and feedback.
+    const systemPrompt = isStructured
+      ? `You are a travel itinerary editor. Replace the given activity with a better alternative based on user feedback.
+
+RULES:
+1. Return ONLY valid JSON with exactly two fields: {"name": "...", "description": "..."}
+2. "name" is a short activity title (3-6 words, no markdown)
+3. "description" is 1-2 plain prose sentences describing what to do — no markdown, no URLs, no bullet points
+4. The replacement must be a GENUINELY different activity — not a variation of the same one
+5. Choose something that fits the context: ${itemContext}
+6. Do not repeat any activity already in the full itinerary`
+      : `You are a travel itinerary editor. You will be given a single itinerary item and feedback.
 Your job is to provide an updated version of JUST that one item.
 
 RULES:
-1. Return ONLY the updated description text - no explanations, no extra text
-2. Do NOT add markdown formatting: no bullet points (- or •), no **bold**, no URLs in the text
-3. Write plain prose: a 1-2 sentence description of the activity, similar in length to the original
-4. Do not include the activity name in the description (it is shown separately)
-5. Match the style and detail level of the original
-6. Keep it contextually appropriate for: ${itemContext}`;
+1. Return ONLY the updated line item - no explanations, no extra text
+2. Keep the same format (bullet point, bold names, etc.)
+3. Match the style and detail level of the original
+4. Keep it contextually appropriate for: ${itemContext}`;
 
     // Build budget label
     const getBudgetLabel = (value?: number) => {
@@ -190,14 +200,35 @@ Provide the updated item (just the line, nothing else):`;
     }
 
     const data = await response.json();
-    const updatedContent = data.content?.[0]?.text?.trim() || itemContent;
+    const rawText = data.content?.[0]?.text?.trim() || itemContent;
 
-    console.log('Point update complete:', updatedContent);
+    console.log('Point update raw:', rawText);
+
+    if (isStructured) {
+      try {
+        // Strip any markdown code fences the model may have added
+        const jsonText = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+        const parsed = JSON.parse(jsonText);
+        const name = (parsed.name || '').trim();
+        const description = (parsed.description || '').trim();
+        if (!name || !description) throw new Error('missing fields');
+        return new Response(
+          JSON.stringify({ updatedContent: JSON.stringify({ name, description }), changed: true }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      } catch {
+        // Fallback: treat as plain description if JSON parse fails
+        return new Response(
+          JSON.stringify({ updatedContent: rawText, changed: rawText !== itemContent }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+    }
 
     return new Response(
-      JSON.stringify({ 
-        updatedContent,
-        changed: updatedContent !== itemContent,
+      JSON.stringify({
+        updatedContent: rawText,
+        changed: rawText !== itemContent,
         reason: feedback.vote === 'down' ? 'Replaced with alternative' : 'Enhanced based on feedback'
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

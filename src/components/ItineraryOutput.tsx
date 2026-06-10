@@ -822,7 +822,7 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
           </div>
         )}
 
-        <StructuredItinerary data={structuredData} rawItinerary={itinerary} tripPreferences={tripPreferences} />
+        <StructuredItinerary key={structuredData.summary.destination + structuredData.summary.duration + (structuredData.summary.recommendedDates || '')} data={structuredData} rawItinerary={itinerary} tripPreferences={tripPreferences} />
       </div>
     );
   }

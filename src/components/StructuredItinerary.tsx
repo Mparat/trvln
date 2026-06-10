@@ -44,6 +44,7 @@ interface FeedbackState {
   vote: 'up' | 'down' | null;
   comment: string;
   isSubmitting: boolean;
+  updatedName?: string;
   updatedDescription?: string;
 }
 
@@ -100,6 +101,10 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences }: Pro
     const day = data.days[dayIdx];
     const period = data.days[dayIdx].periods[periodIdx];
 
+    // Use already-updated content as the base for re-submissions
+    const currentName = state.updatedName ?? activity.name;
+    const currentDescription = state.updatedDescription ?? activity.description;
+
     setFeedback(key, { isSubmitting: true });
 
     try {
@@ -112,8 +117,9 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences }: Pro
             Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
           },
           body: JSON.stringify({
-            itemContent: `${activity.name}: ${activity.description}`,
+            itemContent: `${currentName}: ${currentDescription}`,
             itemContext: `Day ${day.dayNumber}: ${day.title} > ${period.label}`,
+            itemType: 'structured-activity',
             feedback: { vote: state.vote, comment: state.comment },
             fullItinerary: rawItinerary || JSON.stringify(data),
             tripPreferences: tripPreferences || {},
@@ -127,7 +133,17 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences }: Pro
       setOpenComment(null);
 
       if (result.changed) {
-        setFeedback(key, { isSubmitting: false, updatedDescription: result.updatedContent });
+        // Try to parse structured {name, description} response
+        let updatedName: string | undefined;
+        let updatedDescription: string | undefined;
+        try {
+          const parsed = JSON.parse(result.updatedContent);
+          updatedName = parsed.name?.trim();
+          updatedDescription = parsed.description?.trim();
+        } catch {
+          updatedDescription = stripMarkdown(result.updatedContent);
+        }
+        setFeedback(key, { isSubmitting: false, updatedName, updatedDescription });
         toast({ title: "Updated!", description: "This recommendation has been refreshed." });
       } else {
         setFeedback(key, { isSubmitting: false });
@@ -431,6 +447,7 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences }: Pro
                 const key = activityKey(activeDayIdx, activePeriodIdx, actIdx);
                 const fb = getFeedback(key);
                 const isOpen = openComment === key;
+                const displayName = fb.updatedName ?? activity.name;
                 const description = fb.updatedDescription
                   ? stripMarkdown(fb.updatedDescription)
                   : activity.description;
@@ -448,7 +465,7 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences }: Pro
                   >
                     {/* Header row */}
                     <div className="flex items-start justify-between gap-2 mb-2">
-                      <h4 className="font-semibold text-foreground leading-snug">{activity.name}</h4>
+                      <h4 className="font-semibold text-foreground leading-snug">{displayName}</h4>
                       <div className="flex items-center gap-1 shrink-0">
                         {/* Thumbs up */}
                         <button
