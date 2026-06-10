@@ -277,16 +277,81 @@ This itinerary MUST embody the "${themeVariant.name}" theme throughout.
 - The theme should influence: which neighborhoods to visit, which activities to prioritize, dining choices, timing of activities, and overall vibe`;
     }
 
+    // ============================================
+    // DESTINATION RESOLUTION PASS
+    // When no explicit city is given, ask Claude Haiku to pick the best
+    // match before Perplexity runs, so all research is destination-specific.
+    // ============================================
+    let resolvedCities: string[] = [...(cities ?? [])];
+    let destinationWasResolved = false;
+
+    if (resolvedCities.length === 0) {
+      console.log("No explicit cities — resolving destination from preferences...");
+      try {
+        const resolutionPrompt = `You are a travel destination expert. Based on the traveler's preferences below, choose 1-2 specific destination cities or regions that best fit. Be decisive and concrete — not "Southeast Asia" but "Chiang Mai, Thailand".
+
+Preferences:
+- What they described: ${additionalNotes || "Not specified"}
+- Atmosphere: ${atmosphere?.join(", ") || "no preference"}
+- Interests: ${interests?.join(", ") || "no preference"}
+- Adventure level: ${adventureLevel || "active"}
+- Food preferences: ${foodDrink?.join(", ") || "no preference"}
+- Accommodation budget: ${budgetInfo.label} (${budgetInfo.accommodation})
+- Flight budget: ${noFlight ? "no flight needed (local/ground trip)" : flightBudget + " round trip"}
+- Departing from: ${departureCity || "unknown"}
+- Travel timing: ${dateContext}
+- Duration: ${durationContext}
+
+Respond with ONLY a JSON array of 1-2 destination strings. Examples:
+["Lisbon, Portugal"]
+["Chiang Mai, Thailand", "Bangkok, Thailand"]
+
+No explanation. Just the JSON array.`;
+
+        const resolutionResponse = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "claude-haiku-4-5",
+            messages: [{ role: "user", content: resolutionPrompt }],
+            max_tokens: 100,
+          }),
+        });
+
+        if (resolutionResponse.ok) {
+          const resolutionData = await resolutionResponse.json();
+          const resolutionText = resolutionData.content?.[0]?.text?.trim() ?? "";
+          // Strip any accidental code fences
+          const cleaned = resolutionText.replace(/```[a-z]*\n?/gi, "").trim();
+          const parsed = JSON.parse(cleaned);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            resolvedCities = parsed.filter((d: unknown) => typeof d === "string");
+            destinationWasResolved = true;
+            console.log("Resolved destinations:", resolvedCities);
+          }
+        }
+      } catch (err) {
+        console.error("Destination resolution failed — proceeding without explicit cities:", err);
+      }
+    }
+
     // Build inspiration context
     let inspirationContext = "";
-    if (cities?.length > 0) {
-      inspirationContext = cities.join(", ");
+    if (resolvedCities.length > 0) {
+      inspirationContext = destinationWasResolved
+        ? `${resolvedCities.join(", ")} (suggested based on your preferences)`
+        : resolvedCities.join(", ");
     }
     if (media?.length > 0) {
       inspirationContext += inspirationContext ? ` (plus ${media.length} inspiration image(s))` : `${media.length} inspiration image(s)`;
     }
-    
+
     console.log("Cities from preferences:", cities);
+    console.log("Resolved cities:", resolvedCities);
     console.log("Inspiration context:", inspirationContext);
 
     // Build flight context
@@ -300,8 +365,11 @@ ${departureCity ? `- Departing from: ${departureCity}` : ""}`;
     }
 
     const userInputsBlock = `
-**INSPIRATION (must-visit destinations)**: ${inspirationContext || "No specific destinations - suggest based on preferences"}
-**Note: The destinations listed above MUST be included in the itinerary. You may also suggest additional nearby destinations if appropriate for the trip duration and interests.**
+**INSPIRATION (destinations)**: ${inspirationContext || "No specific destinations — use preferences to guide choice"}
+${destinationWasResolved
+  ? "**Note: Destination was AI-suggested from the user's preferences. You may refine or replace it if a better fit exists, but stay consistent with the spirit of the request.**"
+  : "**Note: The destinations listed above MUST be included in the itinerary. You may also suggest additional nearby destinations if appropriate for the trip duration and interests.**"
+}
 
 **LOGISTICS**:
 - Budget (Accommodation): ${budgetInfo.label} (${budgetInfo.accommodation}, ~${budgetInfo.daily} total daily)
@@ -328,15 +396,15 @@ ${additionalNotes || "None provided"}
     if (PERPLEXITY_API_KEY) {
       console.log("Starting Perplexity grounded research...");
       
-      const destinationStr = cities?.length > 0 ? cities.join(', ') : 'popular travel destinations';
-      const primaryCity = cities?.[0] || 'the destination';
+      const destinationStr = resolvedCities.length > 0 ? resolvedCities.join(', ') : 'popular travel destinations';
+      const primaryCity = resolvedCities[0] || 'the destination';
       const interestsStr = interests?.length > 0 ? interests.join(', ') : 'general sightseeing';
       const foodStr = foodDrink?.length > 0 ? foodDrink.join(', ') : 'local cuisine';
       const themeStr = themeVariant?.name || '';
-      
+
       // Determine trip length for context-aware queries
       const tripDaysNum = durationDays || 7;
-      const isSingleCity = cities?.length === 1;
+      const isSingleCity = resolvedCities.length === 1;
       const isLongTrip = tripDaysNum >= 7;
       
       // Build focused search queries based on user preferences
