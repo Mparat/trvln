@@ -619,7 +619,7 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
       )}
 
       {/* Flight Preferences */}
-      <div className="p-4 bg-muted/50 rounded-xl space-y-4">
+      <div className="p-4 bg-muted/20 rounded-xl space-y-4">
         <div className="flex items-center justify-between">
           <h4 className="flex items-center gap-2 text-sm font-medium text-foreground">
             <Plane className="w-4 h-4 text-primary" />
