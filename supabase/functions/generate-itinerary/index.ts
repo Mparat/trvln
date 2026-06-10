@@ -412,8 +412,8 @@ ${additionalNotes || "None provided"}
         // Query 1: Activities and things to do
         `Best things to do in ${destinationStr} for ${interestsStr} travelers. Include specific activity names, tour recommendations, must-visit attractions, hidden gems, and neighborhoods to explore.${themeStr ? ` Focus on ${themeStr} experiences.` : ''} ${budgetInfo.label} budget level.`,
 
-        // Query 2: Restaurants and food scene
-        `Best ${foodStr} restaurants and food experiences in ${destinationStr}. Include specific restaurant names, neighborhoods known for food, price ranges, and local specialties. ${budgetInfo.label} budget.`,
+        // Query 2: Restaurants and food scene — emphasise currently operating
+        `Best ${foodStr} restaurants currently open in ${destinationStr} as of ${new Date().getFullYear()}. Only include establishments confirmed to be actively operating with recent positive reviews. Include specific restaurant names, neighborhoods, price ranges, and what they are known for. Exclude any restaurants that have closed, are temporarily closed, or have uncertain operating status. ${budgetInfo.label} budget.`,
 
         // Query 3: Accommodation with date-specific pricing
         `Best ${budgetInfo.label} hotels in ${destinationStr} priced ${budgetInfo.accommodation}. ${startDate && endDate ? `For dates: check-in ${startDate}, check-out ${endDate}.` : targetMonth ? `For travel in ${targetMonth}.` : ''} Include specific hotel names with nightly rates and neighborhoods to stay.`,
@@ -786,6 +786,7 @@ STRICT RULES:
 - Each period must have EXACTLY 2 activities (no more, no fewer)
 - Include EXACTLY 2 dining options for ALL periods: Morning (breakfast), Afternoon (lunch), Evening (dinner). First must have "isPrimary": true (top pick), second must have "isPrimary": false (alternative). Both must be specific named restaurants — no generic descriptions.
 - DINING MUST BE UNIQUE: Every restaurant across the ENTIRE itinerary must be a DIFFERENT establishment. NEVER repeat the same restaurant in two periods or on two different days — not as a primary and not as an alternative. For an N-day trip you will name roughly N×6 distinct restaurants; if grounded research is limited, branch into nearby neighborhoods/towns to find fresh options rather than reusing one.
+- ONLY recommend restaurants confirmed to be currently open in the grounded research. If the research mentions any closure, "permanently closed", "temporarily closed", or uncertain status for an establishment, do NOT include it. When in doubt, prefer well-established restaurants with multiple recent reviews over newer or less-cited spots.
 - MATCH THE MEAL TO THE PERIOD: Morning dining must be breakfast spots (cafés, bakeries, brunch). Afternoon must be lunch spots. Evening must be dinner restaurants. Do not put a dinner restaurant in a morning slot.
 - VARY THE PRIMARY PICKS BY DAY: The "isPrimary": true restaurant for each period should feel distinct day-to-day in cuisine, vibe, and neighborhood — showcase the destination's range across the trip, don't anchor every day to the same kind of place.
 - Tags must only be from: transit, cultural, nature, hiking, beach, food, photo-worthy, walking, adventure, relaxation, shopping, nightlife
