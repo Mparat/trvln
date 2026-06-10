@@ -7,7 +7,7 @@ import { toast } from "@/hooks/use-toast";
 import {
   ExternalLink, Plane, Hotel, MapPin, Clock, DollarSign,
   Sunrise, Sun, Moon, Utensils, Calendar, ChevronRight, Info,
-  ThumbsUp, ThumbsDown, Loader2, Send, X
+  ThumbsUp, ThumbsDown, MessageSquare, Loader2, Send, X
 } from "lucide-react";
 
 type Tab = 'overview' | 'days' | 'bookings';
@@ -547,7 +547,7 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
                   <div
                     key={actIdx}
                     className={cn(
-                      "bg-card border rounded-2xl p-4 transition-all",
+                      "group bg-card border rounded-2xl p-4 transition-all",
                       fb.vote === 'up' && "border-green-200 bg-green-50/30",
                       fb.vote === 'down' && !fb.updatedDescription && "border-red-200 bg-red-50/20",
                       fb.updatedDescription && "border-green-200 bg-green-50/30",
@@ -557,7 +557,10 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
                     {/* Header row */}
                     <div className="flex items-start justify-between gap-2 mb-2">
                       <h4 className="font-semibold text-foreground leading-snug">{displayName}</h4>
-                      <div className="flex items-center gap-1 shrink-0">
+                      <div className={cn(
+                        "flex items-center gap-1 shrink-0 transition-opacity",
+                        (fb.vote || isOpen) ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                      )}>
                         {/* Thumbs up */}
                         <button
                           onClick={() => handleVote(key, 'up')}
@@ -583,6 +586,19 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
                           title="Suggest change"
                         >
                           <ThumbsDown className="w-3.5 h-3.5" />
+                        </button>
+                        {/* Chat — open comment without voting */}
+                        <button
+                          onClick={() => setOpenComment(key)}
+                          className={cn(
+                            "p-1.5 rounded-lg transition-colors",
+                            isOpen && !fb.vote
+                              ? "bg-blue-100 text-blue-600"
+                              : "text-muted-foreground hover:text-blue-600 hover:bg-blue-50"
+                          )}
+                          title="Request a change"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5" />
                         </button>
                         {/* External link */}
                         {activity.bookingUrl && (
@@ -705,7 +721,7 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
                         <div
                           key={i}
                           className={cn(
-                            "p-3 rounded-xl border transition-colors",
+                            "group p-3 rounded-xl border transition-colors",
                             fb.updatedDescription
                               ? "border-green-200 bg-green-50/30"
                               : dining.isPrimary !== false
@@ -733,7 +749,10 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
                                 <p className="text-xs text-orange-600 font-medium mt-0.5">{dining.priceRange}</p>
                               )}
                             </div>
-                            <div className="flex items-center gap-1 shrink-0">
+                            <div className={cn(
+                              "flex items-center gap-1 shrink-0 transition-opacity",
+                              (fb.vote || isOpen) ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                            )}>
                               <button
                                 onClick={() => handleVote(key, 'up')}
                                 className={cn(
@@ -757,6 +776,19 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
                                 title="Suggest another"
                               >
                                 <ThumbsDown className="w-3.5 h-3.5" />
+                              </button>
+                              {/* Chat — open comment without voting */}
+                              <button
+                                onClick={() => setOpenComment(key)}
+                                className={cn(
+                                  "p-1.5 rounded-lg transition-colors",
+                                  isOpen && !fb.vote
+                                    ? "bg-blue-100 text-blue-600"
+                                    : "text-muted-foreground hover:text-blue-600 hover:bg-blue-50"
+                                )}
+                                title="Request a change"
+                              >
+                                <MessageSquare className="w-3.5 h-3.5" />
                               </button>
                               {dining.url && (
                                 <a
