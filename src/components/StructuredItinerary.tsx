@@ -74,7 +74,10 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences }: Pro
     feedbacks[key] ?? { vote: null, comment: '', isSubmitting: false };
 
   const setFeedback = (key: ActivityKey, patch: Partial<FeedbackState>) =>
-    setFeedbacks(prev => ({ ...prev, [key]: { ...getFeedback(key), ...patch } }));
+    setFeedbacks(prev => {
+      const existing = prev[key] ?? { vote: null, comment: '', isSubmitting: false };
+      return { ...prev, [key]: { ...existing, ...patch } };
+    });
 
   const handleVote = useCallback((key: ActivityKey, vote: 'up' | 'down') => {
     setFeedback(key, { vote });
@@ -92,7 +95,7 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences }: Pro
     periodIdx: number,
     actIdx: number
   ) => {
-    const state = getFeedback(key);
+    const state = feedbacks[key] ?? { vote: null, comment: '', isSubmitting: false };
     const activity = data.days[dayIdx].periods[periodIdx].activities[actIdx];
     const day = data.days[dayIdx];
     const period = data.days[dayIdx].periods[periodIdx];
@@ -134,7 +137,7 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences }: Pro
       setFeedback(key, { isSubmitting: false });
       toast({ title: "Couldn't update", description: "Please try again", variant: "destructive" });
     }
-  }, [data, rawItinerary, tripPreferences]);
+  }, [data, rawItinerary, tripPreferences, feedbacks]);
 
   return (
     <div className="space-y-5">
