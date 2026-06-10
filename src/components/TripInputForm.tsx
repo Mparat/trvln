@@ -235,25 +235,27 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
   // Compact media card for step 0
   const CompactMediaCard = ({ item, index }: { item: MediaItem; index: number }) => {
     const isImage = item.type === 'image' && item.preview;
-    const label = item.file?.name
-      ? item.file.name.length > 16 ? item.file.name.slice(0, 14) + '…' : item.file.name
-      : item.url
-        ? item.url.replace(/^https?:\/\//, '').slice(0, 16) + (item.url.length > 20 ? '…' : '')
-        : 'Media';
+    const rawLabel = item.file?.name || (item.url ? item.url.replace(/^https?:\/\//, '') : 'Media');
+    const label = rawLabel.length > 10 ? rawLabel.slice(0, 10) + '…' : rawLabel;
     return (
-      <div className="relative inline-flex items-center gap-2 bg-muted/60 border border-border rounded-xl px-3 py-2 pr-7 max-w-[180px]">
+      <div className="relative w-[90px] flex-shrink-0 rounded-2xl border border-primary/20 bg-primary/8 overflow-hidden flex flex-col items-center justify-center pt-4 pb-2 gap-2">
+        {/* Icon or thumbnail */}
         {item.uploading ? (
-          <Loader2 className="w-4 h-4 animate-spin text-muted-foreground shrink-0" />
+          <Loader2 className="w-8 h-8 animate-spin text-primary/60" />
         ) : isImage ? (
-          <img src={item.preview} alt="" className="w-6 h-6 object-cover rounded shrink-0" />
+          <img src={item.preview} alt="" className="w-full h-[60px] object-cover" />
         ) : (
-          <LinkIcon className="w-4 h-4 text-muted-foreground shrink-0" />
+          <LinkIcon className="w-9 h-9 text-primary/70" />
         )}
-        <span className="text-xs text-muted-foreground truncate">{label}</span>
+        {/* Label */}
+        <span className="text-[11px] font-semibold text-foreground/80 text-center px-1 truncate w-full text-center">
+          {label}
+        </span>
+        {/* Remove button */}
         <button
           type="button"
           onClick={() => updatePreferences({ media: preferences.media.filter((_, j) => j !== index) })}
-          className="absolute top-1 right-1.5 w-4 h-4 flex items-center justify-center rounded-full hover:bg-muted text-muted-foreground hover:text-foreground text-xs leading-none"
+          className="absolute top-1.5 right-1.5 w-5 h-5 flex items-center justify-center rounded-full bg-foreground text-background text-xs font-bold leading-none hover:bg-foreground/80"
         >
           ×
         </button>
@@ -320,106 +322,76 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
   );
 
   const renderStep0 = () => (
-    <div className="px-6 pb-6 space-y-4">
-      {/* Unified bordered box */}
-      <div
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        className={cn(
-          "border rounded-xl bg-card transition-colors",
-          isDragging ? "border-primary bg-primary/5" : "border-border"
-        )}
-      >
-        {/* Compact media cards */}
-        {preferences.media.length > 0 && (
-          <div className="p-3 flex flex-wrap gap-2 border-b border-border">
-            {preferences.media.map((item, i) => (
-              <CompactMediaCard key={i} item={item} index={i} />
-            ))}
-          </div>
-        )}
-
-        {/* Textarea */}
-        <textarea
-          value={preferences.additionalNotes}
-          onChange={(e) => updatePreferences({ additionalNotes: e.target.value })}
-          onPaste={handlePaste}
-          placeholder="Describe your dream trip, paste a TikTok / Reel / listing link, or drop in a screenshot..."
-          className="w-full min-h-[120px] px-4 py-3 bg-transparent text-sm text-foreground placeholder:text-muted-foreground resize-none focus:outline-none"
-        />
-
-        {/* City pills */}
-        {preferences.cities.length > 0 && (
-          <div className="px-3 pb-2 flex flex-wrap gap-2">
-            {preferences.cities.map((city) => (
-              <span key={city} className="flex items-center gap-1 bg-muted text-foreground text-xs rounded-full px-3 py-1">
-                <MapPin className="w-3 h-3" />
-                {city}
-                <button
-                  type="button"
-                  onClick={() => removeCity(city)}
-                  className="ml-1 opacity-60 hover:opacity-100"
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* Identifying locations spinner */}
-        {isIdentifyingLocations && (
-          <div className="px-4 py-2 flex items-center gap-2 text-xs text-primary border-t border-border">
-            <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-            </svg>
-            Identifying locations…
-          </div>
-        )}
-
-        <div className="border-t border-border" />
-
-        {/* Bottom action row */}
-        <div className="flex items-center justify-between px-3 py-2.5">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded-lg hover:bg-muted/50"
-            >
-              📎 Attach or drop media
-            </button>
-            {/* City input inline */}
-            <div className="flex items-center gap-1">
-              <input
-                value={newCity}
-                onChange={(e) => setNewCity(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && addCity()}
-                placeholder="+ Add city"
-                className="text-sm bg-transparent border-none outline-none placeholder:text-muted-foreground/60 w-24 text-foreground"
-              />
-              {newCity.trim() && (
-                <button
-                  type="button"
-                  onClick={addCity}
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
-          <Button
-            type="button"
-            variant="default"
-            size="sm"
-            onClick={() => setCurrentStep(1)}
-          >
-            Continue &rsaquo;
-          </Button>
+    <div
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className={cn(isDragging && "bg-primary/5 transition-colors")}
+    >
+      {/* Media cards */}
+      {preferences.media.length > 0 && (
+        <div className="px-6 pt-2 pb-3 flex flex-wrap gap-2">
+          {preferences.media.map((item, i) => (
+            <CompactMediaCard key={i} item={item} index={i} />
+          ))}
         </div>
+      )}
+
+      {/* Textarea */}
+      <textarea
+        value={preferences.additionalNotes}
+        onChange={(e) => updatePreferences({ additionalNotes: e.target.value })}
+        onPaste={handlePaste}
+        placeholder="Describe your dream trip, paste a TikTok / Reel / listing link, or drop in a screenshot..."
+        className="w-full min-h-[160px] px-6 py-4 bg-transparent text-base text-foreground placeholder:text-muted-foreground/60 resize-none focus:outline-none"
+      />
+
+      {/* City pills */}
+      {(preferences.cities.length > 0 || isIdentifyingLocations) && (
+        <div className="px-6 pb-3 flex flex-wrap gap-2 items-center">
+          {isIdentifyingLocations && (
+            <span className="flex items-center gap-1.5 text-xs text-primary">
+              <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+              </svg>
+              Identifying locations…
+            </span>
+          )}
+          {preferences.cities.map((city) => (
+            <span key={city} className="flex items-center gap-1 bg-primary/10 text-primary text-xs rounded-full px-3 py-1.5 font-medium">
+              <MapPin className="w-3 h-3 shrink-0" />
+              {city}
+              <button type="button" onClick={() => removeCity(city)} className="ml-1 opacity-60 hover:opacity-100">×</button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Separator */}
+      <div className="border-t border-border mx-0" />
+
+      {/* Bottom action row */}
+      <div className="flex items-center justify-between px-5 py-3">
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="flex items-center gap-2.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <span className="w-9 h-9 rounded-full border border-border flex items-center justify-center shrink-0">
+            <LinkIcon className="w-4 h-4" />
+          </span>
+          Attach or drop media
+        </button>
+        <Button
+          type="button"
+          variant="default"
+          size="default"
+          className="rounded-xl px-6 font-semibold"
+          onClick={() => setCurrentStep(1)}
+        >
+          Continue ›
+        </Button>
       </div>
 
       {/* Hidden inputs */}
