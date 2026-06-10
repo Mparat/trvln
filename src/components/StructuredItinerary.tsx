@@ -190,17 +190,17 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
       {activeTab === 'overview' && (
         <div className="space-y-8">
           {/* Summary pills + destination */}
-          <div>
+          <div className="bg-gradient-to-br from-primary/10 to-transparent rounded-2xl p-5">
             <div className="flex flex-wrap gap-2 mb-4">
-              <span className="flex items-center gap-1.5 text-sm text-foreground border border-border rounded-full px-3 py-1">
+              <span className="flex items-center gap-1.5 text-sm text-foreground bg-background/70 border border-border/60 rounded-full px-3 py-1">
                 <Clock className="w-3.5 h-3.5 text-muted-foreground" />
                 {data.summary.duration}
               </span>
-              <span className="flex items-center gap-1.5 text-sm text-foreground border border-border rounded-full px-3 py-1">
+              <span className="flex items-center gap-1.5 text-sm text-foreground bg-background/70 border border-border/60 rounded-full px-3 py-1">
                 <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
                 {data.summary.recommendedDates}
               </span>
-              <span className="flex items-center gap-1.5 text-sm font-semibold text-foreground border border-border rounded-full px-3 py-1">
+              <span className="flex items-center gap-1.5 text-sm font-semibold text-foreground bg-background/70 border border-border/60 rounded-full px-3 py-1">
                 <DollarSign className="w-3.5 h-3.5 text-muted-foreground" />
                 {data.summary.totalBudget}
               </span>
