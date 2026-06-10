@@ -716,6 +716,9 @@ STRICT RULES:
 - Every day must have exactly 3 periods: Morning, Afternoon, Evening
 - Each period must have EXACTLY 2 activities (no more, no fewer)
 - Include EXACTLY 2 dining options for ALL periods: Morning (breakfast), Afternoon (lunch), Evening (dinner). First must have "isPrimary": true (top pick), second must have "isPrimary": false (alternative). Both must be specific named restaurants — no generic descriptions.
+- DINING MUST BE UNIQUE: Every restaurant across the ENTIRE itinerary must be a DIFFERENT establishment. NEVER repeat the same restaurant in two periods or on two different days — not as a primary and not as an alternative. For an N-day trip you will name roughly N×6 distinct restaurants; if grounded research is limited, branch into nearby neighborhoods/towns to find fresh options rather than reusing one.
+- MATCH THE MEAL TO THE PERIOD: Morning dining must be breakfast spots (cafés, bakeries, brunch). Afternoon must be lunch spots. Evening must be dinner restaurants. Do not put a dinner restaurant in a morning slot.
+- VARY THE PRIMARY PICKS BY DAY: The "isPrimary": true restaurant for each period should feel distinct day-to-day in cuisine, vibe, and neighborhood — showcase the destination's range across the trip, don't anchor every day to the same kind of place.
 - Tags must only be from: transit, cultural, nature, hiking, beach, food, photo-worthy, walking, adventure, relaxation, shopping, nightlife
 - priority must be exactly "high", "medium", or "low"
 - Use real URLs from the grounded research — fallback to search URL patterns listed above
