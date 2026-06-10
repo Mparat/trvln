@@ -106,15 +106,17 @@ If there's a clearly better option available, suggest it. Otherwise, keep the cu
     }
 
     const systemPrompt = isStructured
-      ? `You are a travel itinerary editor. Replace the given activity with a better alternative based on user feedback.
+      ? `You are a travel itinerary editor. Replace ONE activity with a smarter alternative based on user feedback, keeping the day coherent.
 
 RULES:
 1. Return ONLY valid JSON with exactly two fields: {"name": "...", "description": "..."}
 2. "name" is a short activity title (3-6 words, no markdown)
 3. "description" is 1-2 plain prose sentences describing what to do — no markdown, no URLs, no bullet points
-4. The replacement must be a GENUINELY different activity — not a variation of the same one
-5. Choose something that fits the context: ${itemContext}
-6. Do not repeat any activity already in the full itinerary`
+4. The replacement must be GENUINELY different — never a rewording of the activity being replaced.
+5. NEVER suggest something that already appears anywhere in the plan (see "ALREADY IN THE PLAN"). Duplicates are the most common failure — double-check the name and the underlying place/experience against that list before answering.
+6. PREFER pulling from the "ALMOST ADDED / ALTERNATIVES" list when one of those fits the slot — those were vetted for this trip but left out. Only invent something new if none of them fit.
+7. FIT THE DAY: the replacement must suit this time slot (${itemContext}) and flow naturally with the other activities that day — similar or complementary type, in or near the same area, and easy to reach from the activities immediately before and after it (minimize backtracking and long transit).
+8. Respect the traveler's budget, interests, and adventure level, and honor any specific feedback comment.`
       : `You are a travel itinerary editor. You will be given a single itinerary item and feedback.
 Your job is to provide an updated version of JUST that one item.
 
@@ -122,7 +124,8 @@ RULES:
 1. Return ONLY the updated line item - no explanations, no extra text
 2. Keep the same format (bullet point, bold names, etc.)
 3. Match the style and detail level of the original
-4. Keep it contextually appropriate for: ${itemContext}`;
+4. Keep it contextually appropriate for: ${itemContext}
+5. Do NOT suggest anything already present elsewhere in the itinerary; prefer options from any "alternatives" / "almost added" section, and make sure it fits the location and flow of that day.`;
 
     // Build budget label
     const getBudgetLabel = (value?: number) => {
@@ -141,10 +144,72 @@ RULES:
       'adrenaline': 'Adrenaline junky'
     };
 
-    const userPrompt = `CURRENT ITEM:
-${itemContent}
+    // ── Extract richer context from the full itinerary so the replacement
+    //    avoids duplicates, can reuse vetted alternatives, and fits the day ──
+    let existingActivitiesBlock = '';
+    let alternativesBlock = '';
+    let sameDayBlock = '';
 
-FULL TRIP CONTEXT:
+    if (isStructured) {
+      try {
+        const itin = JSON.parse(fullItinerary);
+
+        // Every activity already in the plan (to prevent duplicate suggestions)
+        const allNames: string[] = [];
+        for (const day of itin.days ?? []) {
+          for (const period of day.periods ?? []) {
+            for (const act of period.activities ?? []) {
+              if (act?.name) allNames.push(act.name);
+            }
+          }
+        }
+        if (allNames.length) {
+          existingActivitiesBlock = allNames.map((n: string) => `- ${n}`).join('\n');
+        }
+
+        // "Almost added" alternatives generated with the itinerary
+        if (Array.isArray(itin.alternatives) && itin.alternatives.length) {
+          alternativesBlock = itin.alternatives
+            .map((a: any) => `- ${a.title}${a.description ? `: ${a.description}` : ''}`)
+            .join('\n');
+        }
+
+        // The specific day this item belongs to (for location & flow fit)
+        const dayMatch = itemContext.match(/Day\s+(\d+)/i);
+        if (dayMatch) {
+          const dayNum = parseInt(dayMatch[1], 10);
+          const day = (itin.days ?? []).find((d: any) => d.dayNumber === dayNum);
+          if (day) {
+            const lines: string[] = [`Day ${day.dayNumber}: ${day.title} — based in ${day.location}`];
+            if (day.transitNote) lines.push(`Transit note: ${day.transitNote}`);
+            for (const period of day.periods ?? []) {
+              const acts = (period.activities ?? [])
+                .map((a: any) => a.name)
+                .filter(Boolean);
+              if (acts.length) lines.push(`${period.label}: ${acts.join('; ')}`);
+            }
+            sameDayBlock = lines.join('\n');
+          }
+        }
+      } catch (e) {
+        console.error('Failed to parse fullItinerary for context:', e);
+      }
+    }
+
+    const userPrompt = `CURRENT ITEM (to replace):
+${itemContent}
+Slot: ${itemContext}
+
+${sameDayBlock ? `THIS DAY'S PLAN (keep the replacement coherent with these — type, area, and easy transit between them):
+${sameDayBlock}
+
+` : ''}${existingActivitiesBlock ? `ALREADY IN THE PLAN (do NOT suggest any of these or close equivalents):
+${existingActivitiesBlock}
+
+` : ''}${alternativesBlock ? `ALMOST ADDED / ALTERNATIVES (prefer one of these if it fits the slot and the day):
+${alternativesBlock}
+
+` : ''}FULL TRIP CONTEXT:
 - Destinations: ${tripPreferences.cities?.join(', ') || 'Not specified'}
 - Budget: ${getBudgetLabel(tripPreferences.budgetAccommodation)}
 - Atmosphere: ${tripPreferences.atmosphere?.join(', ') || 'Balanced'}
@@ -169,12 +234,12 @@ Provide the updated item (just the line, nothing else):`;
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: 'claude-sonnet-4-6',
         system: systemPrompt,
         messages: [
           { role: 'user', content: userPrompt }
         ],
-        max_tokens: 500,
+        max_tokens: 600,
         temperature: 0.7,
       }),
     });
