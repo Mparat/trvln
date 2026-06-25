@@ -349,6 +349,17 @@ const Index = () => {
 
   const currentItinerary = itineraries[activeVariant];
 
+  // First name for the personalized greeting (from OAuth metadata, else email local-part)
+  const firstName = (() => {
+    if (!user) return "";
+    const meta = user.user_metadata ?? {};
+    const fromName = (meta.full_name || meta.name || meta.given_name || "").trim().split(/\s+/)[0];
+    if (fromName) return fromName.charAt(0).toUpperCase() + fromName.slice(1);
+    const local = user.email?.split("@")[0] ?? "";
+    if (!local) return "";
+    return local.charAt(0).toUpperCase() + local.slice(1);
+  })();
+
   // ── Shared top nav ─────────────────────────────────────────────────────────
   const ResultsNav = () => (
     <div className="sticky top-0 z-30 bg-background/95 backdrop-blur-sm border-b border-border">
@@ -483,7 +494,7 @@ const Index = () => {
             <span className="font-display text-lg text-primary">Travellin'</span>
           </div>
           <h1 className="text-4xl md:text-6xl lg:text-7xl font-display font-bold text-center leading-tight text-balance max-w-4xl mx-auto bg-gradient-to-r from-foreground via-primary to-foreground bg-clip-text text-transparent">
-            Where to next?
+            {firstName ? `Where to next, ${firstName}?` : "Where to next?"}
           </h1>
           <p className="mt-6 text-lg md:text-xl text-muted-foreground text-center max-w-2xl mx-auto text-balance">
             Drop your saved TikToks, tell us your vibe, and let AI craft the perfect itinerary — complete with flights, hidden gems, and local favorites.
