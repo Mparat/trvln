@@ -364,32 +364,13 @@ const Index = () => {
           <img src="/favicon.svg" alt="Travellin'" className="w-5 h-5" />
           <span className="font-display text-sm text-primary">Travellin'</span>
         </div>
-        <div className="flex items-center gap-3">
-          {/* Save button */}
-          <button
-            onClick={handleSaveTrip}
-            disabled={isSaving || isGenerating}
-            className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
-            title={isSaved ? "Saved" : "Save trip"}
-          >
-            {isSaving ? (
-              <BookmarkLoader className="w-4 h-4 animate-spin" />
-            ) : isSaved ? (
-              <BookmarkCheck className="w-4 h-4 text-primary" />
-            ) : (
-              <Bookmark className="w-4 h-4" />
-            )}
-            <span className="hidden sm:inline">{isSaved ? "Saved" : "Save"}</span>
-          </button>
-          <span className="text-border">·</span>
-          <button
-            onClick={handleNewSearch}
-            className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            <span className="hidden sm:inline">New Search</span>
-          </button>
-        </div>
+        <button
+          onClick={handleNewSearch}
+          className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <Plus className="w-4 h-4" />
+          <span className="hidden sm:inline">New Search</span>
+        </button>
       </div>
     </div>
   );
@@ -428,9 +409,27 @@ const Index = () => {
               </div>
             )}
 
-            {/* Variant switcher */}
+            {/* Save + variant switcher */}
             {itineraries.length > 0 && (
-              <ItinerarySwitcher variants={itineraries} activeIndex={activeVariant} onSelect={setActiveVariant} loadingVariants={loadingVariants} />
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <button
+                    onClick={handleSaveTrip}
+                    disabled={isSaving}
+                    className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
+                  >
+                    {isSaving ? (
+                      <BookmarkLoader className="w-4 h-4 animate-spin" />
+                    ) : isSaved ? (
+                      <BookmarkCheck className="w-4 h-4 text-primary" />
+                    ) : (
+                      <Bookmark className="w-4 h-4" />
+                    )}
+                    {isSaved ? "Saved" : "Save trip"}
+                  </button>
+                </div>
+                <ItinerarySwitcher variants={itineraries} activeIndex={activeVariant} onSelect={setActiveVariant} loadingVariants={loadingVariants} />
+              </div>
             )}
 
             {/* Summary card — markdown fallback only */}
