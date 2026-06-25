@@ -59,6 +59,10 @@ const stripPlanningSection = (content: string): string => {
   return content;
 };
 
+// Stores a trip the user tried to save while logged out, so we can finish the
+// save once the sign-in redirect (Google / magic link) brings them back.
+const PENDING_SAVE_KEY = "trvln_pending_save";
+
 const Index = () => {
   const [view, setView] = useState<View>('input');
   const [preferences, setPreferences] = useState<TripPreferences>(defaultPreferences);
@@ -86,6 +90,25 @@ const Index = () => {
     });
     return () => subscription.unsubscribe();
   }, []);
+
+  // Finish a save that was interrupted by the sign-in redirect.
+  useEffect(() => {
+    if (!user) return;
+    let raw: string | null = null;
+    try { raw = localStorage.getItem(PENDING_SAVE_KEY); } catch { return; }
+    if (!raw) return;
+    try { localStorage.removeItem(PENDING_SAVE_KEY); } catch { /* ignore */ }
+    try {
+      const { itineraries: savedItins, preferences: savedPrefs } = JSON.parse(raw);
+      if (Array.isArray(savedItins) && savedItins.length > 0) {
+        setItineraries(savedItins);
+        if (savedPrefs) setPreferences(savedPrefs);
+        setActiveVariant(0);
+        setView('results');
+        performSave(user, savedItins, savedPrefs);
+      }
+    } catch { /* malformed — drop it */ }
+  }, [user, performSave]);
 
   const getHeaders = useCallback(() => ({
     "Content-Type": "application/json",
@@ -193,7 +216,14 @@ const Index = () => {
 
   const handleSaveTrip = useCallback(() => {
     if (isSaved || isSaving) return;
-    if (!user) { setShowAuthModal(true); return; }
+    if (!user) {
+      // Stash the trip so we can finish the save after the auth redirect returns.
+      try {
+        localStorage.setItem(PENDING_SAVE_KEY, JSON.stringify({ itineraries, preferences }));
+      } catch { /* quota — fall back to manual re-tap */ }
+      setShowAuthModal(true);
+      return;
+    }
     performSave(user, itineraries, preferences);
   }, [user, itineraries, preferences, isSaved, isSaving, performSave]);
 
