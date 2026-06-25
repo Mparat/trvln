@@ -91,25 +91,6 @@ const Index = () => {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Finish a save that was interrupted by the sign-in redirect.
-  useEffect(() => {
-    if (!user) return;
-    let raw: string | null = null;
-    try { raw = localStorage.getItem(PENDING_SAVE_KEY); } catch { return; }
-    if (!raw) return;
-    try { localStorage.removeItem(PENDING_SAVE_KEY); } catch { /* ignore */ }
-    try {
-      const { itineraries: savedItins, preferences: savedPrefs } = JSON.parse(raw);
-      if (Array.isArray(savedItins) && savedItins.length > 0) {
-        setItineraries(savedItins);
-        if (savedPrefs) setPreferences(savedPrefs);
-        setActiveVariant(0);
-        setView('results');
-        performSave(user, savedItins, savedPrefs);
-      }
-    } catch { /* malformed — drop it */ }
-  }, [user, performSave]);
-
   const getHeaders = useCallback(() => ({
     "Content-Type": "application/json",
     "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
@@ -213,6 +194,26 @@ const Index = () => {
       setIsSaving(false);
     }
   }, []);
+
+  // Finish a save that was interrupted by the sign-in redirect (Google / magic link).
+  // Declared after performSave so its dependency array doesn't hit the TDZ.
+  useEffect(() => {
+    if (!user) return;
+    let raw: string | null = null;
+    try { raw = localStorage.getItem(PENDING_SAVE_KEY); } catch { return; }
+    if (!raw) return;
+    try { localStorage.removeItem(PENDING_SAVE_KEY); } catch { /* ignore */ }
+    try {
+      const { itineraries: savedItins, preferences: savedPrefs } = JSON.parse(raw);
+      if (Array.isArray(savedItins) && savedItins.length > 0) {
+        setItineraries(savedItins);
+        if (savedPrefs) setPreferences(savedPrefs);
+        setActiveVariant(0);
+        setView('results');
+        performSave(user, savedItins, savedPrefs);
+      }
+    } catch { /* malformed — drop it */ }
+  }, [user, performSave]);
 
   const handleSaveTrip = useCallback(() => {
     if (isSaved || isSaving) return;
