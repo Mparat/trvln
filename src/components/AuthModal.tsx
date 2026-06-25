@@ -21,7 +21,7 @@ export function AuthModal({ open, onOpenChange }: AuthModalProps) {
     setGoogleLoading(true);
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: window.location.href },
+      options: { redirectTo: window.location.origin },
     });
     if (error) {
       toast({ title: "Couldn't sign in with Google", description: error.message, variant: "destructive" });
