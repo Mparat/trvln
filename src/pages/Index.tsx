@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Sparkles, MapPin, Plane, ScanSearch } from "lucide-react";
 import { TripInputForm, TripPreferences } from "@/components/TripInputForm";
 import { ItineraryOutput } from "@/components/ItineraryOutput";
@@ -6,6 +6,7 @@ import { TripSummaryCard } from "@/components/TripSummaryCard";
 import { ItinerarySwitcher } from "@/components/ItinerarySwitcher";
 import { toast } from "@/hooks/use-toast";
 import { ItineraryData } from "@/types/itinerary";
+import { supabase } from "@/integrations/supabase/client";
 
 const defaultPreferences: TripPreferences = {
   media: [],
@@ -94,6 +95,74 @@ const buildSessionSnapshot = (
   };
 };
 
+// A generation run in flight. Persisted so a reloaded/backgrounded tab can
+// reconnect and fetch the itineraries the server finished on its own.
+const PENDING_BATCH_KEY = 'trvln:pendingBatch:v1';
+
+type PendingJob = { jobId: string; themeId: string; name: string; emoji: string };
+type PendingBatch = { batchId: string; jobs: PendingJob[] };
+
+const loadPendingBatch = (): PendingBatch | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(PENDING_BATCH_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PendingBatch;
+    if (!parsed?.batchId || !Array.isArray(parsed.jobs) || parsed.jobs.length === 0) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const savePendingBatch = (batch: PendingBatch) => {
+  try {
+    window.localStorage.setItem(PENDING_BATCH_KEY, JSON.stringify(batch));
+  } catch { /* storage unavailable — reconnect just won't be possible */ }
+};
+
+const clearPendingBatch = () => {
+  try {
+    window.localStorage.removeItem(PENDING_BATCH_KEY);
+  } catch { /* ignore */ }
+};
+
+// Parse a completed itinerary's JSON, repairing truncated output if needed.
+const parseStructuredItinerary = (content: string): ItineraryData | undefined => {
+  try {
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return undefined;
+    const raw = jsonMatch[0];
+    try {
+      return JSON.parse(raw) as ItineraryData;
+    } catch {
+      // Repair truncated JSON using a proper bracket stack
+      const repairJson = (s: string): string => {
+        let t = s.trimEnd().replace(/,\s*$/, '');
+        const stack: string[] = [];
+        let inStr = false;
+        let esc = false;
+        for (const ch of t) {
+          if (esc) { esc = false; continue; }
+          if (ch === '\\' && inStr) { esc = true; continue; }
+          if (ch === '"') { inStr = !inStr; continue; }
+          if (inStr) continue;
+          if (ch === '{') stack.push('}');
+          else if (ch === '[') stack.push(']');
+          else if (ch === '}' || ch === ']') stack.pop();
+        }
+        if (inStr) t += '"';
+        while (stack.length > 0) t += stack.pop()!;
+        return t;
+      };
+      return JSON.parse(repairJson(raw)) as ItineraryData;
+    }
+  } catch (e) {
+    console.error('Failed to parse structured itinerary:', e);
+    return undefined;
+  }
+};
+
 // Strip the <itinerary_planning> thinking section from LLM output
 const stripPlanningSection = (content: string): string => {
   // Remove everything from start up to and including </itinerary_planning>
@@ -127,6 +196,10 @@ const Index = () => {
   const [isAnalyzingMedia, setIsAnalyzingMedia] = useState(false);
   const [isIdentifyingLocations, setIsIdentifyingLocations] = useState(false);
 
+  // Set when a fresh generation starts, to supersede any in-flight reconnect
+  // poll so it doesn't overwrite the new run's results.
+  const reconnectAbortRef = useRef(false);
+
   // Persist the session (preferences + itineraries) so returning to a
   // reloaded tab restores it. Debounced because itineraries update rapidly
   // while streaming. Transient loading flags are intentionally NOT persisted:
@@ -144,6 +217,83 @@ const Index = () => {
     }, 400);
     return () => window.clearTimeout(handle);
   }, [preferences, itineraries, activeVariant]);
+
+  // On mount, if a previous tab left a generation in flight (e.g. it was
+  // backgrounded and discarded on mobile), reconnect: poll the server for each
+  // job and fill in the itineraries it finished on its own. This is the payoff
+  // of persisting server-side — the work completes even without the tab.
+  useEffect(() => {
+    const pending = loadPendingBatch();
+    if (!pending) return;
+
+    reconnectAbortRef.current = false;
+
+    // Ensure the variants are visible (reconstruct from batch metadata if the
+    // restored session didn't include them) and show them as loading.
+    setItineraries(prev =>
+      prev.length > 0
+        ? prev
+        : pending.jobs.map(j => ({ id: j.themeId, name: j.name, emoji: j.emoji, content: "" }))
+    );
+    setLoadingVariants(prev => {
+      const next = { ...prev };
+      for (const j of pending.jobs) next[j.themeId] = true;
+      return next;
+    });
+    setIsGenerating(true);
+
+    const pollJob = async (job: PendingJob): Promise<boolean> => {
+      const deadline = Date.now() + 5 * 60 * 1000; // give the server up to 5 min
+      let consecutiveErrors = 0;
+      while (!reconnectAbortRef.current && Date.now() < deadline) {
+        const { data, error } = await supabase
+          .from('itinerary_jobs')
+          .select('status, content')
+          .eq('id', job.jobId)
+          .maybeSingle();
+
+        if (error) {
+          console.warn('Reconnect poll error:', error);
+          // Bail fast if the backend isn't reachable/deployed rather than
+          // spinning until the deadline.
+          if (++consecutiveErrors >= 3) break;
+        } else if (data?.status === 'complete' && data.content) {
+          const displayContent = stripPlanningSection(data.content);
+          const structuredData = parseStructuredItinerary(displayContent);
+          setItineraries(prev => prev.map(it =>
+            it.id === job.themeId ? { ...it, content: displayContent, structuredData } : it
+          ));
+          setLoadingVariants(prev => ({ ...prev, [job.themeId]: false }));
+          return true;
+        } else if (data?.status === 'error') {
+          setLoadingVariants(prev => ({ ...prev, [job.themeId]: false }));
+          return false;
+        } else {
+          consecutiveErrors = 0; // still generating — the query itself succeeded
+        }
+        await new Promise(resolve => setTimeout(resolve, 2500));
+      }
+      // Timed out or superseded — stop the spinner for this variant.
+      setLoadingVariants(prev => ({ ...prev, [job.themeId]: false }));
+      return false;
+    };
+
+    (async () => {
+      const results = await Promise.all(pending.jobs.map(pollJob));
+      if (reconnectAbortRef.current) return; // a new generation took over
+      setIsGenerating(false);
+      clearPendingBatch();
+      if (results.some(Boolean)) {
+        toast({
+          title: "Picked up where you left off",
+          description: "Your itineraries finished while the tab was in the background.",
+        });
+      }
+    })();
+
+    return () => { reconnectAbortRef.current = true; };
+    // Runs once on mount — reconnect is a one-time recovery step.
+  }, []);
 
   // Get headers for API calls
   const getHeaders = useCallback(() => {
@@ -192,12 +342,13 @@ const Index = () => {
   const generateSingleItinerary = useCallback(async (
     prefs: TripPreferences,
     themeVariant: { id: string; name: string; emoji: string },
-    onUpdate: (content: string) => void
+    onUpdate: (content: string) => void,
+    jobIds?: { jobId: string; batchId: string }
   ) => {
     const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-itinerary`, {
       method: "POST",
       headers: getHeaders(),
-      body: JSON.stringify({ preferences: prefs, themeVariant }),
+      body: JSON.stringify({ preferences: prefs, themeVariant, ...jobIds }),
     });
 
     if (!response.ok) {
@@ -276,6 +427,9 @@ const Index = () => {
       return;
     }
 
+    // Supersede any in-flight reconnect from a previous session.
+    reconnectAbortRef.current = true;
+
     setIsGenerating(true);
     setItineraries([]);
     setActiveVariant(0);
@@ -334,10 +488,22 @@ const Index = () => {
       setItineraries(themes.map(t => ({ ...t, content: "" })));
       setLoadingVariants(Object.fromEntries(themes.map(t => [t.id, true])));
 
+      // Assign each variant a job id and record the batch so that if this tab
+      // is backgrounded/discarded mid-generation, the server finishes and saves
+      // each itinerary and a reopened tab can reconnect and fetch the results.
+      const batchId = crypto.randomUUID();
+      const jobIdByTheme: Record<string, string> = Object.fromEntries(
+        themes.map(t => [t.id, crypto.randomUUID()])
+      );
+      savePendingBatch({
+        batchId,
+        jobs: themes.map(t => ({ jobId: jobIdByTheme[t.id], themeId: t.id, name: t.name, emoji: t.emoji })),
+      });
+
       // Generate all 3 variants in parallel (using effectivePreferences!)
       // Use a ref-like pattern to avoid stale state in concurrent updates
       const contentMap: Record<string, string> = {};
-      
+
       const promises = themes.map(async (theme) => {
         try {
           const content = await generateSingleItinerary(
@@ -353,44 +519,12 @@ const Index = () => {
                     : it
                 );
               });
-            }
+            },
+            { jobId: jobIdByTheme[theme.id], batchId }
           );
 
           // Parse the completed JSON response into structured data.
-          // If truncated, attempt to salvage by tracking open bracket stack.
-          let structuredData: ItineraryData | undefined;
-          try {
-            const jsonMatch = content.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-              let raw = jsonMatch[0];
-              try {
-                structuredData = JSON.parse(raw) as ItineraryData;
-              } catch {
-                // Repair truncated JSON using a proper bracket stack
-                const repairJson = (s: string): string => {
-                  let t = s.trimEnd().replace(/,\s*$/, '');
-                  const stack: string[] = [];
-                  let inStr = false;
-                  let esc = false;
-                  for (const ch of t) {
-                    if (esc) { esc = false; continue; }
-                    if (ch === '\\' && inStr) { esc = true; continue; }
-                    if (ch === '"') { inStr = !inStr; continue; }
-                    if (inStr) continue;
-                    if (ch === '{') stack.push('}');
-                    else if (ch === '[') stack.push(']');
-                    else if (ch === '}' || ch === ']') stack.pop();
-                  }
-                  if (inStr) t += '"';
-                  while (stack.length > 0) t += stack.pop()!;
-                  return t;
-                };
-                structuredData = JSON.parse(repairJson(raw)) as ItineraryData;
-              }
-            }
-          } catch (e) {
-            console.error(`Failed to parse structured itinerary for ${theme.id}:`, e);
-          }
+          const structuredData = parseStructuredItinerary(content);
 
           // Batch: set structuredData and mark loading done in same render cycle
           if (structuredData) {
@@ -408,6 +542,9 @@ const Index = () => {
       });
 
       await Promise.all(promises);
+
+      // All variants finished locally — no need to reconnect on next load.
+      clearPendingBatch();
 
       toast({
         title: "3 itineraries ready!",

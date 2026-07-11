@@ -1,11 +1,19 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // deploy-v3
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+// Service-role client for persisting job results. SUPABASE_URL and
+// SUPABASE_SERVICE_ROLE_KEY are injected into every edge function by Supabase.
+const supabaseAdmin = createClient(
+  Deno.env.get("SUPABASE_URL") ?? "",
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+);
 
 // Input validation schemas
 const PreferencesSchema = z.object({
@@ -45,6 +53,10 @@ const ThemeVariantSchema = z.object({
 const RequestSchema = z.object({
   preferences: PreferencesSchema,
   themeVariant: ThemeVariantSchema,
+  // Optional: when provided, the finished itinerary is persisted so a
+  // backgrounded/reloaded tab can reconnect and fetch the completed result.
+  jobId: z.string().uuid().optional(),
+  batchId: z.string().uuid().optional(),
 });
 
 
@@ -127,10 +139,26 @@ serve(async (req) => {
       );
     }
 
-    const { preferences, themeVariant } = validationResult.data;
+    const { preferences, themeVariant, jobId, batchId } = validationResult.data;
 
     console.log("Received preferences:", JSON.stringify(preferences, null, 2));
     console.log("Theme variant:", themeVariant || "default");
+
+    // Register the job as pending so a reconnecting client can poll its status.
+    if (jobId) {
+      const { error: jobError } = await supabaseAdmin.from("itinerary_jobs").upsert({
+        id: jobId,
+        batch_id: batchId ?? jobId,
+        theme_id: themeVariant?.id ?? null,
+        theme_name: themeVariant?.name ?? null,
+        theme_emoji: themeVariant?.emoji ?? null,
+        status: "pending",
+        content: null,
+        error: null,
+        updated_at: new Date().toISOString(),
+      });
+      if (jobError) console.error("Failed to register itinerary job:", jobError);
+    }
 
     const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
     if (!ANTHROPIC_API_KEY) {
@@ -808,9 +836,27 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
 
-    (async () => {
+    // The pump accumulates the full itinerary, forwards deltas to the client
+    // (best-effort — the tab may be gone), and persists the final result. It is
+    // registered with EdgeRuntime.waitUntil so it runs to completion and saves
+    // even after the client disconnects (e.g. a mobile tab is discarded).
+    const pump = (async () => {
       const reader = response.body!.getReader();
       let buffer = "";
+      let fullContent = "";
+      let clientConnected = true;
+
+      // Forward to the client only while it's still connected; once a write
+      // fails the tab is gone, so we stop forwarding but keep accumulating.
+      const forward = async (chunk: string) => {
+        if (!clientConnected) return;
+        try {
+          await writer.write(encoder.encode(chunk));
+        } catch {
+          clientConnected = false;
+        }
+      };
+
       try {
         while (true) {
           const { done, value } = await reader.read();
@@ -822,23 +868,51 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
             if (!line.startsWith("data: ")) continue;
             const jsonStr = line.slice(6).trim();
             if (jsonStr === "[DONE]") {
-              await writer.write(encoder.encode("data: [DONE]\n\n"));
+              await forward("data: [DONE]\n\n");
               continue;
             }
             try {
               const event = JSON.parse(jsonStr);
               if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+                fullContent += event.delta.text;
                 const openAiChunk = JSON.stringify({ choices: [{ delta: { content: event.delta.text } }] });
-                await writer.write(encoder.encode(`data: ${openAiChunk}\n\n`));
+                await forward(`data: ${openAiChunk}\n\n`);
               }
             } catch { /* skip malformed lines */ }
           }
         }
-        await writer.write(encoder.encode("data: [DONE]\n\n"));
+        await forward("data: [DONE]\n\n");
+
+        // Persist the finished itinerary for reconnecting clients.
+        if (jobId) {
+          const { error: saveError } = await supabaseAdmin.from("itinerary_jobs").update({
+            status: "complete",
+            content: fullContent,
+            updated_at: new Date().toISOString(),
+          }).eq("id", jobId);
+          if (saveError) console.error("Failed to persist itinerary result:", saveError);
+        }
+      } catch (streamError) {
+        console.error("Streaming/persist error:", streamError);
+        if (jobId) {
+          await supabaseAdmin.from("itinerary_jobs").update({
+            status: "error",
+            error: String(streamError).slice(0, 2000),
+            updated_at: new Date().toISOString(),
+          }).eq("id", jobId);
+        }
       } finally {
-        writer.close();
+        try { await writer.close(); } catch { /* already closed */ }
       }
     })();
+
+    // Keep the function alive until generation + persistence finish, even if the
+    // client disconnects. Guarded because EdgeRuntime is absent when running the
+    // function locally — there the pump still runs within the request lifetime.
+    try {
+      (globalThis as { EdgeRuntime?: { waitUntil: (p: Promise<unknown>) => void } })
+        .EdgeRuntime?.waitUntil(pump);
+    } catch { /* not available — pump runs inline */ }
 
     return new Response(readable, {
       headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
