@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Sparkles, MapPin, Plane, ScanSearch } from "lucide-react";
+import { Sparkles, MapPin, Plane, ScanSearch, RefreshCw } from "lucide-react";
 import { TripInputForm, TripPreferences } from "@/components/TripInputForm";
 import { ItineraryOutput } from "@/components/ItineraryOutput";
 import { TripSummaryCard } from "@/components/TripSummaryCard";
@@ -195,6 +195,9 @@ const Index = () => {
   const [isSuggestingThemes, setIsSuggestingThemes] = useState(false);
   const [isAnalyzingMedia, setIsAnalyzingMedia] = useState(false);
   const [isIdentifyingLocations, setIsIdentifyingLocations] = useState(false);
+  // True while we're fetching itineraries the server finished on its own
+  // after this tab was backgrounded/reloaded mid-generation.
+  const [isReconnecting, setIsReconnecting] = useState(false);
 
   // Set when a fresh generation starts, to supersede any in-flight reconnect
   // poll so it doesn't overwrite the new run's results.
@@ -241,6 +244,7 @@ const Index = () => {
       return next;
     });
     setIsGenerating(true);
+    setIsReconnecting(true);
 
     const pollJob = async (job: PendingJob): Promise<boolean> => {
       const deadline = Date.now() + 5 * 60 * 1000; // give the server up to 5 min
@@ -282,6 +286,7 @@ const Index = () => {
       const results = await Promise.all(pending.jobs.map(pollJob));
       if (reconnectAbortRef.current) return; // a new generation took over
       setIsGenerating(false);
+      setIsReconnecting(false);
       clearPendingBatch();
       if (results.some(Boolean)) {
         toast({
@@ -429,6 +434,7 @@ const Index = () => {
 
     // Supersede any in-flight reconnect from a previous session.
     reconnectAbortRef.current = true;
+    setIsReconnecting(false);
 
     setIsGenerating(true);
     setItineraries([]);
@@ -727,7 +733,23 @@ const Index = () => {
                   </div>
                 </div>
               )}
-              
+
+              {/* Reconnect indicator — the server kept generating while this
+                  tab was away; we're pulling in the finished results. */}
+              {isReconnecting && (
+                <div className="bg-card rounded-2xl shadow-medium p-6 flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                    <RefreshCw className="w-5 h-5 text-primary animate-spin" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-foreground">Finishing your itineraries...</p>
+                    <p className="text-sm text-muted-foreground">
+                      Generation kept running while you were away — picking up the results now
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Itinerary Switcher */}
               {itineraries.length > 0 && (
                 <ItinerarySwitcher
