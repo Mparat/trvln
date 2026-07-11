@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Sparkles, MapPin, Plane, ScanSearch } from "lucide-react";
 import { TripInputForm, TripPreferences } from "@/components/TripInputForm";
 import { ItineraryOutput } from "@/components/ItineraryOutput";
@@ -43,6 +43,57 @@ type IdentifiedDestination = {
   reasoning: string;
 };
 
+// Persist the in-progress session so a backgrounded/reloaded tab (common on
+// mobile browsers, which discard inactive tabs) restores instead of clearing.
+const SESSION_STORAGE_KEY = 'trvln:session:v1';
+
+type PersistedSession = {
+  preferences: TripPreferences;
+  itineraries: ItineraryVariant[];
+  activeVariant: number;
+};
+
+const loadPersistedSession = (): PersistedSession | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedSession;
+    if (!parsed || typeof parsed !== 'object' || !parsed.preferences) return null;
+    // Date fields serialize to ISO strings — reconstruct them.
+    if (parsed.preferences.startDate) {
+      parsed.preferences.startDate = new Date(parsed.preferences.startDate);
+    }
+    if (parsed.preferences.endDate) {
+      parsed.preferences.endDate = new Date(parsed.preferences.endDate);
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+// Build a snapshot safe to JSON-serialize: drop File objects and blob: previews
+// (both invalid after a reload) while keeping durable public storage URLs.
+const buildSessionSnapshot = (
+  preferences: TripPreferences,
+  itineraries: ItineraryVariant[],
+  activeVariant: number,
+): PersistedSession => {
+  const media = preferences.media
+    .filter(m => m.url) // only fully-uploaded media survives a reload
+    .map(({ file, preview, ...rest }) => ({
+      ...rest,
+      preview: preview && !preview.startsWith('blob:') ? preview : rest.url,
+    }));
+
+  return {
+    preferences: { ...preferences, media },
+    itineraries,
+    activeVariant,
+  };
+};
+
 // Strip the <itinerary_planning> thinking section from LLM output
 const stripPlanningSection = (content: string): string => {
   // Remove everything from start up to and including </itinerary_planning>
@@ -61,14 +112,38 @@ const stripPlanningSection = (content: string): string => {
 };
 
 const Index = () => {
-  const [preferences, setPreferences] = useState<TripPreferences>(defaultPreferences);
-  const [itineraries, setItineraries] = useState<ItineraryVariant[]>([]);
-  const [activeVariant, setActiveVariant] = useState(0);
+  const [preferences, setPreferences] = useState<TripPreferences>(
+    () => loadPersistedSession()?.preferences ?? defaultPreferences
+  );
+  const [itineraries, setItineraries] = useState<ItineraryVariant[]>(
+    () => loadPersistedSession()?.itineraries ?? []
+  );
+  const [activeVariant, setActiveVariant] = useState(
+    () => loadPersistedSession()?.activeVariant ?? 0
+  );
   const [isGenerating, setIsGenerating] = useState(false);
   const [loadingVariants, setLoadingVariants] = useState<Record<string, boolean>>({});
   const [isSuggestingThemes, setIsSuggestingThemes] = useState(false);
   const [isAnalyzingMedia, setIsAnalyzingMedia] = useState(false);
   const [isIdentifyingLocations, setIsIdentifyingLocations] = useState(false);
+
+  // Persist the session (preferences + itineraries) so returning to a
+  // reloaded tab restores it. Debounced because itineraries update rapidly
+  // while streaming. Transient loading flags are intentionally NOT persisted:
+  // the in-flight request dies on reload, so any partial itinerary is
+  // restored as-is rather than left spinning forever.
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      try {
+        const snapshot = buildSessionSnapshot(preferences, itineraries, activeVariant);
+        window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(snapshot));
+      } catch (error) {
+        // Storage may be full or unavailable (private mode) — non-fatal.
+        console.warn('Failed to persist session:', error);
+      }
+    }, 400);
+    return () => window.clearTimeout(handle);
+  }, [preferences, itineraries, activeVariant]);
 
   // Get headers for API calls
   const getHeaders = useCallback(() => {
