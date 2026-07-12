@@ -6,8 +6,10 @@ on:
       - main
       - master
       - claude/trusting-keller-ORjYy
+      - claude/friendly-maxwell-h0637h
     paths:
       - 'supabase/functions/**'
+      - 'supabase/migrations/**'
   workflow_dispatch:
 
 jobs:
@@ -19,6 +21,23 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: latest
+
+      # Migrations first so the functions never run against a missing table.
+      # Requires the SUPABASE_DB_PASSWORD secret (the database password from
+      # Supabase dashboard → Project Settings → Database); skips with a
+      # warning if it isn't configured.
+      - name: Push database migrations
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          if [ -z "$SUPABASE_DB_PASSWORD" ]; then
+            echo "::warning::SUPABASE_DB_PASSWORD secret not set — skipping db push. Run 'supabase db push' manually to apply migrations."
+            exit 0
+          fi
+          supabase link --project-ref "$PROJECT_REF"
+          supabase db push
 
       - name: Deploy generate-itinerary
         run: |
