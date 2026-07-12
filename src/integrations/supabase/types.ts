@@ -14,7 +14,45 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      itinerary_jobs: {
+        Row: {
+          id: string
+          batch_id: string
+          theme_id: string | null
+          theme_name: string | null
+          theme_emoji: string | null
+          status: string
+          content: string | null
+          error: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id: string
+          batch_id: string
+          theme_id?: string | null
+          theme_name?: string | null
+          theme_emoji?: string | null
+          status?: string
+          content?: string | null
+          error?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          batch_id?: string
+          theme_id?: string | null
+          theme_name?: string | null
+          theme_emoji?: string | null
+          status?: string
+          content?: string | null
+          error?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
