@@ -24,6 +24,18 @@ export interface MediaDropZoneHandle {
   addUrl: (url: string) => Promise<void>;
 }
 
+// Pull every TikTok/Instagram link out of free-form text (multiple links may be
+// separated by spaces, commas, newlines — or nothing at all when a paste into a
+// single-line input collapses line breaks and concatenates URLs).
+const extractSocialUrls = (text: string): string[] => {
+  const spaced = text.replace(/https?:\/\//g, ' $&');
+  const matches = spaced.match(/https?:\/\/[^\s,]+/g) || [];
+  const urls = matches
+    .map(u => u.replace(/[.,;)\]]+$/, '')) // strip trailing punctuation
+    .filter(u => u.includes('tiktok.com') || u.includes('instagram.com'));
+  return [...new Set(urls)];
+};
+
 export const MediaDropZone = forwardRef<MediaDropZoneHandle, MediaDropZoneProps & { compact?: boolean }>(
   ({ media, onMediaChange, onFramesReady, compact }, ref) => {
   const [isDragging, setIsDragging] = useState(false);
@@ -170,24 +182,24 @@ export const MediaDropZone = forwardRef<MediaDropZoneHandle, MediaDropZoneProps 
     });
   };
 
-  const handleSocialUrl = useCallback(async (urlOverride?: string) => {
-    const url = (urlOverride ?? socialUrl).trim();
-    if (!url) return;
+  const handleSocialUrl = useCallback(async (textOverride?: string) => {
+    const text = (textOverride ?? socialUrl).trim();
+    if (!text) return;
 
-    const isTikTok = url.includes('tiktok.com');
-    const isInstagram = url.includes('instagram.com');
-    if (!isTikTok && !isInstagram) {
+    const urls = extractSocialUrls(text);
+    if (urls.length === 0) {
       toast({ title: "Unsupported URL", description: "Only TikTok and Instagram links are supported", variant: "destructive" });
       return;
     }
 
     setIsExtractingUrl(true);
-    const placeholder: MediaItem = { type: 'video', uploading: true };
-    const mediaWithPlaceholder = [...media, placeholder];
-    const placeholderIndex = media.length;
-    onMediaChange(mediaWithPlaceholder);
+    const placeholders: MediaItem[] = urls.map(() => ({ type: 'video', uploading: true }));
+    const baseIndex = media.length;
+    const mediaWithPlaceholders = [...media, ...placeholders];
+    onMediaChange(mediaWithPlaceholders);
 
-    try {
+    // Import every link in parallel; each resolves to its frames or an error
+    const results = await Promise.allSettled(urls.map(async (url) => {
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/extract-social-video`,
         {
@@ -203,24 +215,44 @@ export const MediaDropZone = forwardRef<MediaDropZoneHandle, MediaDropZoneProps 
       // Server returns frames directly — no client-side extraction needed
       const frameUrls: string[] = data.frameUrls || [];
       const thumbnailUrl: string = data.thumbnailUrl || frameUrls[0] || "";
+      return { thumbnailUrl, frameUrls };
+    }));
 
-      const completed = mediaWithPlaceholder.map((item, idx) =>
-        idx === placeholderIndex
-          ? { type: 'video' as const, url: thumbnailUrl, preview: thumbnailUrl, uploading: false, frameUrls: frameUrls.length > 0 ? frameUrls : undefined }
-          : item
-      );
-      onMediaChange(completed);
-      if (frameUrls.length > 0) onFramesReady?.(frameUrls);
+    // Replace each placeholder with its result; drop the ones that failed
+    const allFrameUrls: string[] = [];
+    let firstError: string | null = null;
+    const completed: (MediaItem | null)[] = mediaWithPlaceholders.map((item, idx) => {
+      const resultIndex = idx - baseIndex;
+      if (resultIndex < 0 || resultIndex >= urls.length) return item;
+      const result = results[resultIndex];
+      if (result.status === 'rejected') {
+        if (!firstError) firstError = result.reason instanceof Error ? result.reason.message : "Please try again";
+        return null;
+      }
+      const { thumbnailUrl, frameUrls } = result.value;
+      allFrameUrls.push(...frameUrls);
+      return { type: 'video' as const, url: thumbnailUrl, preview: thumbnailUrl, uploading: false, frameUrls: frameUrls.length > 0 ? frameUrls : undefined };
+    });
+    onMediaChange(completed.filter((m): m is MediaItem => m !== null));
 
-      if (!urlOverride) setSocialUrl("");
-      toast({ title: "Video added!", description: `${isTikTok ? "TikTok" : "Instagram"} video imported successfully` });
-    } catch (error) {
-      onMediaChange(mediaWithPlaceholder.filter((_, idx) => idx !== placeholderIndex));
-      toast({ title: "Couldn't import video", description: error instanceof Error ? error.message : "Please try again", variant: "destructive" });
-    } finally {
-      setIsExtractingUrl(false);
+    // One combined location-analysis pass over all imported videos' frames
+    if (allFrameUrls.length > 0) onFramesReady?.(allFrameUrls);
+
+    const succeeded = results.filter(r => r.status === 'fulfilled').length;
+    const failed = urls.length - succeeded;
+    if (succeeded > 0) {
+      if (!textOverride) setSocialUrl("");
+      toast({
+        title: succeeded === 1 ? "Video added!" : `${succeeded} videos added!`,
+        description: failed > 0
+          ? `${failed} link${failed > 1 ? 's' : ''} couldn't be imported`
+          : `Imported successfully — finding locations...`,
+      });
+    } else {
+      toast({ title: "Couldn't import video", description: firstError ?? "Please try again", variant: "destructive" });
     }
-  }, [socialUrl, media, onMediaChange]);
+    setIsExtractingUrl(false);
+  }, [socialUrl, media, onMediaChange, onFramesReady]);
 
   const processFiles = useCallback(async (files: File[]) => {
     // Create initial media items with uploading state
@@ -404,7 +436,16 @@ export const MediaDropZone = forwardRef<MediaDropZoneHandle, MediaDropZoneProps 
             value={socialUrl}
             onChange={e => setSocialUrl(e.target.value)}
             onKeyDown={e => e.key === "Enter" && handleSocialUrl()}
-            placeholder="Paste a TikTok or Instagram link..."
+            onPaste={e => {
+              // Parse from the clipboard directly: single-line inputs collapse
+              // newlines, which would concatenate multiple pasted links
+              const text = e.clipboardData.getData('text');
+              if (extractSocialUrls(text).length > 1) {
+                e.preventDefault();
+                handleSocialUrl(text);
+              }
+            }}
+            placeholder="Paste TikTok or Instagram links..."
             className="w-full pl-9 pr-4 py-2.5 text-sm rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
             disabled={isExtractingUrl}
           />

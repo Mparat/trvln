@@ -342,7 +342,7 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
         value={preferences.additionalNotes}
         onChange={(e) => updatePreferences({ additionalNotes: e.target.value })}
         onPaste={handlePaste}
-        placeholder="Describe your dream trip, paste a TikTok / Reel / listing link, or drop in a screenshot..."
+        placeholder="Describe your dream trip, paste TikTok / Reel / listing links, or drop in a screenshot..."
         className="w-full h-[120px] px-6 py-4 bg-transparent text-base text-foreground placeholder:text-muted-foreground/60 resize-none focus:outline-none"
       />
 

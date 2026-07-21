@@ -311,11 +311,12 @@ const Index = () => {
   // Analyze inspiration media for location recognition
   const analyzeInspiration = useCallback(async (mediaUrls: string[]): Promise<IdentifiedDestination[]> => {
     if (mediaUrls.length === 0) return [];
-    
+
     const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-inspiration`, {
       method: "POST",
       headers: getHeaders(),
-      body: JSON.stringify({ mediaUrls }),
+      // The edge function accepts at most 20 images per call
+      body: JSON.stringify({ mediaUrls: mediaUrls.slice(0, 20) }),
     });
 
     if (!response.ok) {
