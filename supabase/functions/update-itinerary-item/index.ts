@@ -41,7 +41,7 @@ const FeedbackSchema = z.object({
 const RequestSchema = z.object({
   itemContent: z.string().min(1).max(2000),
   itemContext: z.string().max(500),
-  itemType: z.enum(['structured-activity', 'markdown-line']).optional().default('markdown-line'),
+  itemType: z.enum(['structured-activity', 'structured-dining', 'markdown-line']).optional().default('markdown-line'),
   feedback: FeedbackSchema,
   fullItinerary: z.string().max(100000),
   tripPreferences: TripPreferencesSchema,
@@ -74,7 +74,8 @@ serve(async (req) => {
     }
 
     const { itemContent, itemContext, itemType, feedback, fullItinerary, tripPreferences } = validationResult.data;
-    const isStructured = itemType === 'structured-activity';
+    const isDining = itemType === 'structured-dining';
+    const isStructured = itemType === 'structured-activity' || isDining;
     console.log('Point update request:', { itemContent, itemContext, feedback });
 
     const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
@@ -105,16 +106,28 @@ ${feedback.comment ? `Their note: "${feedback.comment}"` : ''}
 If there's a clearly better option available, suggest it. Otherwise, keep the current recommendation but maybe enhance the description.`;
     }
 
-    const systemPrompt = isStructured
-      ? `You are a travel itinerary editor. Replace the given activity with a better alternative based on user feedback.
+    const systemPrompt = isDining
+      ? `You are a travel itinerary editor. Replace ONE restaurant recommendation with a better one based on user feedback.
+
+RULES:
+1. Return ONLY valid JSON with exactly two fields: {"name": "...", "description": "..."}
+2. "name" is the restaurant's real, specific name (no markdown). "description" is 1 short plain-prose sentence on what to order or the vibe — no markdown, no URLs.
+3. Suggest a real, specific, different establishment — never a reworded version of the one being replaced.
+4. Do NOT suggest the OTHER restaurant already recommended for this same meal slot (see "OTHER OPTION THIS SLOT"). It is perfectly fine to suggest a place that appears on a different day — only this one meal slot must stay distinct.
+5. Match the meal period in "${itemContext}" (breakfast/café for Morning, lunch for Afternoon, dinner for Evening) and pick somewhere near that period's activities so it's convenient.
+6. Respect the traveler's budget and food preferences, and honor any specific feedback comment.`
+      : isStructured
+      ? `You are a travel itinerary editor. Replace ONE activity with a smarter alternative based on user feedback, keeping the day coherent.
 
 RULES:
 1. Return ONLY valid JSON with exactly two fields: {"name": "...", "description": "..."}
 2. "name" is a short activity title (3-6 words, no markdown)
 3. "description" is 1-2 plain prose sentences describing what to do — no markdown, no URLs, no bullet points
-4. The replacement must be a GENUINELY different activity — not a variation of the same one
-5. Choose something that fits the context: ${itemContext}
-6. Do not repeat any activity already in the full itinerary`
+4. The replacement must be GENUINELY different — never a rewording of the activity being replaced.
+5. NEVER suggest something that already appears anywhere in the plan (see "ALREADY IN THE PLAN"). Duplicates are the most common failure — double-check the name and the underlying place/experience against that list before answering.
+6. PREFER pulling from the "ALMOST ADDED / ALTERNATIVES" list when one of those fits the slot — those were vetted for this trip but left out. Only invent something new if none of them fit.
+7. FIT THE DAY: the replacement must suit this time slot (${itemContext}) and flow naturally with the other activities that day — similar or complementary type, in or near the same area, and easy to reach from the activities immediately before and after it (minimize backtracking and long transit).
+8. Respect the traveler's budget, interests, and adventure level, and honor any specific feedback comment.`
       : `You are a travel itinerary editor. You will be given a single itinerary item and feedback.
 Your job is to provide an updated version of JUST that one item.
 
@@ -122,7 +135,8 @@ RULES:
 1. Return ONLY the updated line item - no explanations, no extra text
 2. Keep the same format (bullet point, bold names, etc.)
 3. Match the style and detail level of the original
-4. Keep it contextually appropriate for: ${itemContext}`;
+4. Keep it contextually appropriate for: ${itemContext}
+5. Do NOT suggest anything already present elsewhere in the itinerary; prefer options from any "alternatives" / "almost added" section, and make sure it fits the location and flow of that day.`;
 
     // Build budget label
     const getBudgetLabel = (value?: number) => {
@@ -141,10 +155,100 @@ RULES:
       'adrenaline': 'Adrenaline junky'
     };
 
-    const userPrompt = `CURRENT ITEM:
-${itemContent}
+    // ── Extract just enough context from the full itinerary so the replacement
+    //    avoids duplicates, can reuse vetted alternatives, and fits the day.
+    //    Only short names are passed (not full descriptions) to keep latency low.
+    let existingActivitiesBlock = '';
+    let alternativesBlock = '';
+    let sameDayBlock = '';
+    let otherDiningBlock = '';
+    let sameSlotActivitiesBlock = '';
 
-FULL TRIP CONTEXT:
+    if (isStructured) {
+      try {
+        const itin = JSON.parse(fullItinerary);
+        const dayMatch = itemContext.match(/Day\s+(\d+)/i);
+        const periodMatch = itemContext.match(/(Morning|Afternoon|Evening)/i);
+        const dayNum = dayMatch ? parseInt(dayMatch[1], 10) : null;
+        const day = dayNum != null ? (itin.days ?? []).find((d: any) => d.dayNumber === dayNum) : null;
+
+        if (isDining) {
+          // Dining only needs the SAME meal slot's other option (dedup is per-period;
+          // repeats across days are fine) plus that slot's activities for proximity.
+          const period = day && periodMatch
+            ? (day.periods ?? []).find((p: any) => (p.label || '').toLowerCase() === periodMatch[1].toLowerCase())
+            : null;
+          if (period) {
+            const otherDining = (period.dining ?? [])
+              .map((d: any) => d?.name)
+              .filter(Boolean);
+            if (otherDining.length) {
+              otherDiningBlock = otherDining.map((n: string) => `- ${n}`).join('\n');
+            }
+            const acts = (period.activities ?? []).map((a: any) => a.name).filter(Boolean);
+            if (acts.length || day.location) {
+              sameSlotActivitiesBlock = [
+                day.location ? `Area: ${day.location}` : '',
+                acts.length ? `Activities this slot: ${acts.join('; ')}` : '',
+              ].filter(Boolean).join('\n');
+            }
+          }
+        } else {
+          // Activities: avoid duplicates across the whole trip, reuse alternatives,
+          // and fit the day's flow.
+          const allNames: string[] = [];
+          for (const d of itin.days ?? []) {
+            for (const period of d.periods ?? []) {
+              for (const act of period.activities ?? []) {
+                if (act?.name) allNames.push(act.name);
+              }
+            }
+          }
+          if (allNames.length) {
+            existingActivitiesBlock = allNames.map((n: string) => `- ${n}`).join('\n');
+          }
+
+          if (Array.isArray(itin.alternatives) && itin.alternatives.length) {
+            alternativesBlock = itin.alternatives
+              .map((a: any) => `- ${a.title}${a.description ? `: ${a.description}` : ''}`)
+              .join('\n');
+          }
+
+          if (day) {
+            const lines: string[] = [`Day ${day.dayNumber}: ${day.title} — based in ${day.location}`];
+            if (day.transitNote) lines.push(`Transit note: ${day.transitNote}`);
+            for (const period of day.periods ?? []) {
+              const acts = (period.activities ?? []).map((a: any) => a.name).filter(Boolean);
+              if (acts.length) lines.push(`${period.label}: ${acts.join('; ')}`);
+            }
+            sameDayBlock = lines.join('\n');
+          }
+        }
+      } catch (e) {
+        console.error('Failed to parse fullItinerary for context:', e);
+      }
+    }
+
+    const userPrompt = `CURRENT ITEM (to replace):
+${itemContent}
+Slot: ${itemContext}
+
+${sameSlotActivitiesBlock ? `THIS MEAL SLOT (pick somewhere convenient to these):
+${sameSlotActivitiesBlock}
+
+` : ''}${otherDiningBlock ? `OTHER OPTION THIS SLOT (do NOT suggest this one — it's the same meal slot):
+${otherDiningBlock}
+
+` : ''}${sameDayBlock ? `THIS DAY'S PLAN (keep the replacement coherent with these — type, area, and easy transit between them):
+${sameDayBlock}
+
+` : ''}${existingActivitiesBlock ? `ALREADY IN THE PLAN (do NOT suggest any of these or close equivalents):
+${existingActivitiesBlock}
+
+` : ''}${alternativesBlock ? `ALMOST ADDED / ALTERNATIVES (prefer one of these if it fits the slot and the day):
+${alternativesBlock}
+
+` : ''}FULL TRIP CONTEXT:
 - Destinations: ${tripPreferences.cities?.join(', ') || 'Not specified'}
 - Budget: ${getBudgetLabel(tripPreferences.budgetAccommodation)}
 - Atmosphere: ${tripPreferences.atmosphere?.join(', ') || 'Balanced'}
@@ -169,7 +273,7 @@ Provide the updated item (just the line, nothing else):`;
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: 'claude-haiku-4-5',
         system: systemPrompt,
         messages: [
           { role: 'user', content: userPrompt }

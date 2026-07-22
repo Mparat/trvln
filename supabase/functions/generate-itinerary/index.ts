@@ -305,16 +305,81 @@ This itinerary MUST embody the "${themeVariant.name}" theme throughout.
 - The theme should influence: which neighborhoods to visit, which activities to prioritize, dining choices, timing of activities, and overall vibe`;
     }
 
+    // ============================================
+    // DESTINATION RESOLUTION PASS
+    // When no explicit city is given, ask Claude Haiku to pick the best
+    // match before Perplexity runs, so all research is destination-specific.
+    // ============================================
+    let resolvedCities: string[] = [...(cities ?? [])];
+    let destinationWasResolved = false;
+
+    if (resolvedCities.length === 0) {
+      console.log("No explicit cities — resolving destination from preferences...");
+      try {
+        const resolutionPrompt = `You are a travel destination expert. Based on the traveler's preferences below, choose 1-2 specific destination cities or regions that best fit. Be decisive and concrete — not "Southeast Asia" but "Chiang Mai, Thailand".
+
+Preferences:
+- What they described: ${additionalNotes || "Not specified"}
+- Atmosphere: ${atmosphere?.join(", ") || "no preference"}
+- Interests: ${interests?.join(", ") || "no preference"}
+- Adventure level: ${adventureLevel || "active"}
+- Food preferences: ${foodDrink?.join(", ") || "no preference"}
+- Accommodation budget: ${budgetInfo.label} (${budgetInfo.accommodation})
+- Flight budget: ${noFlight ? "no flight needed (local/ground trip)" : flightBudget + " round trip"}
+- Departing from: ${departureCity || "unknown"}
+- Travel timing: ${dateContext}
+- Duration: ${durationContext}
+
+Respond with ONLY a JSON array of 1-2 destination strings. Examples:
+["Lisbon, Portugal"]
+["Chiang Mai, Thailand", "Bangkok, Thailand"]
+
+No explanation. Just the JSON array.`;
+
+        const resolutionResponse = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "claude-haiku-4-5",
+            messages: [{ role: "user", content: resolutionPrompt }],
+            max_tokens: 100,
+          }),
+        });
+
+        if (resolutionResponse.ok) {
+          const resolutionData = await resolutionResponse.json();
+          const resolutionText = resolutionData.content?.[0]?.text?.trim() ?? "";
+          // Strip any accidental code fences
+          const cleaned = resolutionText.replace(/```[a-z]*\n?/gi, "").trim();
+          const parsed = JSON.parse(cleaned);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            resolvedCities = parsed.filter((d: unknown) => typeof d === "string");
+            destinationWasResolved = true;
+            console.log("Resolved destinations:", resolvedCities);
+          }
+        }
+      } catch (err) {
+        console.error("Destination resolution failed — proceeding without explicit cities:", err);
+      }
+    }
+
     // Build inspiration context
     let inspirationContext = "";
-    if (cities?.length > 0) {
-      inspirationContext = cities.join(", ");
+    if (resolvedCities.length > 0) {
+      inspirationContext = destinationWasResolved
+        ? `${resolvedCities.join(", ")} (suggested based on your preferences)`
+        : resolvedCities.join(", ");
     }
     if (media?.length > 0) {
       inspirationContext += inspirationContext ? ` (plus ${media.length} inspiration image(s))` : `${media.length} inspiration image(s)`;
     }
-    
+
     console.log("Cities from preferences:", cities);
+    console.log("Resolved cities:", resolvedCities);
     console.log("Inspiration context:", inspirationContext);
 
     // Build flight context
@@ -328,8 +393,11 @@ ${departureCity ? `- Departing from: ${departureCity}` : ""}`;
     }
 
     const userInputsBlock = `
-**INSPIRATION (must-visit destinations)**: ${inspirationContext || "No specific destinations - suggest based on preferences"}
-**Note: The destinations listed above MUST be included in the itinerary. You may also suggest additional nearby destinations if appropriate for the trip duration and interests.**
+**INSPIRATION (destinations)**: ${inspirationContext || "No specific destinations — use preferences to guide choice"}
+${destinationWasResolved
+  ? "**Note: Destination was AI-suggested from the user's preferences. You may refine or replace it if a better fit exists, but stay consistent with the spirit of the request.**"
+  : "**Note: The destinations listed above MUST be included in the itinerary. You may also suggest additional nearby destinations if appropriate for the trip duration and interests.**"
+}
 
 **LOGISTICS**:
 - Budget (Accommodation): ${budgetInfo.label} (${budgetInfo.accommodation}, ~${budgetInfo.daily} total daily)
@@ -356,15 +424,15 @@ ${additionalNotes || "None provided"}
     if (PERPLEXITY_API_KEY) {
       console.log("Starting Perplexity grounded research...");
       
-      const destinationStr = cities?.length > 0 ? cities.join(', ') : 'popular travel destinations';
-      const primaryCity = cities?.[0] || 'the destination';
+      const destinationStr = resolvedCities.length > 0 ? resolvedCities.join(', ') : 'popular travel destinations';
+      const primaryCity = resolvedCities[0] || 'the destination';
       const interestsStr = interests?.length > 0 ? interests.join(', ') : 'general sightseeing';
       const foodStr = foodDrink?.length > 0 ? foodDrink.join(', ') : 'local cuisine';
       const themeStr = themeVariant?.name || '';
-      
+
       // Determine trip length for context-aware queries
       const tripDaysNum = durationDays || 7;
-      const isSingleCity = cities?.length === 1;
+      const isSingleCity = resolvedCities.length === 1;
       const isLongTrip = tripDaysNum >= 7;
       
       // Build focused search queries based on user preferences
@@ -372,8 +440,8 @@ ${additionalNotes || "None provided"}
         // Query 1: Activities and things to do
         `Best things to do in ${destinationStr} for ${interestsStr} travelers. Include specific activity names, tour recommendations, must-visit attractions, hidden gems, and neighborhoods to explore.${themeStr ? ` Focus on ${themeStr} experiences.` : ''} ${budgetInfo.label} budget level.`,
 
-        // Query 2: Restaurants and food scene
-        `Best ${foodStr} restaurants and food experiences in ${destinationStr}. Include specific restaurant names, neighborhoods known for food, price ranges, and local specialties. ${budgetInfo.label} budget.`,
+        // Query 2: Restaurants and food scene — emphasise currently operating
+        `Best ${foodStr} restaurants currently open in ${destinationStr} as of ${new Date().getFullYear()}. Only include establishments confirmed to be actively operating with recent positive reviews. Include specific restaurant names, neighborhoods, price ranges, and what they are known for. Exclude any restaurants that have closed, are temporarily closed, or have uncertain operating status. ${budgetInfo.label} budget.`,
 
         // Query 3: Accommodation with date-specific pricing
         `Best ${budgetInfo.label} hotels in ${destinationStr} priced ${budgetInfo.accommodation}. ${startDate && endDate ? `For dates: check-in ${startDate}, check-out ${endDate}.` : targetMonth ? `For travel in ${targetMonth}.` : ''} Include specific hotel names with nightly rates and neighborhoods to stay.`,
@@ -540,26 +608,37 @@ Use this exact schema. Every field shown is required unless marked optional. All
     "recommendedDates": "e.g. May–September",
     "totalBudget": "e.g. $1,265–$1,780",
     "highlights": ["Top experience 1", "Top experience 2", "Top experience 3"],
-    "assumptions": ["Assumption 1"]
+    "assumptions": ["Assumption 1"],
+    "bestTimeNote": "Best in May or October for fewer crowds and pleasant weather.",
+    "vibeSummary": "Volcanic coastlines, thermal springs, and slow island mornings at an easy pace."
   },
   "budget": {
     "items": [
-      { "category": "Flights", "range": "$400–$580" },
-      { "category": "Accommodation", "range": "$325–$450" },
-      { "category": "Activities", "range": "$100–$165" },
-      { "category": "Food & Dining", "range": "$175–$250" },
-      { "category": "Transportation", "range": "$150–$200" },
-      { "category": "Contingency", "range": "$75" }
+      { "category": "Flights", "range": "$400–$580", "description": "Round trip · per person · NYC → PDL" },
+      { "category": "Accommodation", "range": "$325–$450", "description": "5 nights at $65–$90 / night" },
+      { "category": "Activities", "range": "$100–$165", "description": "Whale watching, hiking tours, thermal pools" },
+      { "category": "Food & Dining", "range": "$175–$250", "description": "≈ $35–$50 / day for two" },
+      { "category": "Transportation", "range": "$150–$200", "description": "Rental car + fuel, 5 days" },
+      { "category": "Contingency", "range": "$75", "description": "Buffer for the unexpected" }
     ],
     "total": "$1,265–$1,780"
   },
   "flights": {
     "skip": false,
+    "context": "Round-trip from New York to Ponta Delgada (PDL) · typical 1–2 stops · ~10–12h door to gate.",
     "options": [
       {
         "description": "JFK to PDL via Lisbon — TAP Air Portugal, approx 10h total",
-        "price": "$380–$520",
-        "url": "https://www.google.com/travel/flights?q=..."
+        "price": "$420",
+        "url": "https://www.google.com/travel/flights?q=...",
+        "airlineCode": "TP",
+        "route": "JFK → PDL",
+        "viaCity": "Lisbon",
+        "airline": "TAP Air Portugal",
+        "stops": "1 stop",
+        "duration": "10h 30m",
+        "departureTime": "7:15 PM",
+        "badge": "Best value"
       }
     ]
   },
@@ -734,6 +813,10 @@ STRICT RULES:
 - Every day must have exactly 3 periods: Morning, Afternoon, Evening
 - Each period must have EXACTLY 2 activities (no more, no fewer)
 - Include EXACTLY 2 dining options for ALL periods: Morning (breakfast), Afternoon (lunch), Evening (dinner). First must have "isPrimary": true (top pick), second must have "isPrimary": false (alternative). Both must be specific named restaurants — no generic descriptions.
+- DINING MUST BE UNIQUE: Every restaurant across the ENTIRE itinerary must be a DIFFERENT establishment. NEVER repeat the same restaurant in two periods or on two different days — not as a primary and not as an alternative. For an N-day trip you will name roughly N×6 distinct restaurants; if grounded research is limited, branch into nearby neighborhoods/towns to find fresh options rather than reusing one.
+- ONLY recommend restaurants confirmed to be currently open in the grounded research. If the research mentions any closure, "permanently closed", "temporarily closed", or uncertain status for an establishment, do NOT include it. When in doubt, prefer well-established restaurants with multiple recent reviews over newer or less-cited spots.
+- MATCH THE MEAL TO THE PERIOD: Morning dining must be breakfast spots (cafés, bakeries, brunch). Afternoon must be lunch spots. Evening must be dinner restaurants. Do not put a dinner restaurant in a morning slot.
+- VARY THE PRIMARY PICKS BY DAY: The "isPrimary": true restaurant for each period should feel distinct day-to-day in cuisine, vibe, and neighborhood — showcase the destination's range across the trip, don't anchor every day to the same kind of place.
 - Tags must only be from: transit, cultural, nature, hiking, beach, food, photo-worthy, walking, adventure, relaxation, shopping, nightlife
 - priority must be exactly "high", "medium", or "low"
 - Use real URLs from the grounded research — fallback to search URL patterns listed above
@@ -741,6 +824,11 @@ STRICT RULES:
 - Keep activity names under 6 words
 - Omit bookingUrl entirely if it would be an empty string
 - If noFlight is true, set flights.skip to true and flights.options to []
+- Always populate summary.bestTimeNote with 1 sentence about the best time to visit and why
+- Always populate summary.vibeSummary with ONE short evocative sentence (10-16 words) capturing the trip's overall vibe and pace — e.g. "Old towns, sea-captains' palaces, island churches, and centuries of maritime history." No destination name, no markdown.
+- Always populate flights.context with a summary of the routing (e.g. "Round-trip from City to Destination (IATA) · N stops · ~Xh door to gate.")
+- Always populate all structured flight fields: airlineCode, route, viaCity, airline, stops, duration, departureTime. Set badge to "Best value", "Fastest", or omit for others.
+- Always populate budget items with a description field explaining what the cost covers
 
 ## Guidelines
 

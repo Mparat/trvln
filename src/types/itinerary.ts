@@ -12,6 +12,7 @@ export interface DiningOption {
   description: string;
   priceRange?: string;
   url?: string;
+  isPrimary?: boolean;
 }
 
 export interface DayPeriod {
@@ -47,6 +48,14 @@ export interface FlightOption {
   description: string;
   price: string;
   url: string;
+  airlineCode?: string;
+  route?: string;
+  viaCity?: string;
+  airline?: string;
+  stops?: string;
+  duration?: string;
+  departureTime?: string;
+  badge?: string;
 }
 
 export interface BookingItem {
@@ -65,13 +74,16 @@ export interface ItineraryData {
     totalBudget: string;
     highlights: string[];
     assumptions?: string[];
+    bestTimeNote?: string;
+    vibeSummary?: string;
   };
   budget: {
-    items: { category: string; range: string }[];
+    items: { category: string; range: string; description?: string }[];
     total: string;
   };
   flights: {
     skip?: boolean;
+    context?: string;
     options: FlightOption[];
   };
   accommodation: AccommodationLocation[];

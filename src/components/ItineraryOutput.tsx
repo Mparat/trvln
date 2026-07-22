@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   Clock, DollarSign, Sparkles, ExternalLink, Edit3, Send,
-  X, Plus, Loader2, ChevronDown, Share2
+  X, Plus, Loader2, ChevronDown, Share2, MessagesSquare
 } from "lucide-react";
 import { jsPDF } from "jspdf";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -768,53 +768,57 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
 
   // When structured JSON data is available, render the beautiful UI
   if (structuredData) {
+    const editButton = onEdit ? (
+      <button
+        type="button"
+        onClick={() => setEditMode(v => !v)}
+        aria-label="Edit the itinerary"
+        title="Edit the itinerary"
+        className="group flex items-center justify-center h-9 w-9 hover:w-auto px-0 hover:px-3.5 rounded-full border border-border bg-background text-muted-foreground hover:text-primary hover:border-primary transition-all duration-300 overflow-hidden"
+      >
+        <MessagesSquare className="w-4 h-4 shrink-0" />
+        <span className="max-w-0 group-hover:max-w-[160px] group-hover:ml-2 overflow-hidden whitespace-nowrap text-sm font-semibold transition-all duration-300">
+          Edit the itinerary
+        </span>
+      </button>
+    ) : undefined;
+
+    const editPanel = onEdit && editMode ? (
+      <Card className="p-4 bg-muted/30 border-dashed">
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-medium text-foreground flex items-center gap-2">
+              <Edit3 className="w-4 h-4" />
+              Request changes
+            </h4>
+            <Button variant="ghost" size="sm" onClick={() => setEditMode(false)}>
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
+          <Textarea
+            value={editRequest}
+            onChange={(e) => setEditRequest(e.target.value)}
+            placeholder="e.g., 'Add more food options' or 'Replace day 2 with beach activities'"
+            className="min-h-[80px] resize-none"
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => !isEditing && setEditMode(false)} disabled={isEditing}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handleSubmitEdit} disabled={!editRequest.trim() || isEditing}>
+              {isEditing ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Updating...</>
+              ) : (
+                <><Send className="w-4 h-4 mr-2" />Submit</>
+              )}
+            </Button>
+          </div>
+        </div>
+      </Card>
+    ) : undefined;
+
     return (
       <div className="space-y-5">
-        {/* Edit mode card */}
-        {onEdit && (
-          <Card className="p-4 bg-muted/30 border-dashed">
-            {editMode ? (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-sm font-medium text-foreground flex items-center gap-2">
-                    <Edit3 className="w-4 h-4" />
-                    Request changes
-                  </h4>
-                  <Button variant="ghost" size="sm" onClick={() => setEditMode(false)}>
-                    <X className="w-4 h-4" />
-                  </Button>
-                </div>
-                <Textarea
-                  value={editRequest}
-                  onChange={(e) => setEditRequest(e.target.value)}
-                  placeholder="e.g., 'Add more food options' or 'Replace day 2 with beach activities'"
-                  className="min-h-[80px] resize-none"
-                />
-                <div className="flex justify-end gap-2">
-                  <Button variant="outline" size="sm" onClick={() => !isEditing && setEditMode(false)} disabled={isEditing}>
-                    Cancel
-                  </Button>
-                  <Button size="sm" onClick={handleSubmitEdit} disabled={!editRequest.trim() || isEditing}>
-                    {isEditing ? (
-                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Updating...</>
-                    ) : (
-                      <><Send className="w-4 h-4 mr-2" />Submit</>
-                    )}
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <button
-                onClick={() => setEditMode(true)}
-                className="w-full flex items-center justify-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors py-2"
-              >
-                <Edit3 className="w-4 h-4" />
-                <span>Want to make changes? Click here to request edits</span>
-              </button>
-            )}
-          </Card>
-        )}
-
         {isEditing && (
           <div className="flex items-center justify-center gap-3 py-4 text-muted-foreground bg-muted/30 rounded-xl">
             <Loader2 className="w-5 h-5 animate-spin text-primary" />
@@ -822,7 +826,14 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
           </div>
         )}
 
-        <StructuredItinerary key={structuredData.summary.destination + structuredData.summary.duration + (structuredData.summary.recommendedDates || '')} data={structuredData} rawItinerary={itinerary} tripPreferences={tripPreferences} />
+        <StructuredItinerary
+          key={structuredData.summary.destination + structuredData.summary.duration + (structuredData.summary.recommendedDates || '')}
+          data={structuredData}
+          rawItinerary={itinerary}
+          tripPreferences={tripPreferences}
+          editButton={editButton}
+          editPanel={editPanel}
+        />
       </div>
     );
   }
