@@ -35,8 +35,8 @@ serve(async (req) => {
 
     console.log(`Extracting social video from: ${url}`);
 
-    // Retry on 502/503: a sleeping/cold-starting Railway service answers the
-    // first request with its own error page before the app is awake.
+    // Retry on 502/503: a sleeping/cold-starting host answers the first
+    // request with its own gateway error page before the app is awake.
     let response: Response | null = null;
     let text = "";
     for (const delayMs of [0, 3000, 6000]) {
@@ -59,13 +59,13 @@ serve(async (req) => {
     } catch { /* upstream returned a non-JSON error page */ }
 
     if (!response!.ok) {
-      // FastAPI errors use `detail`; Railway's own error pages use `message`.
+      // FastAPI errors use `detail`; host gateway error pages use `message`.
       // Surface whatever we got so the real failure reaches the user/logs.
       const upstream = data.detail ?? data.message ?? data.error;
       const detail = typeof upstream === "string" ? upstream : upstream ? JSON.stringify(upstream) : null;
       console.error(`Extract failed (${response!.status}):`, text.slice(0, 500));
       return new Response(
-        JSON.stringify({ error: detail || `Video service unavailable (HTTP ${response!.status}) — check the Railway service` }),
+        JSON.stringify({ error: detail || `Video service unavailable (HTTP ${response!.status}) — the video extraction service isn't responding` }),
         { status: response!.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
