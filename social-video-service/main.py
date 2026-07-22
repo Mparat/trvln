@@ -87,7 +87,17 @@ def upload_frame(path: str) -> str | None:
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    # Report the running yt-dlp version so a deploy can be verified from the
+    # browser (whether this build has the current extractor + import fix).
+    try:
+        from yt_dlp.version import __version__ as ytdlp_version
+    except Exception:
+        ytdlp_version = "unknown"
+    return {
+        "status": "ok",
+        "ytdlp_version": ytdlp_version,
+        "instagram_cookies_configured": bool(INSTAGRAM_COOKIES),
+    }
 
 
 @app.post("/extract")
