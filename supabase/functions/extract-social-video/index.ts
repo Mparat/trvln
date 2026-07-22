@@ -35,18 +35,38 @@ serve(async (req) => {
 
     console.log(`Extracting social video from: ${url}`);
 
-    const response = await fetch(`${serviceUrl}/extract`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
-    });
+    // Retry on 502/503: a sleeping/cold-starting Railway service answers the
+    // first request with its own error page before the app is awake.
+    let response: Response | null = null;
+    let text = "";
+    for (const delayMs of [0, 3000, 6000]) {
+      if (delayMs > 0) {
+        console.log(`Upstream ${response?.status} — retrying in ${delayMs}ms...`);
+        await new Promise(r => setTimeout(r, delayMs));
+      }
+      response = await fetch(`${serviceUrl}/extract`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      text = await response.text();
+      if (response.status !== 502 && response.status !== 503) break;
+    }
 
-    const data = await response.json();
+    let data: Record<string, unknown> = {};
+    try {
+      data = JSON.parse(text);
+    } catch { /* upstream returned a non-JSON error page */ }
 
-    if (!response.ok) {
+    if (!response!.ok) {
+      // FastAPI errors use `detail`; Railway's own error pages use `message`.
+      // Surface whatever we got so the real failure reaches the user/logs.
+      const upstream = data.detail ?? data.message ?? data.error;
+      const detail = typeof upstream === "string" ? upstream : upstream ? JSON.stringify(upstream) : null;
+      console.error(`Extract failed (${response!.status}):`, text.slice(0, 500));
       return new Response(
-        JSON.stringify({ error: data.detail || "Failed to extract video" }),
-        { status: response.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ error: detail || `Video service unavailable (HTTP ${response!.status}) — check the Railway service` }),
+        { status: response!.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
