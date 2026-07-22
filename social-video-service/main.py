@@ -19,6 +19,7 @@ app.add_middleware(
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+INSTAGRAM_COOKIES = os.environ.get("INSTAGRAM_COOKIES")
 
 SUPPORTED_DOMAINS = [
     "tiktok.com", "vm.tiktok.com",
@@ -120,11 +121,10 @@ def extract_video(req: ExtractRequest):
         ]
 
         # Instagram often requires authentication — pass cookies if provided
-        instagram_cookies = os.environ.get("INSTAGRAM_COOKIES")
-        if instagram_cookies and is_instagram_url(req.url):
+        if INSTAGRAM_COOKIES and is_instagram_url(req.url):
             cookie_path = os.path.join(tmpdir, "cookies.txt")
             with open(cookie_path, "w") as cf:
-                cf.write(instagram_cookies)
+                cf.write(INSTAGRAM_COOKIES)
             cmd += ["--cookies", cookie_path]
 
         cmd.append(req.url)
