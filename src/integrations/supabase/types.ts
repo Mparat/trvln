@@ -14,6 +14,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      saved_trips: {
+        Row: {
+          id: string
+          user_id: string
+          title: string
+          variants: Json
+          preferences: Json
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          title: string
+          variants: Json
+          preferences: Json
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          title?: string
+          variants?: Json
+          preferences?: Json
+          created_at?: string
+        }
+        Relationships: []
+      }
       itinerary_jobs: {
         Row: {
           id: string

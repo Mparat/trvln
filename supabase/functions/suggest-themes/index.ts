@@ -173,15 +173,18 @@ Each theme should:
 2. Be relevant to what they've expressed interest in
 3. Have a clear, evocative name (2-4 words max)
 4. Include an appropriate emoji
+5. Have a short tagline (one sentence, 12-18 words) that captures the angle and pace of the theme
 
 Examples of good theme variety:
 - For "Tokyo, food lover": "🍜 Ramen Pilgrimage", "🌸 Traditional Kyoto Side Trip", "🎮 Otaku & Gaming Culture"
 - For "Italy honeymoon": "💕 Romantic Classics", "🍷 Wine Country Escape", "🏖️ Amalfi Coast Bliss"
 - For "Peru adventure": "🏔️ Inca Trail Trek", "🌿 Amazon Jungle Immersion", "🍽️ Culinary Lima"
 
+Example tagline: "Water, walls, and waterfront villages — the classic Boka Bay loop at an easy pace."
+
 The themes should feel tailored to THIS specific traveler, not generic.
 
-Respond with ONLY a JSON array of 3 objects, each with "id" (snake_case), "name", and "emoji" fields. No other text.`;
+Respond with ONLY a JSON array of 3 objects, each with "id" (snake_case), "name", "emoji", and "tagline" fields. No other text.`;
 
     const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
       method: "POST",
@@ -237,9 +240,9 @@ Respond with ONLY a JSON array of 3 objects, each with "id" (snake_case), "name"
       console.error("Failed to parse themes:", parseError);
       // Fallback themes based on interests
       themes = [
-        { id: "immersive_culture", name: "Deep Cultural Dive", emoji: "🎭" },
-        { id: "adventure_nature", name: "Active Explorer", emoji: "🏔️" },
-        { id: "local_flavors", name: "Local Food & Vibes", emoji: "🍜" },
+        { id: "immersive_culture", name: "Deep Cultural Dive", emoji: "🎭", tagline: "Museums, neighborhoods, and local traditions at a thoughtful, unhurried pace." },
+        { id: "adventure_nature", name: "Active Explorer", emoji: "🏔️", tagline: "Trails, viewpoints, and the outdoors — an energetic loop through the region." },
+        { id: "local_flavors", name: "Local Food & Vibes", emoji: "🍜", tagline: "Markets, family kitchens, and the best local tables, one bite at a time." },
       ];
     }
 
@@ -248,6 +251,7 @@ Respond with ONLY a JSON array of 3 objects, each with "id" (snake_case), "name"
       id: t.id || `theme_${i + 1}`,
       name: t.name || `Theme ${i + 1}`,
       emoji: t.emoji || ["🌟", "✨", "🎯"][i],
+      tagline: t.tagline || "",
     }));
 
     console.log("Suggested themes:", validThemes);

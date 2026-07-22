@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import {
   Sparkles, Camera, MapPin, Calendar, Clock, Wallet, Plane,
   Building, Trees, Tent, Heart, Users, Zap,
-  Utensils, PartyPopper, Globe,
+  Utensils, PartyPopper, Globe, GraduationCap, Landmark, Mountain,
   Plus, Check, Link as LinkIcon, Loader2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -87,12 +87,12 @@ const foodDrinkOptions = [
 ];
 
 const interestOptions = [
-  { id: 'educational', label: 'Educational' },
-  { id: 'culture', label: 'Learn the culture' },
-  { id: 'food', label: 'Food & drink experience' },
-  { id: 'instagram', label: "For the 'gram" },
-  { id: 'activities', label: 'Activities & adventures' },
-  { id: 'nature', label: 'Natural beauty' },
+  { id: 'educational', label: 'Educational', icon: GraduationCap },
+  { id: 'culture', label: 'Culture', icon: Landmark },
+  { id: 'food', label: 'Food & drink', icon: Utensils },
+  { id: 'instagram', label: "For the 'gram", icon: Camera },
+  { id: 'activities', label: 'Adventures', icon: Mountain },
+  { id: 'nature', label: 'Nature', icon: Trees },
 ];
 
 const budgetLabels = [
@@ -277,14 +277,14 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
       type="button"
       onClick={onClick}
       className={cn(
-        "border rounded-full px-4 py-2 text-sm flex items-center gap-2 transition-colors",
+        "border rounded-full px-3 py-1.5 text-[13px] flex items-center gap-1.5 transition-colors",
         isSelected
           ? "border-primary bg-primary/5"
           : "border-border hover:bg-muted/40"
       )}
     >
       <span className={cn(
-        "w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0",
+        "w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center shrink-0",
         isSelected ? "border-primary" : "border-muted-foreground/30"
       )}>
         {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-primary" />}
@@ -299,25 +299,28 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
     onClick,
     icon: Icon,
     label,
+    compact,
   }: {
     isSelected: boolean;
     onClick: () => void;
     icon?: React.ElementType;
     label: string;
+    compact?: boolean;
   }) => (
     <button
       type="button"
       onClick={onClick}
       className={cn(
-        "border rounded-full px-4 py-2 text-sm flex items-center gap-2 transition-colors",
+        "border rounded-full flex items-center transition-colors whitespace-nowrap",
+        compact ? "px-3 py-1.5 text-[13px] gap-1.5" : "px-4 py-2 text-sm gap-2",
         isSelected
           ? "border-primary bg-primary/5"
           : "border-border hover:bg-muted/40"
       )}
     >
-      {Icon && <Icon className="w-4 h-4 shrink-0" />}
+      {Icon && <Icon className={cn("shrink-0", compact ? "w-3.5 h-3.5" : "w-4 h-4")} />}
       {label}
-      {isSelected && <Check className="w-3 h-3 ml-1" />}
+      {isSelected && <Check className={cn("ml-0.5", compact ? "w-3 h-3" : "w-3 h-3 ml-1")} />}
     </button>
   );
 
@@ -369,7 +372,7 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
       )}
 
       {/* Separator */}
-      <div className="border-t border-border mx-0" />
+      <div className="border-t border-border mx-5" />
 
       {/* Bottom action row */}
       <div className="flex items-center justify-between px-5 py-3">
@@ -616,7 +619,7 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
       )}
 
       {/* Flight Preferences */}
-      <div className="p-4 bg-muted/50 rounded-xl space-y-4">
+      <div className="p-4 bg-muted/20 rounded-xl space-y-4">
         <div className="flex items-center justify-between">
           <h4 className="flex items-center gap-2 text-sm font-medium text-foreground">
             <Plane className="w-4 h-4 text-primary" />
@@ -693,7 +696,6 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
       <div className="space-y-3">
         <label className="text-sm font-medium text-foreground flex items-center gap-2">
           Atmosphere
-          <span className="text-xs text-muted-foreground font-normal">PICK ANY</span>
         </label>
         <div className="flex flex-wrap gap-2">
           {atmosphereOptions.map(opt => (
@@ -703,6 +705,7 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
               onClick={() => toggleArrayItem('atmosphere', opt.id)}
               icon={opt.icon}
               label={opt.label}
+              compact
             />
           ))}
         </div>
@@ -751,7 +754,6 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
         <label className="text-sm font-medium text-foreground flex items-center gap-2">
           <Utensils className="w-4 h-4 text-primary" />
           Food & drink preferences
-          <span className="text-xs text-muted-foreground font-normal">PICK ANY</span>
         </label>
         <div className="flex flex-wrap gap-2">
           {foodDrinkOptions.map(opt => (
@@ -761,6 +763,7 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
               onClick={() => toggleArrayItem('foodDrink', opt.id)}
               icon={opt.icon}
               label={opt.label}
+              compact
             />
           ))}
         </div>
@@ -771,15 +774,16 @@ export function TripInputForm({ preferences, onPreferencesChange, onGenerate, is
         <label className="text-sm font-medium text-foreground flex items-center gap-2">
           <Globe className="w-4 h-4 text-primary" />
           What matters most?
-          <span className="text-xs text-muted-foreground font-normal">PICK ANY</span>
         </label>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-nowrap gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
           {interestOptions.map(opt => (
             <ToggleOption
               key={opt.id}
               isSelected={preferences.interests.includes(opt.id)}
               onClick={() => toggleArrayItem('interests', opt.id)}
+              icon={opt.icon}
               label={opt.label}
+              compact
             />
           ))}
         </div>

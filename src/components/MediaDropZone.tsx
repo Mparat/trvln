@@ -208,10 +208,8 @@ export const MediaDropZone = forwardRef<MediaDropZoneHandle, MediaDropZoneProps 
           body: JSON.stringify({ url }),
         }
       );
-
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to extract video");
-
       // Server returns frames directly — no client-side extraction needed
       const frameUrls: string[] = data.frameUrls || [];
       const thumbnailUrl: string = data.thumbnailUrl || frameUrls[0] || "";
