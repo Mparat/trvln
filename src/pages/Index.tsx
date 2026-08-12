@@ -172,6 +172,20 @@ const stripPlanningSection = (content: string): string => {
 // Stores a trip the user tried to save while logged out, so we can finish the
 // save once the sign-in redirect (Google / magic link) brings them back.
 const PENDING_SAVE_KEY = "trvln_pending_save";
+// Records where a sign-in should land the user when they reach the auth modal
+// from a flow that isn't "save" (e.g. tapping "Saved trips" while logged out).
+// Kept separate from — and mutually exclusive with — PENDING_SAVE_KEY so the
+// two intents never fire together.
+const PENDING_SIGNIN_DEST_KEY = "trvln_pending_signin_dest";
+
+// Forget any queued post-sign-in action (save or redirect). Called when the
+// user abandons the flow that queued it.
+const clearPendingAuthAction = () => {
+  try {
+    localStorage.removeItem(PENDING_SAVE_KEY);
+    localStorage.removeItem(PENDING_SIGNIN_DEST_KEY);
+  } catch { /* ignore */ }
+};
 
 const Index = () => {
   const [view, setView] = useState<View>(() => loadPersistedSession()?.view ?? 'input');
@@ -199,6 +213,10 @@ const Index = () => {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  // True once the user actually kicks off a sign-in from the auth modal (Google
+  // redirect or magic link sent). Lets us tell "dismissed without signing in"
+  // (cancel the queued action) from "left to complete sign-in" (keep it).
+  const authInitiatedRef = useRef(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -394,38 +412,75 @@ const Index = () => {
     }
   }, []);
 
-  // Finish a save that was interrupted by the sign-in redirect (Google / magic link).
+  // Resume whatever the user set out to do before the sign-in redirect (Google /
+  // magic link) sent them away. Exactly one action is queued at a time: either a
+  // pending save (from the "Save trip" flow) or a redirect (from "Saved trips").
+  // Consuming a save must NOT also honor a redirect, and vice versa — signing in
+  // from "Saved trips" should never resurrect a save the user abandoned earlier.
   // Declared after performSave so its dependency array doesn't hit the TDZ.
   useEffect(() => {
     if (!user) return;
     let raw: string | null = null;
-    try { raw = localStorage.getItem(PENDING_SAVE_KEY); } catch { return; }
-    if (!raw) return;
-    try { localStorage.removeItem(PENDING_SAVE_KEY); } catch { /* ignore */ }
+    let dest: string | null = null;
     try {
-      const { itineraries: savedItins, preferences: savedPrefs } = JSON.parse(raw);
-      if (Array.isArray(savedItins) && savedItins.length > 0) {
-        setItineraries(savedItins);
-        if (savedPrefs) setPreferences(savedPrefs);
-        setActiveVariant(0);
-        setView('results');
-        performSave(user, savedItins, savedPrefs);
-      }
-    } catch { /* malformed — drop it */ }
+      raw = localStorage.getItem(PENDING_SAVE_KEY);
+      dest = localStorage.getItem(PENDING_SIGNIN_DEST_KEY);
+    } catch { return; }
+    // Clear both up front so a later auth event (token refresh, tab focus) can't
+    // replay the action.
+    clearPendingAuthAction();
+
+    if (raw) {
+      try {
+        const { itineraries: savedItins, preferences: savedPrefs } = JSON.parse(raw);
+        if (Array.isArray(savedItins) && savedItins.length > 0) {
+          setItineraries(savedItins);
+          if (savedPrefs) setPreferences(savedPrefs);
+          setActiveVariant(0);
+          setView('results');
+          performSave(user, savedItins, savedPrefs);
+          return;
+        }
+      } catch { /* malformed — fall through to any redirect intent */ }
+    }
+
+    if (dest === 'saved-list') setView('saved-list');
   }, [user, performSave]);
 
   const handleSaveTrip = useCallback(() => {
     if (isSaved || isSaving) return;
     if (!user) {
-      // Stash the trip so we can finish the save after the auth redirect returns.
+      // Stash the trip so we can finish the save after the auth redirect returns,
+      // and drop any competing redirect intent so this is the only queued action.
       try {
         localStorage.setItem(PENDING_SAVE_KEY, JSON.stringify({ itineraries, preferences }));
+        localStorage.removeItem(PENDING_SIGNIN_DEST_KEY);
       } catch { /* quota — fall back to manual re-tap */ }
+      authInitiatedRef.current = false;
       setShowAuthModal(true);
       return;
     }
     performSave(user, itineraries, preferences);
   }, [user, itineraries, preferences, isSaved, isSaving, performSave]);
+
+  // Open the saved-trips list, prompting sign-in first when logged out. Signing
+  // in from here should land on the list — never trigger a save the user may
+  // have started and walked away from earlier.
+  const handleViewSavedTrips = useCallback(() => {
+    if (user) { setView('saved-list'); return; }
+    clearPendingAuthAction();
+    try { localStorage.setItem(PENDING_SIGNIN_DEST_KEY, 'saved-list'); } catch { /* ignore */ }
+    authInitiatedRef.current = false;
+    setShowAuthModal(true);
+  }, [user]);
+
+  // Dismissing the auth modal without starting a sign-in cancels whatever action
+  // (save / view saved) prompted it. A started sign-in (Google redirect or magic
+  // link sent) leaves it queued so it can complete after the round-trip.
+  const handleAuthModalOpenChange = useCallback((open: boolean) => {
+    if (!open && !authInitiatedRef.current) clearPendingAuthAction();
+    setShowAuthModal(open);
+  }, []);
 
   // ── Open a saved trip ──────────────────────────────────────────────────────
   const handleOpenSavedTrip = useCallback((variants: ItineraryVariant[], savedPrefs: TripPreferences | null) => {
@@ -443,6 +498,8 @@ const Index = () => {
     setLoadingVariants({});
     setIsSaved(false);
     setView('input');
+    // The itinerary that a pending save referred to is gone — drop the queued save.
+    clearPendingAuthAction();
   }, []);
 
   // ── Generate ───────────────────────────────────────────────────────────────
@@ -613,7 +670,11 @@ const Index = () => {
     return (
       <>
         <SavedTripsList onBack={() => setView('input')} onOpen={handleOpenSavedTrip} />
-        <AuthModal open={showAuthModal} onOpenChange={setShowAuthModal} />
+        <AuthModal
+          open={showAuthModal}
+          onOpenChange={handleAuthModalOpenChange}
+          onSignInStart={() => { authInitiatedRef.current = true; }}
+        />
       </>
     );
   }
@@ -712,7 +773,11 @@ const Index = () => {
             )}
           </div>
         </main>
-        <AuthModal open={showAuthModal} onOpenChange={setShowAuthModal} />
+        <AuthModal
+          open={showAuthModal}
+          onOpenChange={handleAuthModalOpenChange}
+          onSignInStart={() => { authInitiatedRef.current = true; }}
+        />
       </div>
     );
   }
@@ -777,7 +842,7 @@ const Index = () => {
           {/* Saved trips entry */}
           <div className="flex justify-center pb-2">
             <button
-              onClick={() => user ? setView('saved-list') : setShowAuthModal(true)}
+              onClick={handleViewSavedTrips}
               className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
               <Bookmark className="w-4 h-4" />
@@ -793,7 +858,11 @@ const Index = () => {
         </div>
       </footer>
 
-      <AuthModal open={showAuthModal} onOpenChange={setShowAuthModal} />
+      <AuthModal
+        open={showAuthModal}
+        onOpenChange={handleAuthModalOpenChange}
+        onSignInStart={() => { authInitiatedRef.current = true; }}
+      />
     </div>
   );
 };
