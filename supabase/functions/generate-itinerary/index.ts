@@ -119,6 +119,10 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Tracked outside the try so the catch below can mark a registered job failed
+  // rather than leaving it pending for reconnecting clients to poll.
+  let registeredJobId: string | undefined;
+
   try {
 
     // Parse and validate input
@@ -140,6 +144,7 @@ serve(async (req) => {
     }
 
     const { preferences, themeVariant, jobId, batchId } = validationResult.data;
+    registeredJobId = jobId;
 
     console.log("Received preferences:", JSON.stringify(preferences, null, 2));
     console.log("Theme variant:", themeVariant || "default");
@@ -576,7 +581,7 @@ Use the grounded research data below to find real establishment names, accurate 
 
 ## GROUNDED RESEARCH (CRITICAL - READ BEFORE PROCEEDING)
 
-You have been provided with LIVE WEB SEARCH RESULTS in the assistant message below. This is your FACTUAL GROUND TRUTH from real travel blogs, guides, and booking sites.
+You have been provided with LIVE WEB SEARCH RESULTS at the start of the user message below. This is your FACTUAL GROUND TRUTH from real travel blogs, guides, and booking sites.
 
 **STRICT RULES - YOU MUST FOLLOW THESE:**
 
@@ -849,41 +854,36 @@ ${userInputsBlock}
 
 Create a comprehensive, well-researched travel itinerary based on these preferences. Be opinionated and specific - tell me exactly what I should do.`;
 
-    // Build messages
-    const messages: any[] = [{ role: "system", content: systemPrompt }];
+    // Build the single user turn. The grounded research goes inside it rather
+    // than in an assistant message of its own: the Anthropic Messages API
+    // requires the first message to use the "user" role, so an assistant-first
+    // array is rejected with a 400 before any generation happens.
+    const userContent: any[] = [];
 
-    // Inject grounded research context as assistant message (if available)
     if (groundedResearchContext) {
-      messages.push({ role: "assistant", content: groundedResearchContext });
-      console.log("Injected grounded research context into messages");
+      userContent.push({ type: "text", text: groundedResearchContext });
+      console.log("Injected grounded research context into the user message");
     }
 
-    // Handle media (images/videos) - use public URLs from storage
+    userContent.push({ type: "text", text: userPrompt });
+
+    // Media (images/videos) - use public URLs from storage. Anthropic takes an
+    // image block with a `source`; `image_url` is the OpenAI shape and 400s here.
     const mediaWithUrls = media?.filter(item => item.url && item.type === 'image') || [];
-    
-    if (mediaWithUrls.length > 0) {
-      const content: any[] = [{ type: "text", text: userPrompt }];
 
-      for (const item of mediaWithUrls) {
-        if (item.url) {
-          content.push({
-            type: "image_url",
-            image_url: { url: item.url },
-          });
-        }
+    for (const item of mediaWithUrls) {
+      if (item.url) {
+        userContent.push({
+          type: "image",
+          source: { type: "url", url: item.url },
+        });
       }
-
-      messages.push({ role: "user", content });
+    }
+    if (mediaWithUrls.length > 0) {
       console.log(`Attached ${mediaWithUrls.length} image(s) to the request`);
-    } else {
-      messages.push({ role: "user", content: userPrompt });
     }
 
     console.log("Calling Anthropic API");
-
-    // Extract system message; Anthropic API takes it as a top-level field
-    const systemMessage = messages.find((m: any) => m.role === "system");
-    const nonSystemMessages = messages.filter((m: any) => m.role !== "system");
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -894,8 +894,9 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
-        system: systemMessage?.content,
-        messages: nonSystemMessages,
+        // The system prompt is a top-level field, not a message.
+        system: systemPrompt,
+        messages: [{ role: "user", content: userContent }],
         max_tokens: 32000,
         stream: true,
       }),
@@ -904,6 +905,17 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
     if (!response.ok) {
       const errorText = await response.text();
       console.error("Anthropic API error:", response.status, errorText);
+
+      // Mark the job failed. It was registered as pending before this call, and
+      // a client that reconnects to it would otherwise poll a job that can never
+      // complete until its own timeout expires.
+      if (jobId) {
+        await supabaseAdmin.from("itinerary_jobs").update({
+          status: "error",
+          error: `Anthropic API ${response.status}: ${errorText}`.slice(0, 2000),
+          updated_at: new Date().toISOString(),
+        }).eq("id", jobId);
+      }
 
       if (response.status === 429) {
         return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment." }), {
@@ -1007,6 +1019,13 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
     });
   } catch (error) {
     console.error("Error in generate-itinerary function:", error);
+    if (registeredJobId) {
+      await supabaseAdmin.from("itinerary_jobs").update({
+        status: "error",
+        error: String(error).slice(0, 2000),
+        updated_at: new Date().toISOString(),
+      }).eq("id", registeredJobId);
+    }
     return new Response(JSON.stringify({ error: "Unable to process request. Please try again." }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
