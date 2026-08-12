@@ -125,16 +125,22 @@ const clearPendingBatch = () => {
   try { window.localStorage.removeItem(PENDING_BATCH_KEY); } catch { /* ignore */ }
 };
 
-// Poll itinerary_jobs until the server finishes the given job, and return its
-// raw content (null if the job errored, timed out, or the caller went stale).
-// The edge function keeps generating and persists the result even after the
-// client disconnects, so this is how a tab recovers a stream it lost — whether
-// it was reloaded or just frozen in the background by mobile Safari/Chrome.
+// Poll itinerary_jobs until the server finishes the given job. The edge
+// function keeps generating and persists the result even after the client
+// disconnects, so this is how a tab recovers a stream it lost — whether it was
+// reloaded or just frozen in the background by mobile Safari/Chrome.
+// The outcome is reported separately from the content: 'error' means the server
+// gave up and there is nothing left to wait for, while 'timeout' means the job
+// may still be running and is worth reconnecting to on a later load.
+type JobPollResult =
+  | { status: 'complete'; content: string }
+  | { status: 'error' | 'timeout' | 'stale' };
+
 const pollJobContent = async (
   jobId: string,
   isStale: () => boolean,
   timeoutMs = 5 * 60 * 1000,
-): Promise<string | null> => {
+): Promise<JobPollResult> => {
   const deadline = Date.now() + timeoutMs;
   while (!isStale() && Date.now() < deadline) {
     const { data } = await supabase
@@ -142,12 +148,12 @@ const pollJobContent = async (
       .select('status,content')
       .eq('id', jobId)
       .maybeSingle();
-    if (isStale()) return null;
-    if (data?.status === 'complete' && data.content) return data.content;
-    if (data?.status === 'error') return null;
+    if (isStale()) return { status: 'stale' };
+    if (data?.status === 'complete' && data.content) return { status: 'complete', content: data.content };
+    if (data?.status === 'error') return { status: 'error' };
     await new Promise(r => setTimeout(r, 2500));
   }
-  return null;
+  return { status: isStale() ? 'stale' : 'timeout' };
 };
 
 // Parse a completed itinerary's JSON, repairing truncated output if needed.
@@ -297,10 +303,10 @@ const Index = () => {
     setView('results');
 
     const pollJob = async (job: PendingJob) => {
-      const content = await pollJobContent(job.jobId, isStale);
+      const result = await pollJobContent(job.jobId, isStale);
       if (isStale()) return;
-      if (content) {
-        const displayContent = stripPlanningSection(content);
+      if (result.status === 'complete') {
+        const displayContent = stripPlanningSection(result.content);
         const structuredData = parseStructuredItinerary(displayContent);
         setItineraries(prev => prev.map(it =>
           it.id === job.themeId ? { ...it, content: displayContent, structuredData } : it));
@@ -353,7 +359,13 @@ const Index = () => {
     const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-itinerary`, {
       method: "POST", headers: getHeaders(), body: JSON.stringify({ preferences: prefs, themeVariant, ...jobIds }),
     });
-    if (!response.ok) { const e = await response.json().catch(() => ({})); throw new Error(e.error || "Failed to generate"); }
+    if (!response.ok) {
+      const e = await response.json().catch(() => ({}));
+      // The server actively refused this request (bad input, rate limit, upstream
+      // failure). Nothing is generating in the background, so there is nothing for
+      // the recovery poll to wait for — flag it so the caller doesn't sit on it.
+      throw Object.assign(new Error(e.error || "Failed to generate"), { serverRejected: true });
+    }
     if (!response.body) throw new Error("No response body");
 
     const reader = response.body.getReader();
@@ -602,7 +614,16 @@ const Index = () => {
           it.id === themeId ? { ...it, content: displayContent, structuredData } : it));
       };
 
-      const streamed = await Promise.all(themes.map(async (theme) => {
+      // `recoverable` distinguishes "the stream died but the server is still
+      // working" (poll for it) from "the server refused" (nothing to poll for).
+      type StreamOutcome = {
+        theme: (typeof themes)[number];
+        ok: boolean;
+        recoverable: boolean;
+        error?: unknown;
+      };
+
+      const streamed: StreamOutcome[] = await Promise.all(themes.map(async (theme) => {
         try {
           const { content, complete } = await generateSingleItinerary(effectivePreferences, theme, (updatedContent) => {
             const displayContent = stripPlanningSection(updatedContent);
@@ -615,14 +636,19 @@ const Index = () => {
           // call that a success; let the recovery pass below fetch the real
           // result, which the server finished and saved regardless.
           if (!complete || !stripPlanningSection(content).trim()) {
-            return { theme, ok: false };
+            return { theme, ok: false, recoverable: true };
           }
           applyFinalContent(theme.id, content);
           setLoadingVariants(prev => ({ ...prev, [theme.id]: false }));
-          return { theme, ok: true };
+          return { theme, ok: true, recoverable: false };
         } catch (error) {
           console.error(`Error generating ${theme.id}:`, error);
-          return { theme, ok: false };
+          const serverRejected = !!(error as { serverRejected?: boolean })?.serverRejected;
+          // A refused request will never produce a job to poll, so stop this
+          // variant's spinner now instead of leaving it running through a
+          // recovery pass that has nothing to find.
+          if (serverRejected) setLoadingVariants(prev => ({ ...prev, [theme.id]: false }));
+          return { theme, ok: false, recoverable: !serverRejected, error };
         }
       }));
 
@@ -631,39 +657,52 @@ const Index = () => {
       // Recover anything whose stream died: the edge function runs to completion
       // under waitUntil and persists each itinerary, so poll for the results
       // rather than leaving the user with empty cards.
-      const unfinished = streamed.filter(r => !r.ok).map(r => r.theme);
-      let readyCount = streamed.length - unfinished.length;
+      const failures = streamed.filter(r => !r.ok);
+      const recoverable = failures.filter(r => r.recoverable).map(r => r.theme);
+      const firstError = failures.find(r => r.error)?.error;
+      let readyCount = streamed.length - failures.length;
+      // Variants the server may still be finishing that we failed to collect.
+      let stillPending = 0;
 
-      if (unfinished.length > 0) {
+      if (recoverable.length > 0) {
         setIsReconnecting(true);
-        const recovered = await Promise.all(unfinished.map(async (theme) => {
-          const content = await pollJobContent(jobIdByTheme[theme.id], isStale);
-          if (isStale()) return false;
-          if (content) applyFinalContent(theme.id, content);
+        const outcomes = await Promise.all(recoverable.map(async (theme) => {
+          const result = await pollJobContent(jobIdByTheme[theme.id], isStale);
+          if (isStale()) return 'stale' as const;
+          if (result.status === 'complete') applyFinalContent(theme.id, result.content);
           setLoadingVariants(prev => ({ ...prev, [theme.id]: false }));
-          return !!content;
+          return result.status;
         }));
         if (isStale()) return;
         setIsReconnecting(false);
-        readyCount += recovered.filter(Boolean).length;
+        readyCount += outcomes.filter(s => s === 'complete').length;
+        stillPending = outcomes.filter(s => s === 'timeout').length;
       }
 
-      // Keep the batch when something is still missing, so a later reload gets
-      // one more chance to reconnect to it.
+      // Keep the batch only while a variant might still land on the server. A
+      // request the server refused or failed leaves nothing to reconnect to, so
+      // holding the batch would just make the next load poll for a dead job.
+      if (stillPending === 0) clearPendingBatch();
+
       const allReady = readyCount === themes.length;
-      if (allReady) clearPendingBatch();
+      const errorMessage = firstError instanceof Error ? firstError.message : undefined;
 
       if (allReady) {
         toast({ title: `${readyCount} itineraries ready!`, description: "Explore different themed versions of your trip" });
       } else if (readyCount > 0) {
         toast({
           title: `${readyCount} of ${themes.length} itineraries ready`,
-          description: "The rest didn't come through — reload to pick them up, or try again",
+          description: stillPending > 0
+            ? "The rest didn't come through — reload to pick them up, or try again"
+            : errorMessage ?? "The rest couldn't be generated — please try again",
         });
       } else {
         toast({
           title: "Couldn't load your itineraries",
-          description: "The connection dropped before they arrived. Please try again.",
+          description: errorMessage
+            ?? (stillPending > 0
+              ? "The connection dropped before they arrived. Please try again."
+              : "Please try again."),
           variant: "destructive",
         });
       }
