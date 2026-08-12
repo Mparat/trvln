@@ -103,6 +103,15 @@ const PENDING_BATCH_KEY = 'trvln:pendingBatch:v1';
 type PendingJob = { jobId: string; themeId: string; name: string; emoji: string };
 type PendingBatch = { batchId: string; jobs: PendingJob[] };
 
+// Everything a single variant needs to generate itself, so a variant opened
+// later can run without re-deriving the batch it belongs to.
+type GenerationContext = {
+  preferences: TripPreferences;
+  batchId: string;
+  jobIdByTheme: Record<string, string>;
+  runId: number;
+};
+
 const loadPendingBatch = (): PendingBatch | null => {
   if (typeof window === 'undefined') return null;
   try {
@@ -123,6 +132,26 @@ const savePendingBatch = (batch: PendingBatch) => {
 
 const clearPendingBatch = () => {
   try { window.localStorage.removeItem(PENDING_BATCH_KEY); } catch { /* ignore */ }
+};
+
+// Variants are generated one at a time, on demand, so the pending batch is
+// built up and torn down job by job. Only a variant that actually started has a
+// job on the server; recording one that never ran would make the next load poll
+// for a row that will never exist.
+const addPendingJob = (batchId: string, job: PendingJob) => {
+  const current = loadPendingBatch();
+  const jobs = current?.batchId === batchId
+    ? current.jobs.filter(j => j.themeId !== job.themeId)
+    : [];
+  savePendingBatch({ batchId, jobs: [...jobs, job] });
+};
+
+const removePendingJob = (batchId: string, themeId: string) => {
+  const current = loadPendingBatch();
+  if (!current || current.batchId !== batchId) return;
+  const jobs = current.jobs.filter(j => j.themeId !== themeId);
+  if (jobs.length === 0) clearPendingBatch();
+  else savePendingBatch({ batchId, jobs });
 };
 
 // Poll itinerary_jobs until the server finishes the given job. The edge
@@ -239,6 +268,12 @@ const Index = () => {
   // the value it started under and bails out once it no longer matches, so a
   // superseded run can't overwrite the current one's results or loading flags.
   const runIdRef = useRef(0);
+  // Only the first variant is generated up front; the rest are generated when
+  // the user actually opens them. These hold what a later variant needs to run.
+  const generationContextRef = useRef<GenerationContext | null>(null);
+  // Variants already kicked off, so re-opening a tab mid-generation doesn't
+  // start a second run for the same theme.
+  const startedVariantsRef = useRef<Set<string>>(new Set());
 
   // Auth + save state
   const [user, setUser] = useState<User | null>(null);
@@ -301,6 +336,10 @@ const Index = () => {
     setIsGenerating(true);
     setIsReconnecting(true);
     setView('results');
+
+    // These variants already have a job running on the server. Mark them started
+    // so opening one while we reconnect doesn't kick off a duplicate generation.
+    pending.jobs.forEach(job => startedVariantsRef.current.add(job.themeId));
 
     const pollJob = async (job: PendingJob) => {
       const result = await pollJobContent(job.jobId, isStale);
@@ -537,6 +576,112 @@ const Index = () => {
     clearPendingAuthAction();
   }, []);
 
+  // Generate one variant end to end: stream it, and if the stream dies while the
+  // server is still working, poll the job it left behind. Used both for the
+  // variant generated up front and for the ones generated when opened.
+  const runVariant = useCallback(async (
+    theme: { id: string; name: string; emoji: string },
+    ctx: GenerationContext,
+  ): Promise<{ ok: boolean; stillPending: boolean; error?: unknown }> => {
+    const isStale = () => runIdRef.current !== ctx.runId;
+    startedVariantsRef.current.add(theme.id);
+
+    const jobId = ctx.jobIdByTheme[theme.id] ?? crypto.randomUUID();
+    ctx.jobIdByTheme[theme.id] = jobId;
+    addPendingJob(ctx.batchId, { jobId, themeId: theme.id, name: theme.name, emoji: theme.emoji });
+
+    const applyFinalContent = (rawContent: string) => {
+      const displayContent = stripPlanningSection(rawContent);
+      const structuredData = parseStructuredItinerary(displayContent);
+      setItineraries(prev => prev.map(it =>
+        it.id === theme.id ? { ...it, content: displayContent, structuredData } : it));
+    };
+
+    setLoadingVariants(prev => ({ ...prev, [theme.id]: true }));
+
+    let recoverable = false;
+    let error: unknown;
+
+    try {
+      const { content, complete } = await generateSingleItinerary(ctx.preferences, theme, (updatedContent) => {
+        const displayContent = stripPlanningSection(updatedContent);
+        setItineraries(prev => prev.map(it =>
+          it.id === theme.id ? { ...it, content: displayContent } : it));
+      }, { jobId, batchId: ctx.batchId });
+
+      // A stream cut short leaves nothing to show — often literally nothing.
+      // Don't call that a success; the server finished and saved the result
+      // regardless, so recover it below.
+      if (complete && stripPlanningSection(content).trim()) {
+        if (isStale()) return { ok: false, stillPending: false };
+        applyFinalContent(content);
+        setLoadingVariants(prev => ({ ...prev, [theme.id]: false }));
+        removePendingJob(ctx.batchId, theme.id);
+        return { ok: true, stillPending: false };
+      }
+      recoverable = true;
+    } catch (err) {
+      console.error(`Error generating ${theme.id}:`, err);
+      error = err;
+      // A refused request never produces a job to poll, so there is nothing to
+      // recover and no reason to keep the spinner or the batch entry alive.
+      recoverable = !(err as { serverRejected?: boolean })?.serverRejected;
+    }
+
+    if (isStale()) return { ok: false, stillPending: false, error };
+
+    if (!recoverable) {
+      setLoadingVariants(prev => ({ ...prev, [theme.id]: false }));
+      removePendingJob(ctx.batchId, theme.id);
+      return { ok: false, stillPending: false, error };
+    }
+
+    setIsReconnecting(true);
+    const result = await pollJobContent(jobId, isStale);
+    if (isStale()) return { ok: false, stillPending: false, error };
+    setIsReconnecting(false);
+
+    if (result.status === 'complete') applyFinalContent(result.content);
+    setLoadingVariants(prev => ({ ...prev, [theme.id]: false }));
+
+    // Only a genuine timeout leaves work the server may still finish; keep that
+    // job so a later load can reconnect to it, and drop everything else.
+    const stillPending = result.status === 'timeout';
+    if (!stillPending) removePendingJob(ctx.batchId, theme.id);
+
+    return { ok: result.status === 'complete', stillPending, error };
+  }, [generateSingleItinerary]);
+
+  // Opening a variant that hasn't been generated yet starts it.
+  const handleSelectVariant = useCallback((index: number) => {
+    setActiveVariant(index);
+    const theme = itineraries[index];
+    if (!theme || theme.content || startedVariantsRef.current.has(theme.id)) return;
+
+    // After a reload the original context is gone, but a variant only needs the
+    // preferences and a fresh job id — so rebuild rather than refusing to run.
+    const ctx: GenerationContext = generationContextRef.current ?? {
+      preferences,
+      batchId: crypto.randomUUID(),
+      jobIdByTheme: {},
+      runId: runIdRef.current,
+    };
+    generationContextRef.current = ctx;
+
+    void runVariant(theme, ctx).then(result => {
+      if (result.ok || runIdRef.current !== ctx.runId) return;
+      toast({
+        title: `Couldn't load ${theme.name}`,
+        description: result.error instanceof Error
+          ? result.error.message
+          : result.stillPending
+            ? "It didn't come through — reload to pick it up, or try again"
+            : "Please try again",
+        variant: "destructive",
+      });
+    });
+  }, [itineraries, preferences, runVariant]);
+
   // ── Generate ───────────────────────────────────────────────────────────────
   const handleGenerate = useCallback(async (pendingCity?: string) => {
     const effectiveCities = pendingCity && !preferences.cities.includes(pendingCity)
@@ -592,117 +737,39 @@ const Index = () => {
       if (themes.length === 0) throw new Error("No themes came back for this trip — try adding more detail");
       setIsSuggestingThemes(false);
       setItineraries(themes.map(t => ({ ...t, content: "" })));
-      setLoadingVariants(Object.fromEntries(themes.map(t => [t.id, true])));
+      setLoadingVariants({});
 
-      // Tag each variant with a job id and record the batch, so if this tab is
-      // backgrounded/discarded mid-generation the server finishes and saves each
-      // itinerary and a reopened tab can reconnect and fetch the results.
-      const batchId = crypto.randomUUID();
-      const jobIdByTheme: Record<string, string> = Object.fromEntries(
-        themes.map(t => [t.id, crypto.randomUUID()])
-      );
-      savePendingBatch({
-        batchId,
-        jobs: themes.map(t => ({ jobId: jobIdByTheme[t.id], themeId: t.id, name: t.name, emoji: t.emoji })),
-      });
-
-      const contentMap: Record<string, string> = {};
-      const applyFinalContent = (themeId: string, rawContent: string) => {
-        const displayContent = stripPlanningSection(rawContent);
-        const structuredData = parseStructuredItinerary(displayContent);
-        setItineraries(prev => prev.map(it =>
-          it.id === themeId ? { ...it, content: displayContent, structuredData } : it));
+      // Generate only the first variant now. Producing all three up front meant
+      // waiting on the slowest of three long generations before seeing anything,
+      // and two of them were usually never opened. The rest start when the user
+      // actually switches to them.
+      const ctx: GenerationContext = {
+        preferences: effectivePreferences,
+        batchId: crypto.randomUUID(),
+        jobIdByTheme: {},
+        runId,
       };
+      generationContextRef.current = ctx;
+      startedVariantsRef.current = new Set();
 
-      // `recoverable` distinguishes "the stream died but the server is still
-      // working" (poll for it) from "the server refused" (nothing to poll for).
-      type StreamOutcome = {
-        theme: (typeof themes)[number];
-        ok: boolean;
-        recoverable: boolean;
-        error?: unknown;
-      };
-
-      const streamed: StreamOutcome[] = await Promise.all(themes.map(async (theme) => {
-        try {
-          const { content, complete } = await generateSingleItinerary(effectivePreferences, theme, (updatedContent) => {
-            const displayContent = stripPlanningSection(updatedContent);
-            contentMap[theme.id] = displayContent;
-            setItineraries(prev => prev.map(it => contentMap[it.id] !== undefined ? { ...it, content: contentMap[it.id] } : it));
-          }, { jobId: jobIdByTheme[theme.id], batchId });
-
-          // A stream cut short leaves nothing to show — often literally nothing,
-          // since the planning section is stripped from the display copy. Don't
-          // call that a success; let the recovery pass below fetch the real
-          // result, which the server finished and saved regardless.
-          if (!complete || !stripPlanningSection(content).trim()) {
-            return { theme, ok: false, recoverable: true };
-          }
-          applyFinalContent(theme.id, content);
-          setLoadingVariants(prev => ({ ...prev, [theme.id]: false }));
-          return { theme, ok: true, recoverable: false };
-        } catch (error) {
-          console.error(`Error generating ${theme.id}:`, error);
-          const serverRejected = !!(error as { serverRejected?: boolean })?.serverRejected;
-          // A refused request will never produce a job to poll, so stop this
-          // variant's spinner now instead of leaving it running through a
-          // recovery pass that has nothing to find.
-          if (serverRejected) setLoadingVariants(prev => ({ ...prev, [theme.id]: false }));
-          return { theme, ok: false, recoverable: !serverRejected, error };
-        }
-      }));
-
+      const result = await runVariant(themes[0], ctx);
       if (isStale()) return; // a newer generation took over while we streamed
 
-      // Recover anything whose stream died: the edge function runs to completion
-      // under waitUntil and persists each itinerary, so poll for the results
-      // rather than leaving the user with empty cards.
-      const failures = streamed.filter(r => !r.ok);
-      const recoverable = failures.filter(r => r.recoverable).map(r => r.theme);
-      const firstError = failures.find(r => r.error)?.error;
-      let readyCount = streamed.length - failures.length;
-      // Variants the server may still be finishing that we failed to collect.
-      let stillPending = 0;
-
-      if (recoverable.length > 0) {
-        setIsReconnecting(true);
-        const outcomes = await Promise.all(recoverable.map(async (theme) => {
-          const result = await pollJobContent(jobIdByTheme[theme.id], isStale);
-          if (isStale()) return 'stale' as const;
-          if (result.status === 'complete') applyFinalContent(theme.id, result.content);
-          setLoadingVariants(prev => ({ ...prev, [theme.id]: false }));
-          return result.status;
-        }));
-        if (isStale()) return;
-        setIsReconnecting(false);
-        readyCount += outcomes.filter(s => s === 'complete').length;
-        stillPending = outcomes.filter(s => s === 'timeout').length;
-      }
-
-      // Keep the batch only while a variant might still land on the server. A
-      // request the server refused or failed leaves nothing to reconnect to, so
-      // holding the batch would just make the next load poll for a dead job.
-      if (stillPending === 0) clearPendingBatch();
-
-      const allReady = readyCount === themes.length;
-      const errorMessage = firstError instanceof Error ? firstError.message : undefined;
-
-      if (allReady) {
-        toast({ title: `${readyCount} itineraries ready!`, description: "Explore different themed versions of your trip" });
-      } else if (readyCount > 0) {
+      if (result.ok) {
         toast({
-          title: `${readyCount} of ${themes.length} itineraries ready`,
-          description: stillPending > 0
-            ? "The rest didn't come through — reload to pick them up, or try again"
-            : errorMessage ?? "The rest couldn't be generated — please try again",
+          title: `${themes[0].emoji} ${themes[0].name} is ready!`,
+          description: themes.length > 1
+            ? "Tap another theme to build a different version of the trip"
+            : "Explore your trip below",
         });
       } else {
         toast({
-          title: "Couldn't load your itineraries",
-          description: errorMessage
-            ?? (stillPending > 0
-              ? "The connection dropped before they arrived. Please try again."
-              : "Please try again."),
+          title: "Couldn't load your itinerary",
+          description: result.error instanceof Error
+            ? result.error.message
+            : result.stillPending
+              ? "The connection dropped before it arrived. Please try again."
+              : "Please try again.",
           variant: "destructive",
         });
       }
@@ -719,7 +786,7 @@ const Index = () => {
         setIsAnalyzingMedia(false);
       }
     }
-  }, [preferences, suggestThemes, generateSingleItinerary, analyzeInspiration]);
+  }, [preferences, suggestThemes, runVariant, analyzeInspiration]);
 
   const handleEdit = useCallback(async (editRequest: string) => {
     const current = itineraries[activeVariant];
@@ -856,7 +923,7 @@ const Index = () => {
                     {isSaved ? "Saved" : "Save trip"}
                   </button>
                 </div>
-                <ItinerarySwitcher variants={itineraries} activeIndex={activeVariant} onSelect={setActiveVariant} loadingVariants={loadingVariants} />
+                <ItinerarySwitcher variants={itineraries} activeIndex={activeVariant} onSelect={handleSelectVariant} loadingVariants={loadingVariants} />
               </div>
             )}
 
