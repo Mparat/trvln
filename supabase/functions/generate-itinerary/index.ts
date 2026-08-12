@@ -1,6 +1,18 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  buildDateContext,
+  buildDurationContext,
+  buildSharedQuerySpecs,
+  buildThemeQuerySpec,
+  formatResearchContext,
+  getBudgetLabel,
+  getFlightBudget,
+  resolveDestinations,
+  runQuerySpecs,
+  type ResearchBundle,
+} from "../_shared/research.ts";
 // deploy-v3
 
 const corsHeaders = {
@@ -57,50 +69,11 @@ const RequestSchema = z.object({
   // backgrounded/reloaded tab can reconnect and fetch the completed result.
   jobId: z.string().uuid().optional(),
   batchId: z.string().uuid().optional(),
+  // Points at research-trip's shared payload for this batch. Optional so the
+  // function still works standalone, doing its own research pass.
+  researchId: z.string().uuid().optional(),
 });
 
-
-// Helper function to call Perplexity for grounded web search
-async function searchWithPerplexity(
-  query: string, 
-  apiKey: string
-): Promise<{ content: string; citations: string[] }> {
-  try {
-    console.log("Perplexity search query:", query);
-    
-    const response = await fetch('https://api.perplexity.ai/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'sonar',
-        messages: [
-          { 
-            role: 'system', 
-            content: 'You are a travel research assistant. Provide specific, detailed recommendations with exact names of restaurants, hotels, tours, and activities. When researching hotels, prioritize options within the specified price range and include nightly rates. If most options exceed the budget, explicitly note this and suggest alternatives. Include price ranges when available. Be comprehensive but concise.' 
-          },
-          { role: 'user', content: query }
-        ],
-      }),
-    });
-
-    if (!response.ok) {
-      console.error("Perplexity API error:", response.status);
-      return { content: '', citations: [] };
-    }
-
-    const data = await response.json();
-    return {
-      content: data.choices?.[0]?.message?.content || '',
-      citations: data.citations || []
-    };
-  } catch (error) {
-    console.error("Perplexity search error:", error);
-    return { content: '', citations: [] };
-  }
-}
 
 // Helper to format dates for booking URLs
 function formatDateForBooking(dateStr: string | undefined): string {
@@ -159,7 +132,7 @@ serve(async (req) => {
       );
     }
 
-    const { preferences, themeVariant, jobId, batchId } = validationResult.data;
+    const { preferences, themeVariant, jobId, batchId, researchId } = validationResult.data;
     registeredJobId = jobId;
 
     console.log("Received preferences:", JSON.stringify(preferences, null, 2));
@@ -217,101 +190,10 @@ serve(async (req) => {
       additionalNotes,
     } = preferences;
 
-    // Build budget context
-    const getBudgetLabel = (value: number) => {
-      if (value <= 25) return { label: "Budget", accommodation: "$0-$50/night", daily: "$50-80/day" };
-      if (value <= 50) return { label: "Moderate", accommodation: "$50-$100/night", daily: "$100-150/day" };
-      if (value <= 75) return { label: "Comfortable", accommodation: "$100-$200/night", daily: "$200-300/day" };
-      return { label: "Luxury", accommodation: "$200+/night", daily: "$400+/day" };
-    };
-
-    const getFlightBudget = (value: number) => {
-      if (value <= 25) return "$100-$300";
-      if (value <= 50) return "$300-$600";
-      if (value <= 75) return "$600-$1000";
-      return "$1000+";
-    };
-
     const budgetInfo = getBudgetLabel(budgetAccommodation);
     const flightBudget = getFlightBudget(budgetFlight);
-
-    // Build duration context
-    const computeInclusiveDays = (startISO?: string, endISO?: string) => {
-      if (!startISO || !endISO) return null;
-      const start = new Date(startISO);
-      const end = new Date(endISO);
-      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
-      const diffMs = end.getTime() - start.getTime();
-      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-      return diffDays + 1; // inclusive
-    };
-
-    let durationContext = "";
-
-    // If user chose exact dates, calculate base duration and apply flexibility
-    if (dateFlexibility === "strict") {
-      const daysFromDates = computeInclusiveDays(startDate, endDate);
-      if (daysFromDates) {
-        if (flexibleDays && flexibleDays > 0) {
-          // User has exact dates but with ± N days flexibility
-          const minDays = Math.max(1, daysFromDates - flexibleDays);
-          const maxDays = daysFromDates + flexibleDays;
-          durationContext = `${minDays}-${maxDays} days (base: ${daysFromDates} days, ±${flexibleDays} days flexible)`;
-        } else {
-          durationContext = `exactly ${daysFromDates} days`;
-        }
-      } else {
-        durationContext = "dates provided but duration unclear";
-      }
-    } else {
-      switch (durationFlexibility) {
-        case "weekend":
-          durationContext = "2-3 day weekend trip";
-          break;
-        case "long-weekend":
-          durationContext = "4-5 day long weekend";
-          break;
-        case "1-week":
-          durationContext = "7 day trip";
-          break;
-        case "2-weeks":
-          durationContext = "14 day trip";
-          break;
-        case "strict":
-          durationContext = `exactly ${durationDays} days`;
-          break;
-        case "flexible-days":
-          durationContext = `approximately ${durationDays} days (±2 days flexible)`;
-          break;
-        default:
-          durationContext = "flexible duration - suggest optimal length";
-      }
-    }
-
-    // Build date context
-    let dateContext = "";
-    switch (dateFlexibility) {
-      case "strict":
-        if (startDate && endDate) {
-          if (flexibleDays && flexibleDays > 0) {
-            // Exact dates with flexibility - AI can extend trip by ± N days on either end
-            dateContext = `Target dates: ${startDate} to ${endDate} (±${flexibleDays} days flexible on either end). You may start up to ${flexibleDays} days earlier or end up to ${flexibleDays} days later if it improves the trip. Choose what works best for the destination and activities.`;
-          } else {
-            dateContext = `Fixed dates: ${startDate} to ${endDate}`;
-          }
-        } else {
-          dateContext = "Specific dates (not provided)";
-        }
-        break;
-      case "flexible-days":
-        dateContext = startDate ? `Around ${startDate} (±few days flexible)` : "Flexible around specific dates";
-        break;
-      case "month":
-        dateContext = targetMonth ? `Target: ${targetMonth}` : "Specific month/season";
-        break;
-      default:
-        dateContext = "Anytime - recommend best time to visit";
-    }
+    const durationContext = buildDurationContext(preferences);
+    const dateContext = buildDateContext(preferences);
 
     // Build vibe context
     const guidedLabels: Record<string, string> = {
@@ -333,73 +215,65 @@ This itinerary MUST embody the "${themeVariant.name}" theme throughout.
     }
 
     // ============================================
-    // DESTINATION RESOLUTION PASS
-    // When no explicit city is given, ask Claude Haiku to pick the best
-    // match before Perplexity runs, so all research is destination-specific.
+    // SHARED RESEARCH
+    // research-trip ran the destination resolution and every non-theme query
+    // once for this batch; load it rather than repeating that work per variant.
+    // ============================================
+    type SharedResearch = {
+      destinations: string[];
+      destinationWasResolved: boolean;
+      research: ResearchBundle;
+    };
+    let sharedResearch: SharedResearch | null = null;
+
+    if (researchId) {
+      const { data: researchRow, error: researchError } = await supabaseAdmin
+        .from("trip_research")
+        .select("destinations, destination_was_resolved, research")
+        .eq("id", researchId)
+        .maybeSingle();
+
+      if (researchError || !researchRow) {
+        // Fall back to researching locally rather than failing the itinerary.
+        console.error("Could not load shared research, falling back to a local pass:", researchError);
+      } else {
+        sharedResearch = {
+          destinations: researchRow.destinations ?? [],
+          destinationWasResolved: researchRow.destination_was_resolved ?? false,
+          research: (researchRow.research ?? {}) as ResearchBundle,
+        };
+      }
+    }
+
+    // ============================================
+    // DESTINATION RESOLUTION
+    // Skipped when research-trip already resolved it for this batch, so every
+    // variant of one trip plans for the same place.
     // ============================================
     let resolvedCities: string[] = [...(cities ?? [])];
     let destinationWasResolved = false;
 
-    if (resolvedCities.length === 0) {
-      console.log("No explicit cities — resolving destination from preferences...");
-      try {
-        const resolutionPrompt = `You are a travel destination expert. Based on the traveler's preferences below, choose 1-2 destinations that best fit. Be decisive and concrete — a place a traveler can actually plan around, never a continent or a vague area like "Southeast Asia".
-
-Pick the unit that matches how the trip actually moves:
-- A trip based in one place is a city: "Chiang Mai, Thailand".
-- A trip that moves through an area — a road trip, a thru-hike, a hut-to-hut trek, island hopping, a wine route — is the region plus the anchor towns that bound it: "Dolomites, Italy (Cortina d'Ampezzo to Ortisei)". Naming only the gateway city would send the research to the wrong place, because the trip happens between the towns, not in one of them.
-
-Preferences:
-- What they described: ${additionalNotes || "Not specified"}
-- Atmosphere: ${atmosphere?.join(", ") || "no preference"}
-- Interests: ${interests?.join(", ") || "no preference"}
-- Adventure level: ${adventureLevel || "active"}
-- Food preferences: ${foodDrink?.join(", ") || "no preference"}
-- Accommodation budget: ${budgetInfo.label} (${budgetInfo.accommodation})
-- Flight budget: ${noFlight ? "no flight needed (local/ground trip)" : flightBudget + " round trip"}
-- Departing from: ${departureCity || "unknown"}
-- Travel timing: ${dateContext}
-- Duration: ${durationContext}
-
-Respond with ONLY a JSON array of 1-2 destination strings. Examples:
-["Lisbon, Portugal"]
-["Chiang Mai, Thailand", "Bangkok, Thailand"]
-["Dolomites, Italy (Cortina d'Ampezzo to Ortisei)"]
-["Kii Peninsula, Japan (Kumano Kodo, Tanabe to Nachi)"]
-
-No explanation. Just the JSON array.`;
-
-        const resolutionResponse = await timePhase("destination_resolution", () =>
-          fetch("https://api.anthropic.com/v1/messages", {
-            method: "POST",
-            headers: {
-              "x-api-key": ANTHROPIC_API_KEY,
-              "anthropic-version": "2023-06-01",
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              model: "claude-haiku-4-5",
-              messages: [{ role: "user", content: resolutionPrompt }],
-              // Region answers carry their anchor towns, so they run longer than a bare city name.
-              max_tokens: 200,
-            }),
-          }));
-
-        if (resolutionResponse.ok) {
-          const resolutionData = await resolutionResponse.json();
-          const resolutionText = resolutionData.content?.[0]?.text?.trim() ?? "";
-          // Strip any accidental code fences
-          const cleaned = resolutionText.replace(/```[a-z]*\n?/gi, "").trim();
-          const parsed = JSON.parse(cleaned);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            resolvedCities = parsed.filter((d: unknown) => typeof d === "string");
-            destinationWasResolved = true;
-            console.log("Resolved destinations:", resolvedCities);
-          }
-        }
-      } catch (err) {
-        console.error("Destination resolution failed — proceeding without explicit cities:", err);
-      }
+    if (sharedResearch) {
+      resolvedCities = sharedResearch.destinations;
+      destinationWasResolved = sharedResearch.destinationWasResolved;
+      console.log("Using destinations from shared research:", resolvedCities);
+    } else {
+      const resolution = await timePhase("destination_resolution", () => resolveDestinations({
+        cities: cities ?? [],
+        additionalNotes,
+        atmosphere,
+        interests,
+        adventureLevel,
+        foodDrink,
+        budgetInfo,
+        flightBudget,
+        noFlight,
+        departureCity,
+        dateContext,
+        durationContext,
+      }, ANTHROPIC_API_KEY));
+      resolvedCities = resolution.cities;
+      destinationWasResolved = resolution.wasResolved;
     }
 
     // Build inspiration context
@@ -453,179 +327,40 @@ ${additionalNotes || "None provided"}
 
     // ============================================
     // PERPLEXITY WEB SEARCH FOR GROUNDED RESEARCH
+    // Only the activities query depends on the theme, so that is all this
+    // invocation runs when research-trip already did the shared work.
     // ============================================
-    console.log("Starting Perplexity grounded research...");
+    const queryContext = {
+      resolvedCities,
+      interests,
+      foodDrink,
+      additionalNotes,
+      budgetInfo,
+      durationDays,
+      startDate,
+      endDate,
+      targetMonth,
+      noFlight,
+      departureCity,
+    };
 
-    const destinationStr = resolvedCities.length > 0 ? resolvedCities.join(', ') : 'popular travel destinations';
-    const primaryCity = resolvedCities[0] || 'the destination';
-    const interestsStr = interests?.length > 0 ? interests.join(', ') : 'general sightseeing';
-    const foodStr = foodDrink?.length > 0 ? foodDrink.join(', ') : 'local cuisine';
-    const themeStr = themeVariant?.name || '';
-    const currentYear = new Date().getFullYear();
-
-    // The traveler's own words are usually the most specific thing in the
-    // request ("hut to hut", "no driving", "travelling with a toddler"). They
-    // used to reach only the final prompt, so the research never saw the trip
-    // the user actually described.
-    const tripNotes = (additionalNotes ?? '').trim().slice(0, 500);
-    const notesClause = tripNotes
-      ? ` The traveler describes the trip as: "${tripNotes}". Prioritise recommendations that fit that description.`
-      : '';
-
-    // Determine trip length for context-aware queries
-    const tripDaysNum = durationDays || 7;
-    const isSingleCity = resolvedCities.length === 1;
-    const isLongTrip = tripDaysNum >= 7;
-
-    // Keyed so a conditional query can be added without shifting the indices
-    // the context block reads from.
-    const searchSpecs: { key: string; query: string }[] = [
-      // Activities and things to do
-      {
-        key: 'activities',
-        query: `Best things to do in ${destinationStr} for ${interestsStr} travelers. Include specific activity names, tour recommendations, must-visit attractions, hidden gems, and neighborhoods to explore.${themeStr ? ` Focus on ${themeStr} experiences.` : ''} ${budgetInfo.label} budget level.${notesClause}`,
-      },
-
-      // Restaurants and food scene — emphasise currently operating
-      {
-        key: 'restaurants',
-        query: `Best ${foodStr} restaurants currently open in ${destinationStr} as of ${currentYear}. Only include establishments confirmed to be actively operating with recent positive reviews. Include specific restaurant names, neighborhoods, price ranges, and what they are known for. Exclude any restaurants that have closed, are temporarily closed, or have uncertain operating status. ${budgetInfo.label} budget.${tripNotes ? ` The traveler describes the trip as: "${tripNotes}" — if this trip spends nights somewhere without restaurants nearby (a mountain hut, a lodge, a remote village, a boat), say so and name where meals are actually eaten there instead.` : ''}`,
-      },
-
-      // Where to sleep, in whatever form this trip actually needs
-      {
-        key: 'accommodation',
-        query: `Best ${budgetInfo.label} places to stay in ${destinationStr} priced ${budgetInfo.accommodation}. ${startDate && endDate ? `For dates: check-in ${startDate}, check-out ${endDate}.` : targetMonth ? `For travel in ${targetMonth}.` : ''} Include specific names with nightly rates and where each one is.${tripNotes ? ` The traveler describes the trip as: "${tripNotes}" — include the kinds of lodging this trip actually requires (for example mountain huts or refuges, guesthouses, campsites, lodges, hostels, ryokan), not only conventional hotels, and note how each is booked and what a night includes such as half board.` : ''}`,
-      },
-
-      // Nearby destinations + transportation (combined)
-      {
-        key: 'nearbyAndTransport',
-        query: isSingleCity && isLongTrip
-          ? `For a ${tripDaysNum}-day trip based in ${primaryCity}: what other cities should I visit, how to travel between them (trains, buses, flights with prices and times), and how many days to spend in each? Include day trips and overnight options.${notesClause}`
-          : `Best day trips and nearby destinations from ${destinationStr} for a ${tripDaysNum}-day trip. Include travel time, transport options with prices, and why each is worth visiting.${notesClause}`,
-      },
-
-      // Seasonal & practical information
-      {
-        key: 'seasonal',
-        query: `${destinationStr} travel in ${targetMonth || 'the travel season'}. Include weather, peak vs off-season pricing, festivals or events, crowd levels, and any seasonal closures.${notesClause}`,
-      },
-
-      // Planning, booking windows, access rules, conditions and required skill.
-      // These are the details that decide whether a trip is possible at all,
-      // and none of the queries above ask about them.
-      {
-        key: 'planning',
-        query: `Practical planning for a ${tripDaysNum}-day trip in ${destinationStr}${targetMonth ? ` in ${targetMonth}` : ''}${tripNotes ? `, described by the traveler as: "${tripNotes}"` : ''}. Answer each of these specifically for ${currentYear}: (1) How far in advance do the places to stay need to be booked, and how is each one booked — online, by email, deposit required, cash only? (2) What permits, reservations, entry fees, timed-entry slots, or vehicle and access restrictions apply, and how are they obtained? (3) What conditions, closures, or seasonal limits affect this trip, and what is the usable window? (4) What fitness or skill level, equipment, and guiding does it require, and where locally can equipment be rented or a guide hired, at what price?`,
-      },
+    const specs = [
+      buildThemeQuerySpec(queryContext, themeVariant?.name ?? ''),
+      ...(sharedResearch ? [] : buildSharedQuerySpecs(queryContext)),
     ];
 
-    // Flight estimates (conditional)
-    if (!noFlight && departureCity) {
-      searchSpecs.push({
-        key: 'flights',
-        query: `Flights from ${departureCity} to ${primaryCity} in ${targetMonth || 'upcoming months'}. Include typical price ranges, best airlines, flight duration, and whether nonstop options exist.`,
-      });
-    }
-
-    // Run all searches in parallel for speed
-    console.log(`Executing ${searchSpecs.length} Perplexity research queries...`);
-    const results = await timePhase("perplexity_research", () =>
-      Promise.all(searchSpecs.map(spec => searchWithPerplexity(spec.query, PERPLEXITY_API_KEY))));
-
-    type ResearchResult = { content: string; citations: string[] };
-    const research: Record<string, ResearchResult | undefined> = {};
-    searchSpecs.forEach((spec, i) => { research[spec.key] = results[i]; });
+    const freshResearch = await timePhase("perplexity_research", () =>
+      runQuerySpecs(specs, PERPLEXITY_API_KEY));
+    const research: ResearchBundle = { ...(sharedResearch?.research ?? {}), ...freshResearch };
 
     // Individual queries can come back empty, but if every one did then the
     // grounding failed and anything generated would be pure invention.
-    if (results.every(r => !r.content)) {
+    if (Object.values(research).every(r => !r?.content)) {
       throw new Error("Grounded research returned no content for any query");
     }
 
-    console.log("Perplexity research completed. Building grounded context...");
-
-    const activitiesResearch = research.activities;
-    const restaurantsResearch = research.restaurants;
-    const accommodationResearch = research.accommodation;
-    const nearbyAndTransportResearch = research.nearbyAndTransport;
-    const seasonalResearch = research.seasonal;
-    const planningResearch = research.planning;
-    const flightResearch = research.flights; // Undefined when no flight query ran
-
-    const citeList = (r: ResearchResult | undefined) =>
-      r?.citations?.length ? r.citations.map((c, i) => `${i + 1}. ${c}`).join('\n') : 'No citations available';
-
-    const groundedResearchContext = `
-## GROUNDED RESEARCH DATA (From Live Web Search)
-
-**CRITICAL INSTRUCTIONS:** The following is retrieved from live web search — treat it as FACTUAL GROUNDING.
-- ONLY recommend places, activities, and restaurants that appear in this research
-- Do NOT hallucinate establishment names or URLs
-- For anything not in the research, use the fallback URL patterns in the system prompt
-
----
-
-### 🗺️ NEARBY DESTINATIONS, DAY TRIPS & TRANSPORTATION
-${nearbyAndTransportResearch?.content || 'No nearby destinations/transport research available.'}
-
-**Citations:**
-${citeList(nearbyAndTransportResearch)}
-
----
-
-### 📅 SEASONAL & PRACTICAL INFORMATION
-${seasonalResearch?.content || 'No seasonal research available.'}
-
-**Citations:**
-${citeList(seasonalResearch)}
-
----
-
-### 🧭 PLANNING, BOOKING, ACCESS & CONDITIONS
-${planningResearch?.content || 'No planning research available.'}
-
-**Use this section for:** bookingChecklist lead times and costs, summary.assumptions, transitNote content, and any permit, reservation, access restriction, seasonal window, or required gear/guiding the traveler must arrange. If this research says something must be booked months ahead, requires a permit, or needs equipment or a guide, that belongs in the itinerary — do not leave it out because it is not an attraction.
-
-**Citations:**
-${citeList(planningResearch)}
-
----
-
-### ✈️ FLIGHT INFORMATION
-${flightResearch?.content || 'No flight research available - use Google Flights for accurate pricing.'}
-
-**Citations:**
-${citeList(flightResearch)}
-
----
-
-### 🎯 ACTIVITIES & THINGS TO DO
-${activitiesResearch?.content || 'No activity research available.'}
-
-**Citations:**
-${citeList(activitiesResearch)}
-
----
-
-### 🍽️ RESTAURANTS & FOOD
-${restaurantsResearch?.content || 'No restaurant research available.'}
-
-**Citations:**
-${citeList(restaurantsResearch)}
-
----
-
-### 🏨 ACCOMMODATION
-${accommodationResearch?.content || 'No accommodation research available.'}
-
-**User's Accommodation Budget:** ${budgetInfo.accommodation}
-**If prices exceed this range, note why and provide a budget alternative.**
-
-**Citations:**
-${citeList(accommodationResearch)}
-`;
+    console.log("Grounded research ready. Building context...");
+    const groundedResearchContext = formatResearchContext(research, budgetInfo);
 
     const systemPrompt = `You are an expert travel planning AI assistant. Your task is to create comprehensive, well-researched travel itineraries with cited sources for every recommendation.
 

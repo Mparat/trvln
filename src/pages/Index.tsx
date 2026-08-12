@@ -110,6 +110,9 @@ type GenerationContext = {
   batchId: string;
   jobIdByTheme: Record<string, string>;
   runId: number;
+  // Shared grounded research for the batch. Null when research-trip failed, in
+  // which case each variant researches for itself.
+  researchId: string | null;
 };
 
 const loadPendingBatch = (): PendingBatch | null => {
@@ -389,11 +392,31 @@ const Index = () => {
     return data.themes as { id: string; name: string; emoji: string; tagline?: string }[];
   }, [getHeaders]);
 
+  // Runs the research every variant shares — destination resolution and all
+  // the non-theme searches — once per batch. Returns an id the generate calls
+  // pass along. On failure each variant falls back to researching for itself,
+  // so a trip is still produced, just less cheaply.
+  const researchTrip = useCallback(async (
+    prefs: TripPreferences,
+    batchId: string
+  ): Promise<string | null> => {
+    try {
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/research-trip`, {
+        method: "POST", headers: getHeaders(), body: JSON.stringify({ preferences: prefs, batchId }),
+      });
+      if (!response.ok) return null;
+      const data = await response.json();
+      return typeof data.researchId === "string" ? data.researchId : null;
+    } catch {
+      return null;
+    }
+  }, [getHeaders]);
+
   const generateSingleItinerary = useCallback(async (
     prefs: TripPreferences,
     themeVariant: { id: string; name: string; emoji: string },
     onUpdate: (content: string) => void,
-    jobIds?: { jobId: string; batchId: string }
+    jobIds?: { jobId: string; batchId: string; researchId?: string }
   ) => {
     const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-itinerary`, {
       method: "POST", headers: getHeaders(), body: JSON.stringify({ preferences: prefs, themeVariant, ...jobIds }),
@@ -607,7 +630,7 @@ const Index = () => {
         const displayContent = stripPlanningSection(updatedContent);
         setItineraries(prev => prev.map(it =>
           it.id === theme.id ? { ...it, content: displayContent } : it));
-      }, { jobId, batchId: ctx.batchId });
+      }, { jobId, batchId: ctx.batchId, ...(ctx.researchId ? { researchId: ctx.researchId } : {}) });
 
       // A stream cut short leaves nothing to show — often literally nothing.
       // Don't call that a success; the server finished and saved the result
@@ -665,6 +688,9 @@ const Index = () => {
       batchId: crypto.randomUUID(),
       jobIdByTheme: {},
       runId: runIdRef.current,
+      // The batch's research id didn't survive the reload, so this variant
+      // researches for itself rather than not running at all.
+      researchId: null,
     };
     generationContextRef.current = ctx;
 
@@ -732,7 +758,12 @@ const Index = () => {
         setIsAnalyzingMedia(false);
       }
 
+      // Themes and the shared research both depend only on the preferences, so
+      // run them together — the searches are the slow half and would otherwise
+      // wait on the theme call for nothing.
+      const batchId = crypto.randomUUID();
       setIsSuggestingThemes(true);
+      const researchPromise = researchTrip(effectivePreferences, batchId);
       const themes = await suggestThemes(effectivePreferences);
       if (themes.length === 0) throw new Error("No themes came back for this trip — try adding more detail");
       setIsSuggestingThemes(false);
@@ -745,9 +776,12 @@ const Index = () => {
       // actually switches to them.
       const ctx: GenerationContext = {
         preferences: effectivePreferences,
-        batchId: crypto.randomUUID(),
+        batchId,
         jobIdByTheme: {},
         runId,
+        // Every variant of this trip reuses the one research pass, including
+        // the ones generated later when the user switches themes.
+        researchId: await researchPromise,
       };
       generationContextRef.current = ctx;
       startedVariantsRef.current = new Set();
