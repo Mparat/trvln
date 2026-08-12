@@ -862,7 +862,7 @@ const Index = () => {
 
             {/* Summary card — markdown fallback only */}
             {currentItinerary?.content && !loadingVariants[currentItinerary.id] && !currentItinerary.structuredData && (
-              <TripSummaryCard itinerary={currentItinerary.content} departureCity={preferences.departureCity} startDate={preferences.startDate} endDate={preferences.endDate} durationDays={preferences.durationDays} />
+              <TripSummaryCard data={currentItinerary.structuredData} departureCity={preferences.departureCity} startDate={preferences.startDate} endDate={preferences.endDate} durationDays={preferences.durationDays} />
             )}
 
             {/* Itinerary card */}
