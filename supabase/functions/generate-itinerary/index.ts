@@ -190,10 +190,16 @@ serve(async (req) => {
       throw new Error("ANTHROPIC_API_KEY is not configured");
     }
     
+    // Grounded research is not optional: the system prompt tells Claude that
+    // everything it names comes from live search, so generating without it
+    // produces a confidently-sourced itinerary built entirely on model priors.
     // Trimmed: a secret pasted with a trailing newline produces an
     // "Authorization: Bearer pplx-…\n" header and a 401 that looks exactly like
     // a revoked key.
     const PERPLEXITY_API_KEY = Deno.env.get("PERPLEXITY_API_KEY")?.trim();
+    if (!PERPLEXITY_API_KEY) {
+      throw new Error("PERPLEXITY_API_KEY is not configured");
+    }
 
     const {
       media,
@@ -344,7 +350,11 @@ This itinerary MUST embody the "${themeVariant.name}" theme throughout.
     if (resolvedCities.length === 0) {
       console.log("No explicit cities — resolving destination from preferences...");
       try {
-        const resolutionPrompt = `You are a travel destination expert. Based on the traveler's preferences below, choose 1-2 specific destination cities or regions that best fit. Be decisive and concrete — not "Southeast Asia" but "Chiang Mai, Thailand".
+        const resolutionPrompt = `You are a travel destination expert. Based on the traveler's preferences below, choose 1-2 destinations that best fit. Be decisive and concrete — a place a traveler can actually plan around, never a continent or a vague area like "Southeast Asia".
+
+Pick the unit that matches how the trip actually moves:
+- A trip based in one place is a city: "Chiang Mai, Thailand".
+- A trip that moves through an area — a road trip, a thru-hike, a hut-to-hut trek, island hopping, a wine route — is the region plus the anchor towns that bound it: "Dolomites, Italy (Cortina d'Ampezzo to Ortisei)". Naming only the gateway city would send the research to the wrong place, because the trip happens between the towns, not in one of them.
 
 Preferences:
 - What they described: ${additionalNotes || "Not specified"}
@@ -361,6 +371,8 @@ Preferences:
 Respond with ONLY a JSON array of 1-2 destination strings. Examples:
 ["Lisbon, Portugal"]
 ["Chiang Mai, Thailand", "Bangkok, Thailand"]
+["Dolomites, Italy (Cortina d'Ampezzo to Ortisei)"]
+["Kii Peninsula, Japan (Kumano Kodo, Tanabe to Nachi)"]
 
 No explanation. Just the JSON array.`;
 
@@ -375,7 +387,8 @@ No explanation. Just the JSON array.`;
             body: JSON.stringify({
               model: "claude-haiku-4-5",
               messages: [{ role: "user", content: resolutionPrompt }],
-              max_tokens: 100,
+              // Region answers carry their anchor towns, so they run longer than a bare city name.
+              max_tokens: 200,
             }),
           }));
 
@@ -448,78 +461,114 @@ ${additionalNotes || "None provided"}
     // ============================================
     // PERPLEXITY WEB SEARCH FOR GROUNDED RESEARCH
     // ============================================
-    let groundedResearchContext = "";
-    // Whether the research actually came back with anything. Drives which set of
-    // sourcing rules the system prompt carries.
-    let hasGroundedResearch = false;
-    
-    if (PERPLEXITY_API_KEY) {
-      console.log("Starting Perplexity grounded research...");
-      
-      const destinationStr = resolvedCities.length > 0 ? resolvedCities.join(', ') : 'popular travel destinations';
-      const primaryCity = resolvedCities[0] || 'the destination';
-      const interestsStr = interests?.length > 0 ? interests.join(', ') : 'general sightseeing';
-      const foodStr = foodDrink?.length > 0 ? foodDrink.join(', ') : 'local cuisine';
-      const themeStr = themeVariant?.name || '';
+    console.log("Starting Perplexity grounded research...");
 
-      // Determine trip length for context-aware queries
-      const tripDaysNum = durationDays || 7;
-      const isSingleCity = resolvedCities.length === 1;
-      const isLongTrip = tripDaysNum >= 7;
-      
-      // Build focused search queries based on user preferences
-      const searchQueries: string[] = [
-        // Query 1: Activities and things to do
-        `Best things to do in ${destinationStr} for ${interestsStr} travelers. Include specific activity names, tour recommendations, must-visit attractions, hidden gems, and neighborhoods to explore.${themeStr ? ` Focus on ${themeStr} experiences.` : ''} ${budgetInfo.label} budget level.`,
+    const destinationStr = resolvedCities.length > 0 ? resolvedCities.join(', ') : 'popular travel destinations';
+    const primaryCity = resolvedCities[0] || 'the destination';
+    const interestsStr = interests?.length > 0 ? interests.join(', ') : 'general sightseeing';
+    const foodStr = foodDrink?.length > 0 ? foodDrink.join(', ') : 'local cuisine';
+    const themeStr = themeVariant?.name || '';
+    const currentYear = new Date().getFullYear();
 
-        // Query 2: Restaurants and food scene — emphasise currently operating
-        `Best ${foodStr} restaurants currently open in ${destinationStr} as of ${new Date().getFullYear()}. Only include establishments confirmed to be actively operating with recent positive reviews. Include specific restaurant names, neighborhoods, price ranges, and what they are known for. Exclude any restaurants that have closed, are temporarily closed, or have uncertain operating status. ${budgetInfo.label} budget.`,
+    // The traveler's own words are usually the most specific thing in the
+    // request ("hut to hut", "no driving", "travelling with a toddler"). They
+    // used to reach only the final prompt, so the research never saw the trip
+    // the user actually described.
+    const tripNotes = (additionalNotes ?? '').trim().slice(0, 500);
+    const notesClause = tripNotes
+      ? ` The traveler describes the trip as: "${tripNotes}". Prioritise recommendations that fit that description.`
+      : '';
 
-        // Query 3: Accommodation with date-specific pricing
-        `Best ${budgetInfo.label} hotels in ${destinationStr} priced ${budgetInfo.accommodation}. ${startDate && endDate ? `For dates: check-in ${startDate}, check-out ${endDate}.` : targetMonth ? `For travel in ${targetMonth}.` : ''} Include specific hotel names with nightly rates and neighborhoods to stay.`,
+    // Determine trip length for context-aware queries
+    const tripDaysNum = durationDays || 7;
+    const isSingleCity = resolvedCities.length === 1;
+    const isLongTrip = tripDaysNum >= 7;
 
-        // Query 4: Nearby destinations + transportation (combined)
-        isSingleCity && isLongTrip
-          ? `For a ${tripDaysNum}-day trip based in ${primaryCity}: what other cities should I visit, how to travel between them (trains, buses, flights with prices and times), and how many days to spend in each? Include day trips and overnight options.`
-          : `Best day trips and nearby destinations from ${destinationStr} for a ${tripDaysNum}-day trip. Include travel time, transport options with prices, and why each is worth visiting.`,
+    // Keyed so a conditional query can be added without shifting the indices
+    // the context block reads from.
+    const searchSpecs: { key: string; query: string }[] = [
+      // Activities and things to do
+      {
+        key: 'activities',
+        query: `Best things to do in ${destinationStr} for ${interestsStr} travelers. Include specific activity names, tour recommendations, must-visit attractions, hidden gems, and neighborhoods to explore.${themeStr ? ` Focus on ${themeStr} experiences.` : ''} ${budgetInfo.label} budget level.${notesClause}`,
+      },
 
-        // Query 5: Seasonal & practical information
-        `${destinationStr} travel in ${targetMonth || 'the travel season'}. Include weather, peak vs off-season pricing, festivals or events, crowd levels, and any seasonal closures.`
-      ];
+      // Restaurants and food scene — emphasise currently operating
+      {
+        key: 'restaurants',
+        query: `Best ${foodStr} restaurants currently open in ${destinationStr} as of ${currentYear}. Only include establishments confirmed to be actively operating with recent positive reviews. Include specific restaurant names, neighborhoods, price ranges, and what they are known for. Exclude any restaurants that have closed, are temporarily closed, or have uncertain operating status. ${budgetInfo.label} budget.${tripNotes ? ` The traveler describes the trip as: "${tripNotes}" — if this trip spends nights somewhere without restaurants nearby (a mountain hut, a lodge, a remote village, a boat), say so and name where meals are actually eaten there instead.` : ''}`,
+      },
 
-      // Query 6: Flight estimates (conditional)
-      if (!noFlight && departureCity) {
-        searchQueries.push(
-          `Flights from ${departureCity} to ${primaryCity} in ${targetMonth || 'upcoming months'}. Include typical price ranges, best airlines, flight duration, and whether nonstop options exist.`
-        );
-      }
-      
-      // Run all searches in parallel for speed
-      console.log(`Executing ${searchQueries.length} Perplexity research queries...`);
-      const results = await timePhase("perplexity_research", () =>
-        Promise.all(searchQueries.map(query => searchWithPerplexity(query, PERPLEXITY_API_KEY))));
-      
-      // Every search failing returns empty content rather than throwing, so the
-      // research block can assemble into nothing but section headers. Left
-      // unchecked the model is then handed "ONLY recommend places that appear in
-      // the research" alongside no research at all — contradictory instructions
-      // that it can only resolve by inventing establishments and URLs, which is
-      // the exact failure the rules were written to prevent.
-      hasGroundedResearch = results.some(r => r.content.trim().length > 0);
-      console.log(`Perplexity research completed. grounded=${hasGroundedResearch}`);
-      if (!hasGroundedResearch) {
-        console.error("All Perplexity searches returned empty — generating without grounding.");
-      }
+      // Where to sleep, in whatever form this trip actually needs
+      {
+        key: 'accommodation',
+        query: `Best ${budgetInfo.label} places to stay in ${destinationStr} priced ${budgetInfo.accommodation}. ${startDate && endDate ? `For dates: check-in ${startDate}, check-out ${endDate}.` : targetMonth ? `For travel in ${targetMonth}.` : ''} Include specific names with nightly rates and where each one is.${tripNotes ? ` The traveler describes the trip as: "${tripNotes}" — include the kinds of lodging this trip actually requires (for example mountain huts or refuges, guesthouses, campsites, lodges, hostels, ryokan), not only conventional hotels, and note how each is booked and what a night includes such as half board.` : ''}`,
+      },
 
-      // Build the grounded context block
-      const activitiesResearch = results[0];
-      const restaurantsResearch = results[1];
-      const accommodationResearch = results[2];
-      const nearbyAndTransportResearch = results[3];
-      const seasonalResearch = results[4];
-      const flightResearch = results[5]; // May be undefined if no flight query
+      // Nearby destinations + transportation (combined)
+      {
+        key: 'nearbyAndTransport',
+        query: isSingleCity && isLongTrip
+          ? `For a ${tripDaysNum}-day trip based in ${primaryCity}: what other cities should I visit, how to travel between them (trains, buses, flights with prices and times), and how many days to spend in each? Include day trips and overnight options.${notesClause}`
+          : `Best day trips and nearby destinations from ${destinationStr} for a ${tripDaysNum}-day trip. Include travel time, transport options with prices, and why each is worth visiting.${notesClause}`,
+      },
 
-      groundedResearchContext = `
+      // Seasonal & practical information
+      {
+        key: 'seasonal',
+        query: `${destinationStr} travel in ${targetMonth || 'the travel season'}. Include weather, peak vs off-season pricing, festivals or events, crowd levels, and any seasonal closures.${notesClause}`,
+      },
+
+      // Planning, booking windows, access rules, conditions and required skill.
+      // These are the details that decide whether a trip is possible at all,
+      // and none of the queries above ask about them.
+      {
+        key: 'planning',
+        query: `Practical planning for a ${tripDaysNum}-day trip in ${destinationStr}${targetMonth ? ` in ${targetMonth}` : ''}${tripNotes ? `, described by the traveler as: "${tripNotes}"` : ''}. Answer each of these specifically for ${currentYear}: (1) How far in advance do the places to stay need to be booked, and how is each one booked — online, by email, deposit required, cash only? (2) What permits, reservations, entry fees, timed-entry slots, or vehicle and access restrictions apply, and how are they obtained? (3) What conditions, closures, or seasonal limits affect this trip, and what is the usable window? (4) What fitness or skill level, equipment, and guiding does it require, and where locally can equipment be rented or a guide hired, at what price?`,
+      },
+    ];
+
+    // Flight estimates (conditional)
+    if (!noFlight && departureCity) {
+      searchSpecs.push({
+        key: 'flights',
+        query: `Flights from ${departureCity} to ${primaryCity} in ${targetMonth || 'upcoming months'}. Include typical price ranges, best airlines, flight duration, and whether nonstop options exist.`,
+      });
+    }
+
+    // Run all searches in parallel for speed
+    console.log(`Executing ${searchSpecs.length} Perplexity research queries...`);
+    const results = await timePhase("perplexity_research", () =>
+      Promise.all(searchSpecs.map(spec => searchWithPerplexity(spec.query, PERPLEXITY_API_KEY))));
+
+    type ResearchResult = { content: string; citations: string[] };
+    const research: Record<string, ResearchResult | undefined> = {};
+    searchSpecs.forEach((spec, i) => { research[spec.key] = results[i]; });
+
+    // Every search failing returns empty content rather than throwing, so the
+    // research block can assemble into nothing but section headers. Left
+    // unchecked the model is then handed "ONLY recommend places that appear in
+    // the research" alongside no research at all — contradictory instructions
+    // that it can only resolve by inventing establishments and URLs, which is
+    // the exact failure the rules were written to prevent.
+    const hasGroundedResearch = results.some(r => r.content.trim().length > 0);
+    console.log(`Perplexity research completed. grounded=${hasGroundedResearch}`);
+    if (!hasGroundedResearch) {
+      console.error("All Perplexity searches returned empty — generating without grounding.");
+    }
+
+    const activitiesResearch = research.activities;
+    const restaurantsResearch = research.restaurants;
+    const accommodationResearch = research.accommodation;
+    const nearbyAndTransportResearch = research.nearbyAndTransport;
+    const seasonalResearch = research.seasonal;
+    const planningResearch = research.planning;
+    const flightResearch = research.flights; // Undefined when no flight query ran
+
+    const citeList = (r: ResearchResult | undefined) =>
+      r?.citations?.length ? r.citations.map((c, i) => `${i + 1}. ${c}`).join('\n') : 'No citations available';
+
+    const groundedResearchContext = `
 ## GROUNDED RESEARCH DATA (From Live Web Search)
 
 **CRITICAL INSTRUCTIONS:** The following is retrieved from live web search — treat it as FACTUAL GROUNDING.
@@ -533,7 +582,7 @@ ${additionalNotes || "None provided"}
 ${nearbyAndTransportResearch?.content || 'No nearby destinations/transport research available.'}
 
 **Citations:**
-${nearbyAndTransportResearch?.citations?.length > 0 ? nearbyAndTransportResearch.citations.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
+${citeList(nearbyAndTransportResearch)}
 
 ---
 
@@ -541,7 +590,17 @@ ${nearbyAndTransportResearch?.citations?.length > 0 ? nearbyAndTransportResearch
 ${seasonalResearch?.content || 'No seasonal research available.'}
 
 **Citations:**
-${seasonalResearch?.citations?.length > 0 ? seasonalResearch.citations.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
+${citeList(seasonalResearch)}
+
+---
+
+### 🧭 PLANNING, BOOKING, ACCESS & CONDITIONS
+${planningResearch?.content || 'No planning research available.'}
+
+**Use this section for:** bookingChecklist lead times and costs, summary.assumptions, transitNote content, and any permit, reservation, access restriction, seasonal window, or required gear/guiding the traveler must arrange. If this research says something must be booked months ahead, requires a permit, or needs equipment or a guide, that belongs in the itinerary — do not leave it out because it is not an attraction.
+
+**Citations:**
+${citeList(planningResearch)}
 
 ---
 
@@ -549,38 +608,35 @@ ${seasonalResearch?.citations?.length > 0 ? seasonalResearch.citations.map((c: s
 ${flightResearch?.content || 'No flight research available - use Google Flights for accurate pricing.'}
 
 **Citations:**
-${flightResearch?.citations?.length > 0 ? flightResearch.citations.map((c: string, i: number) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
+${citeList(flightResearch)}
 
 ---
 
 ### 🎯 ACTIVITIES & THINGS TO DO
-${activitiesResearch.content || 'No activity research available.'}
+${activitiesResearch?.content || 'No activity research available.'}
 
 **Citations:**
-${activitiesResearch.citations?.length > 0 ? activitiesResearch.citations.map((c, i) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
+${citeList(activitiesResearch)}
 
 ---
 
 ### 🍽️ RESTAURANTS & FOOD
-${restaurantsResearch.content || 'No restaurant research available.'}
+${restaurantsResearch?.content || 'No restaurant research available.'}
 
 **Citations:**
-${restaurantsResearch.citations?.length > 0 ? restaurantsResearch.citations.map((c, i) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
+${citeList(restaurantsResearch)}
 
 ---
 
 ### 🏨 ACCOMMODATION
-${accommodationResearch.content || 'No accommodation research available.'}
+${accommodationResearch?.content || 'No accommodation research available.'}
 
 **User's Accommodation Budget:** ${budgetInfo.accommodation}
 **If prices exceed this range, note why and provide a budget alternative.**
 
 **Citations:**
-${accommodationResearch.citations?.length > 0 ? accommodationResearch.citations.map((c, i) => `${i + 1}. ${c}`).join('\n') : 'No citations available'}
+${citeList(accommodationResearch)}
 `;
-    } else {
-      console.log("PERPLEXITY_API_KEY not configured - skipping grounded research");
-    }
 
     // Two sourcing regimes. With live research, the model is held to it. Without,
     // it is told plainly that there is none and pointed at the search-URL
@@ -603,7 +659,9 @@ You have been provided with LIVE WEB SEARCH RESULTS at the start of the user mes
 4. **Do NOT hallucinate establishment names** that don't appear in the research
 5. **When citing sources**, use the actual URLs from the research citations
 6. **For restaurants near activities**, use Google Maps search URLs for the neighborhood:
-   - Format: https://www.google.com/maps/search/?api=1&query=restaurants+near+NEIGHBORHOOD+CITY`
+   - Format: https://www.google.com/maps/search/?api=1&query=restaurants+near+NEIGHBORHOOD+CITY
+7. **The only name you may use that the research did not surface is a place already in this itinerary** — the hut, lodge, or hotel the traveler is booked into that night, when they eat there because nothing else is within reach. Naming that stay's own dining room is grounded; inventing a nearby restaurant is not.
+8. **If the research is thin for part of the trip, say less rather than more.** Fewer, sourced recommendations beat a full-looking day built on invention. Note the gap in summary.assumptions.`
       : `## Research Requirements (NO LIVE RESEARCH AVAILABLE)
 
 Live web search returned nothing for this trip, so there is no research document — do not refer to one.
@@ -873,11 +931,13 @@ STRICT RULES:
 - No markdown code fences in the actual output — the above \`\`\` are just for illustration
 - Every day must have exactly 3 periods: Morning, Afternoon, Evening
 - Each period must have EXACTLY 2 activities (no more, no fewer)
-- Include EXACTLY 2 dining options for ALL periods: Morning (breakfast), Afternoon (lunch), Evening (dinner). First must have "isPrimary": true (top pick), second must have "isPrimary": false (alternative). Both must be specific named restaurants — no generic descriptions.
-- DINING MUST BE UNIQUE: Every restaurant across the ENTIRE itinerary must be a DIFFERENT establishment. NEVER repeat the same restaurant in two periods or on two different days — not as a primary and not as an alternative. For an N-day trip you will name roughly N×6 distinct restaurants; if grounded research is limited, branch into nearby neighborhoods/towns to find fresh options rather than reusing one.
+- Include 1 or 2 dining options for every period: Morning (breakfast), Afternoon (lunch), Evening (dinner). The first must have "isPrimary": true (top pick); include a second with "isPrimary": false ONLY when a real, separate alternative exists within reach of where the traveler actually is at that hour. One real option beats two where the second is filler.
+- NEVER INVENT A RESTAURANT TO FILL A SLOT. Every name must come from the research above, or be the place the traveler is already staying that day, or — where no research was available — be a long-established place you are confident still exists. If nothing for a location meets that bar, give one option, the lodging's own kitchen, rather than a second name you cannot stand behind. A slot with one sourced option is correct; a slot with an invented second option is a failure.
+- WHERE MEALS ARE INCLUDED, SAY SO INSTEAD OF INVENTING CHOICE. When a stay includes meals or has no alternative nearby — a mountain hut or refuge on half board, a lodge, a ryokan, a safari camp, an all-inclusive, a boat, a remote village — the correct answer is that establishment. The same establishment MAY serve dinner and the next morning's breakfast; state that it is the hut/lodge's own dining room and what the meal plan covers.
+- OTHERWISE VARY THE RESTAURANTS: in towns and cities, where the traveler has real choice, do not repeat an establishment across periods or days — branch into nearby neighborhoods for fresh options. Repetition is only correct when it reflects where the traveler actually is, never when it is padding.
 - ONLY recommend restaurants confirmed to be currently open in the grounded research. If the research mentions any closure, "permanently closed", "temporarily closed", or uncertain status for an establishment, do NOT include it. When in doubt, prefer well-established restaurants with multiple recent reviews over newer or less-cited spots.
-- MATCH THE MEAL TO THE PERIOD: Morning dining must be breakfast spots (cafés, bakeries, brunch). Afternoon must be lunch spots. Evening must be dinner restaurants. Do not put a dinner restaurant in a morning slot.
-- VARY THE PRIMARY PICKS BY DAY: The "isPrimary": true restaurant for each period should feel distinct day-to-day in cuisine, vibe, and neighborhood — showcase the destination's range across the trip, don't anchor every day to the same kind of place.
+- MATCH THE MEAL TO THE PERIOD: Morning dining must be breakfast spots (cafés, bakeries, brunch, or the included hut/hotel breakfast). Afternoon must be lunch spots. Evening must be dinner. Do not put a dinner restaurant in a morning slot.
+- VARY THE PRIMARY PICKS BY DAY where the destination offers a choice: the "isPrimary": true option should feel distinct day-to-day in cuisine, vibe, and neighborhood — showcase the destination's range, don't anchor every day to the same kind of place.
 - Tags must only be from: transit, cultural, nature, hiking, beach, food, photo-worthy, walking, adventure, relaxation, shopping, nightlife
 - priority must be exactly "high", "medium", or "low"
 - Use real URLs from the grounded research — fallback to search URL patterns listed above
@@ -895,6 +955,8 @@ STRICT RULES:
 
 - Stay within budget or clearly explain tradeoffs
 - Always include destinations from the user's inspiration
+- When the destination is a region rather than a single city, plan across it — move between its towns and valleys as the trip requires, and do not collapse the itinerary into the gateway city
+- Turn the planning research into action: anything with a booking window, permit, reservation, access restriction, or equipment/guiding requirement belongs in bookingChecklist with its real lead time, and any constraint the traveler must accept belongs in summary.assumptions
 - Match adventure level and vibe throughout
 - For trips with few destinations and long duration, suggest nearby additions
 - Prioritize by the user's interests ranking
