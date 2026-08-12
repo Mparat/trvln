@@ -911,8 +911,13 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
-        // The system prompt is a top-level field, not a message.
-        system: systemPrompt,
+        // The system prompt is a top-level field, not a message. It is ~4k
+        // tokens and byte-identical on every request, for every trip, so mark it
+        // cacheable: subsequent generations skip re-processing it and start
+        // streaming sooner. Everything trip-specific (the grounded research, the
+        // prompt, the images) lives in the user turn after this breakpoint, so
+        // it never invalidates the cached prefix.
+        system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
         messages: [{ role: "user", content: userContent }],
         max_tokens: 32000,
         stream: true,
@@ -1012,6 +1017,15 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
               if (event.type === "message_delta") {
                 stopReason = event.delta?.stop_reason ?? stopReason;
                 outputTokens = event.usage?.output_tokens ?? outputTokens;
+              }
+              // Confirms the system-prompt cache is actually being hit. If
+              // cache_read stays at 0 across generations, something upstream of
+              // the breakpoint is changing between requests.
+              if (event.type === "message_start") {
+                const u = event.message?.usage;
+                if (u) {
+                  console.log(`[timing] cache: read=${u.cache_read_input_tokens ?? 0} write=${u.cache_creation_input_tokens ?? 0} uncached_input=${u.input_tokens ?? 0}`);
+                }
               }
             } catch { /* skip malformed lines */ }
           }
