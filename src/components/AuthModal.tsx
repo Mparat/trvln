@@ -9,9 +9,13 @@ import { toast } from "@/hooks/use-toast";
 interface AuthModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  // Fired the moment a sign-in is actually kicked off (Google redirect begins or
+  // a magic link is sent), so the caller knows a later modal close means
+  // "completing sign-in" rather than "cancelled".
+  onSignInStart?: () => void;
 }
 
-export function AuthModal({ open, onOpenChange }: AuthModalProps) {
+export function AuthModal({ open, onOpenChange, onSignInStart }: AuthModalProps) {
   const [email, setEmail] = useState("");
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
@@ -26,6 +30,10 @@ export function AuthModal({ open, onOpenChange }: AuthModalProps) {
     if (error) {
       toast({ title: "Couldn't sign in with Google", description: error.message, variant: "destructive" });
       setGoogleLoading(false);
+    } else {
+      // Redirect is under way — mark the sign-in as started so closing the modal
+      // isn't treated as a cancellation.
+      onSignInStart?.();
     }
     // On success the browser redirects away — nothing more to do
   };
@@ -43,6 +51,9 @@ export function AuthModal({ open, onOpenChange }: AuthModalProps) {
       toast({ title: "Couldn't send link", description: error.message, variant: "destructive" });
     } else {
       setSent(true);
+      // The link is out; completing sign-in reloads the tab. Keep any queued
+      // action (e.g. a pending save) alive even if the modal is closed now.
+      onSignInStart?.();
     }
   };
 
