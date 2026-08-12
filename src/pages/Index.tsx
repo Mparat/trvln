@@ -125,6 +125,31 @@ const clearPendingBatch = () => {
   try { window.localStorage.removeItem(PENDING_BATCH_KEY); } catch { /* ignore */ }
 };
 
+// Poll itinerary_jobs until the server finishes the given job, and return its
+// raw content (null if the job errored, timed out, or the caller went stale).
+// The edge function keeps generating and persists the result even after the
+// client disconnects, so this is how a tab recovers a stream it lost — whether
+// it was reloaded or just frozen in the background by mobile Safari/Chrome.
+const pollJobContent = async (
+  jobId: string,
+  isStale: () => boolean,
+  timeoutMs = 5 * 60 * 1000,
+): Promise<string | null> => {
+  const deadline = Date.now() + timeoutMs;
+  while (!isStale() && Date.now() < deadline) {
+    const { data } = await supabase
+      .from('itinerary_jobs')
+      .select('status,content')
+      .eq('id', jobId)
+      .maybeSingle();
+    if (isStale()) return null;
+    if (data?.status === 'complete' && data.content) return data.content;
+    if (data?.status === 'error') return null;
+    await new Promise(r => setTimeout(r, 2500));
+  }
+  return null;
+};
+
 // Parse a completed itinerary's JSON, repairing truncated output if needed.
 const parseStructuredItinerary = (content: string): ItineraryData | undefined => {
   try {
@@ -204,9 +229,10 @@ const Index = () => {
   // True while fetching itineraries the server finished after this tab was
   // backgrounded/reloaded mid-generation.
   const [isReconnecting, setIsReconnecting] = useState(false);
-  // Set true when a fresh generation starts, to supersede an in-flight reconnect
-  // poll so it doesn't overwrite the new run's results.
-  const reconnectAbortRef = useRef(false);
+  // Bumped whenever a generation or reconnect takes over. Async work captures
+  // the value it started under and bails out once it no longer matches, so a
+  // superseded run can't overwrite the current one's results or loading flags.
+  const runIdRef = useRef(0);
 
   // Auth + save state
   const [user, setUser] = useState<User | null>(null);
@@ -253,7 +279,9 @@ const Index = () => {
     const pending = loadPendingBatch();
     if (!pending || pending.jobs.length === 0) return;
 
-    reconnectAbortRef.current = false;
+    const runId = ++runIdRef.current;
+    let unmounted = false;
+    const isStale = () => unmounted || runIdRef.current !== runId;
     // Ensure switcher entries exist (restored session usually has them; if the
     // tab died before that persisted, rebuild from the batch metadata).
     setItineraries(prev => prev.length > 0
@@ -269,40 +297,26 @@ const Index = () => {
     setView('results');
 
     const pollJob = async (job: PendingJob) => {
-      const deadline = Date.now() + 5 * 60 * 1000;
-      while (!reconnectAbortRef.current && Date.now() < deadline) {
-        const { data } = await supabase
-          .from('itinerary_jobs')
-          .select('status,content')
-          .eq('id', job.jobId)
-          .maybeSingle();
-        if (reconnectAbortRef.current) return;
-        if (data?.status === 'complete' && data.content) {
-          const displayContent = stripPlanningSection(data.content);
-          const structuredData = parseStructuredItinerary(displayContent);
-          setItineraries(prev => prev.map(it =>
-            it.id === job.themeId ? { ...it, content: displayContent, structuredData } : it));
-          setLoadingVariants(prev => ({ ...prev, [job.themeId]: false }));
-          return;
-        }
-        if (data?.status === 'error') {
-          setLoadingVariants(prev => ({ ...prev, [job.themeId]: false }));
-          return;
-        }
-        await new Promise(r => setTimeout(r, 2500));
+      const content = await pollJobContent(job.jobId, isStale);
+      if (isStale()) return;
+      if (content) {
+        const displayContent = stripPlanningSection(content);
+        const structuredData = parseStructuredItinerary(displayContent);
+        setItineraries(prev => prev.map(it =>
+          it.id === job.themeId ? { ...it, content: displayContent, structuredData } : it));
       }
       setLoadingVariants(prev => ({ ...prev, [job.themeId]: false }));
     };
 
     (async () => {
       await Promise.all(pending.jobs.map(pollJob));
-      if (reconnectAbortRef.current) return; // a new generation took over
+      if (isStale()) return; // a new generation took over
       setIsGenerating(false);
       setIsReconnecting(false);
       clearPendingBatch();
     })();
 
-    return () => { reconnectAbortRef.current = true; };
+    return () => { unmounted = true; };
   }, []);
 
   const getHeaders = useCallback(() => ({
@@ -345,8 +359,13 @@ const Index = () => {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let textBuffer = "", fullContent = "";
+    // Only a [DONE] sentinel proves we received the whole itinerary. A stream
+    // that just stops — the usual outcome when a mobile browser freezes a
+    // backgrounded tab and drops its connection — leaves partial or empty
+    // content, so the caller has to recover it from the server instead.
+    let complete = false;
 
-    while (true) {
+    while (!complete) {
       const { done, value } = await reader.read();
       if (done) break;
       textBuffer += decoder.decode(value, { stream: true });
@@ -358,7 +377,7 @@ const Index = () => {
         if (line.startsWith(":") || line.trim() === "") continue;
         if (!line.startsWith("data: ")) continue;
         const jsonStr = line.slice(6).trim();
-        if (jsonStr === "[DONE]") break;
+        if (jsonStr === "[DONE]") { complete = true; break; }
         try {
           const parsed = JSON.parse(jsonStr);
           const content = parsed.choices?.[0]?.delta?.content;
@@ -366,7 +385,11 @@ const Index = () => {
         } catch { /* skip */ }
       }
     }
-    return fullContent;
+    // We stopped reading at [DONE]; release the connection rather than leaving
+    // it open for the rest of the tab's life.
+    reader.cancel().catch(() => { /* already closed */ });
+
+    return { content: fullContent, complete };
   }, [getHeaders]);
 
   // ── Save trip ──────────────────────────────────────────────────────────────
@@ -516,7 +539,8 @@ const Index = () => {
     }
 
     // Supersede any in-flight reconnect from a previous session.
-    reconnectAbortRef.current = true;
+    const runId = ++runIdRef.current;
+    const isStale = () => runIdRef.current !== runId;
     setIsReconnecting(false);
 
     setIsGenerating(true);
@@ -553,6 +577,7 @@ const Index = () => {
 
       setIsSuggestingThemes(true);
       const themes = await suggestThemes(effectivePreferences);
+      if (themes.length === 0) throw new Error("No themes came back for this trip — try adding more detail");
       setIsSuggestingThemes(false);
       setItineraries(themes.map(t => ({ ...t, content: "" })));
       setLoadingVariants(Object.fromEntries(themes.map(t => [t.id, true])));
@@ -570,35 +595,90 @@ const Index = () => {
       });
 
       const contentMap: Record<string, string> = {};
-      const promises = themes.map(async (theme) => {
+      const applyFinalContent = (themeId: string, rawContent: string) => {
+        const displayContent = stripPlanningSection(rawContent);
+        const structuredData = parseStructuredItinerary(displayContent);
+        setItineraries(prev => prev.map(it =>
+          it.id === themeId ? { ...it, content: displayContent, structuredData } : it));
+      };
+
+      const streamed = await Promise.all(themes.map(async (theme) => {
         try {
-          const content = await generateSingleItinerary(effectivePreferences, theme, (updatedContent) => {
+          const { content, complete } = await generateSingleItinerary(effectivePreferences, theme, (updatedContent) => {
             const displayContent = stripPlanningSection(updatedContent);
             contentMap[theme.id] = displayContent;
             setItineraries(prev => prev.map(it => contentMap[it.id] !== undefined ? { ...it, content: contentMap[it.id] } : it));
           }, { jobId: jobIdByTheme[theme.id], batchId });
 
-          const structuredData = parseStructuredItinerary(content);
-          if (structuredData) setItineraries(prev => prev.map(it => it.id === theme.id ? { ...it, structuredData } : it));
+          // A stream cut short leaves nothing to show — often literally nothing,
+          // since the planning section is stripped from the display copy. Don't
+          // call that a success; let the recovery pass below fetch the real
+          // result, which the server finished and saved regardless.
+          if (!complete || !stripPlanningSection(content).trim()) {
+            return { theme, ok: false };
+          }
+          applyFinalContent(theme.id, content);
           setLoadingVariants(prev => ({ ...prev, [theme.id]: false }));
-          return { id: theme.id, success: true, content };
+          return { theme, ok: true };
         } catch (error) {
           console.error(`Error generating ${theme.id}:`, error);
-          setLoadingVariants(prev => ({ ...prev, [theme.id]: false }));
-          return { id: theme.id, success: false, error };
+          return { theme, ok: false };
         }
-      });
+      }));
 
-      await Promise.all(promises);
-      clearPendingBatch(); // all variants finished locally — no reconnect needed
-      toast({ title: "3 itineraries ready!", description: "Explore different themed versions of your trip" });
+      if (isStale()) return; // a newer generation took over while we streamed
+
+      // Recover anything whose stream died: the edge function runs to completion
+      // under waitUntil and persists each itinerary, so poll for the results
+      // rather than leaving the user with empty cards.
+      const unfinished = streamed.filter(r => !r.ok).map(r => r.theme);
+      let readyCount = streamed.length - unfinished.length;
+
+      if (unfinished.length > 0) {
+        setIsReconnecting(true);
+        const recovered = await Promise.all(unfinished.map(async (theme) => {
+          const content = await pollJobContent(jobIdByTheme[theme.id], isStale);
+          if (isStale()) return false;
+          if (content) applyFinalContent(theme.id, content);
+          setLoadingVariants(prev => ({ ...prev, [theme.id]: false }));
+          return !!content;
+        }));
+        if (isStale()) return;
+        setIsReconnecting(false);
+        readyCount += recovered.filter(Boolean).length;
+      }
+
+      // Keep the batch when something is still missing, so a later reload gets
+      // one more chance to reconnect to it.
+      const allReady = readyCount === themes.length;
+      if (allReady) clearPendingBatch();
+
+      if (allReady) {
+        toast({ title: `${readyCount} itineraries ready!`, description: "Explore different themed versions of your trip" });
+      } else if (readyCount > 0) {
+        toast({
+          title: `${readyCount} of ${themes.length} itineraries ready`,
+          description: "The rest didn't come through — reload to pick them up, or try again",
+        });
+      } else {
+        toast({
+          title: "Couldn't load your itineraries",
+          description: "The connection dropped before they arrived. Please try again.",
+          variant: "destructive",
+        });
+      }
     } catch (error) {
+      if (isStale()) return;
       console.error("Error in generation flow:", error);
       toast({ title: "Something went wrong", description: error instanceof Error ? error.message : "Please try again later", variant: "destructive" });
     } finally {
-      setIsGenerating(false);
-      setIsSuggestingThemes(false);
-      setIsAnalyzingMedia(false);
+      // A newer run owns these flags now — leave them alone.
+      if (!isStale()) {
+        setIsGenerating(false);
+        setIsReconnecting(false);
+        setIsSuggestingThemes(false);
+        setIsAnalyzingMedia(false);
+      }
     }
   }, [preferences, suggestThemes, generateSingleItinerary, analyzeInspiration]);
 
