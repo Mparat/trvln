@@ -87,7 +87,11 @@ async function searchWithPerplexity(
     });
 
     if (!response.ok) {
-      console.error("Perplexity API error:", response.status);
+      // Include the body: a bare status can't distinguish a revoked key from an
+      // exhausted balance from a malformed header, and this failure is silent
+      // enough already.
+      const errorBody = await response.text().catch(() => '');
+      console.error("Perplexity API error:", response.status, errorBody.slice(0, 500));
       return { content: '', citations: [] };
     }
 
@@ -186,7 +190,10 @@ serve(async (req) => {
       throw new Error("ANTHROPIC_API_KEY is not configured");
     }
     
-    const PERPLEXITY_API_KEY = Deno.env.get("PERPLEXITY_API_KEY");
+    // Trimmed: a secret pasted with a trailing newline produces an
+    // "Authorization: Bearer pplx-…\n" header and a 401 that looks exactly like
+    // a revoked key.
+    const PERPLEXITY_API_KEY = Deno.env.get("PERPLEXITY_API_KEY")?.trim();
 
     const {
       media,
@@ -442,6 +449,9 @@ ${additionalNotes || "None provided"}
     // PERPLEXITY WEB SEARCH FOR GROUNDED RESEARCH
     // ============================================
     let groundedResearchContext = "";
+    // Whether the research actually came back with anything. Drives which set of
+    // sourcing rules the system prompt carries.
+    let hasGroundedResearch = false;
     
     if (PERPLEXITY_API_KEY) {
       console.log("Starting Perplexity grounded research...");
@@ -489,8 +499,18 @@ ${additionalNotes || "None provided"}
       const results = await timePhase("perplexity_research", () =>
         Promise.all(searchQueries.map(query => searchWithPerplexity(query, PERPLEXITY_API_KEY))));
       
-      console.log("Perplexity research completed. Building grounded context...");
-      
+      // Every search failing returns empty content rather than throwing, so the
+      // research block can assemble into nothing but section headers. Left
+      // unchecked the model is then handed "ONLY recommend places that appear in
+      // the research" alongside no research at all — contradictory instructions
+      // that it can only resolve by inventing establishments and URLs, which is
+      // the exact failure the rules were written to prevent.
+      hasGroundedResearch = results.some(r => r.content.trim().length > 0);
+      console.log(`Perplexity research completed. grounded=${hasGroundedResearch}`);
+      if (!hasGroundedResearch) {
+        console.error("All Perplexity searches returned empty — generating without grounding.");
+      }
+
       // Build the grounded context block
       const activitiesResearch = results[0];
       const restaurantsResearch = results[1];
@@ -562,6 +582,41 @@ ${accommodationResearch.citations?.length > 0 ? accommodationResearch.citations.
       console.log("PERPLEXITY_API_KEY not configured - skipping grounded research");
     }
 
+    // Two sourcing regimes. With live research, the model is held to it. Without,
+    // it is told plainly that there is none and pointed at the search-URL
+    // patterns — rather than being ordered to source from an empty document,
+    // which leaves fabrication as the only way to satisfy the instruction.
+    const researchInstructions = hasGroundedResearch
+      ? `## Research Requirements
+
+Use the grounded research data below to find real establishment names, accurate prices, and working URLs. For every activity, hotel, restaurant, and booking link, use URLs from the research — falling back to the search URL patterns if a direct URL is not available. Do not invent establishment names or fabricate URLs.
+
+## GROUNDED RESEARCH (CRITICAL - READ BEFORE PROCEEDING)
+
+You have been provided with LIVE WEB SEARCH RESULTS at the start of the user message below. This is your FACTUAL GROUND TRUTH from real travel blogs, guides, and booking sites.
+
+**STRICT RULES - YOU MUST FOLLOW THESE:**
+
+1. **ONLY recommend activities, tours, restaurants, and hotels that appear in the grounded research data**
+2. **Use the URLs and citations provided in the research** - Do NOT make up URLs
+3. **Do NOT introduce new facts** beyond what is provided in the research
+4. **Do NOT hallucinate establishment names** that don't appear in the research
+5. **When citing sources**, use the actual URLs from the research citations
+6. **For restaurants near activities**, use Google Maps search URLs for the neighborhood:
+   - Format: https://www.google.com/maps/search/?api=1&query=restaurants+near+NEIGHBORHOOD+CITY`
+      : `## Research Requirements (NO LIVE RESEARCH AVAILABLE)
+
+Live web search returned nothing for this trip, so there is no research document — do not refer to one.
+
+**STRICT RULES - YOU MUST FOLLOW THESE:**
+
+1. **Recommend only long-established, well-known places you are confident actually exist** and have operated for years. Prefer institutions over recent openings, which you cannot verify are still trading.
+2. **Never invent a direct URL.** You have no citations to draw on, so every link must be built from the search URL patterns below — a search URL that resolves is correct; a guessed booking or restaurant homepage is not.
+3. **Do not state prices, opening hours, or availability as fact.** Give ranges and label them estimates.
+4. **Prefer a neighborhood or a dish over a specific restaurant** when you are unsure a particular establishment is still open.
+5. **For restaurants near activities**, use Google Maps search URLs for the neighborhood:
+   - Format: https://www.google.com/maps/search/?api=1&query=restaurants+near+NEIGHBORHOOD+CITY`;
+
     const systemPrompt = `You are an expert travel planning AI assistant. Your task is to create comprehensive, well-researched travel itineraries with cited sources for every recommendation.
 
 ${themeContext ? themeContext + "\n\n" : ""}
@@ -592,23 +647,7 @@ The user inputs are organized into four main categories:
 - This may clarify, override, or add nuance to the structured inputs above
 - Pay close attention to any specific requests or concerns mentioned here
 
-## Research Requirements
-
-Use the grounded research data below to find real establishment names, accurate prices, and working URLs. For every activity, hotel, restaurant, and booking link, use URLs from the research — falling back to the search URL patterns if a direct URL is not available. Do not invent establishment names or fabricate URLs.
-
-## GROUNDED RESEARCH (CRITICAL - READ BEFORE PROCEEDING)
-
-You have been provided with LIVE WEB SEARCH RESULTS at the start of the user message below. This is your FACTUAL GROUND TRUTH from real travel blogs, guides, and booking sites.
-
-**STRICT RULES - YOU MUST FOLLOW THESE:**
-
-1. **ONLY recommend activities, tours, restaurants, and hotels that appear in the grounded research data**
-2. **Use the URLs and citations provided in the research** - Do NOT make up URLs
-3. **Do NOT introduce new facts** beyond what is provided in the research
-4. **Do NOT hallucinate establishment names** that don't appear in the research
-5. **When citing sources**, use the actual URLs from the research citations
-6. **For restaurants near activities**, use Google Maps search URLs for the neighborhood:
-   - Format: https://www.google.com/maps/search/?api=1&query=restaurants+near+NEIGHBORHOOD+CITY
+${researchInstructions}
 
 **If something specific isn't in the research, use these SEARCH URL patterns as fallback:**
 - Places: https://www.google.com/maps/search/?api=1&query=PLACE+NAME+CITY
@@ -877,7 +916,10 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
     // array is rejected with a 400 before any generation happens.
     const userContent: any[] = [];
 
-    if (groundedResearchContext) {
+    // Only send the research block when it actually holds research. Otherwise it
+    // is section headers wrapped around "No activity research available", which
+    // costs tokens and reads to the model as a document it failed to use.
+    if (hasGroundedResearch && groundedResearchContext) {
       userContent.push({ type: "text", text: groundedResearchContext });
       console.log("Injected grounded research context into the user message");
     }
@@ -1041,6 +1083,7 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
           output_tokens: outputTokens,
           output_chars: fullContent.length,
           theme: themeVariant?.id ?? "default",
+          grounded: hasGroundedResearch,
           client_disconnected: !clientConnected,
         }));
         // `end_turn` is the only clean finish. Anything else means the itinerary
