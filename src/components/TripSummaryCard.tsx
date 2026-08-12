@@ -1,68 +1,38 @@
 import { DollarSign, MapPin, Calendar, Plane, Sparkles } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import type { ItineraryData } from "@/types/itinerary";
 
 interface TripSummaryCardProps {
-  itinerary: string;
+  /** Parsed itinerary. The card renders nothing until this is available. */
+  data?: ItineraryData;
   departureCity?: string;
   startDate?: Date;
   endDate?: Date;
   durationDays?: number;
 }
 
-function extractSummaryData(itinerary: string, providedDuration?: number) {
-  // Extract cities mentioned
-  const cityMatches = itinerary.match(/\*\*([A-Z][a-z]+(?:\s[A-Z][a-z]+)*)\*\*/g) || [];
-  const cities = [...new Set(cityMatches.map(m => m.replace(/\*\*/g, '')))].slice(0, 5);
-  
-  // Extract budget info
-  const budgetMatch = itinerary.match(/\$[\d,]+(?:\s*[-–]\s*\$[\d,]+)?(?:\s*(?:per day|\/day|daily))?/i);
-  const budget = budgetMatch ? budgetMatch[0] : null;
-  
-  // Count days from itinerary - look for "Day X:" patterns
-  const dayMatches = itinerary.match(/\*\*Day\s+(\d+)/gi) || [];
-  const dayNumbers = dayMatches.map(m => {
-    const num = m.match(/\d+/);
-    return num ? parseInt(num[0], 10) : 0;
-  });
-  const maxDayFromItinerary = dayNumbers.length > 0 ? Math.max(...dayNumbers) : 0;
-  
-  // Use the higher of: provided duration, days from itinerary, or count of day matches
-  const totalDays = providedDuration 
-    ? providedDuration 
-    : maxDayFromItinerary > 0 
-      ? maxDayFromItinerary 
-      : dayMatches.length;
-  
-  // Extract highlights (look for key activities)
-  const highlights: string[] = [];
-  const highlightPatterns = [
-    /visit(?:ing)?\s+(?:the\s+)?([^,.]+)/gi,
-    /explore\s+(?:the\s+)?([^,.]+)/gi,
-    /experience\s+(?:the\s+)?([^,.]+)/gi,
-  ];
-  
-  highlightPatterns.forEach(pattern => {
-    const matches = itinerary.matchAll(pattern);
-    for (const match of matches) {
-      if (match[1] && match[1].length < 50) {
-        highlights.push(match[1].trim());
-      }
-    }
-  });
+export function TripSummaryCard({ data, departureCity, startDate, endDate, durationDays }: TripSummaryCardProps) {
+  // The model returns a JSON itinerary whose `summary` block already holds
+  // everything this card shows. It used to scrape those values out of the raw
+  // string with markdown-era regexes (`**City**`, `**Day 1**`), which silently
+  // stopped matching when the output became JSON: destinations came back empty
+  // and "highlights" were sentence fragments cut at the next comma, trailing
+  // JSON quotes and all. Worse, it rendered that guesswork even when the
+  // itinerary had failed to parse, so a truncated generation still showed a
+  // confident-looking summary above an error.
+  if (!data?.summary) return null;
 
-  return {
-    cities,
-    budget,
-    totalDays,
-    highlights: [...new Set(highlights)].slice(0, 4),
+  const summary = {
+    // `destination` is a single string ("Dolomites, Italy" or "Lisbon & Porto").
+    // Split so multi-stop trips still render as separate chips.
+    cities: data.summary.destination
+      ? data.summary.destination.split(/\s*(?:,|&|\band\b|\/)\s*/).map(c => c.trim()).filter(Boolean)
+      : [],
+    budget: data.summary.totalBudget || null,
+    duration: data.summary.duration || (durationDays ? `${durationDays} days` : null),
+    highlights: (data.summary.highlights ?? []).slice(0, 4),
   };
-}
-
-export function TripSummaryCard({ itinerary, departureCity, startDate, endDate, durationDays }: TripSummaryCardProps) {
-  const summary = extractSummaryData(itinerary, durationDays);
-  
-  if (!itinerary || summary.totalDays === 0) return null;
 
   return (
     <Card className="p-6 bg-gradient-to-br from-primary/5 via-background to-background border-primary/20">
@@ -78,7 +48,7 @@ export function TripSummaryCard({ itinerary, departureCity, startDate, endDate, 
             <Calendar className="w-4 h-4" />
             Duration
           </div>
-          <p className="font-semibold text-foreground">{summary.totalDays} days</p>
+          <p className="font-semibold text-foreground">{summary.duration}</p>
           {startDate && endDate && (
             <p className="text-xs text-muted-foreground">
               {startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}

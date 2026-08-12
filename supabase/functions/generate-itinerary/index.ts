@@ -123,6 +123,22 @@ serve(async (req) => {
   // rather than leaving it pending for reconnecting clients to poll.
   let registeredJobId: string | undefined;
 
+  // Phase timings. Generation is slow and we have been guessing at which stage
+  // owns the wall clock; every phase below reports its own duration so a single
+  // log line per request tells us where the time actually goes.
+  const t0 = Date.now();
+  const timings: Record<string, number> = {};
+  const since = (start: number) => Date.now() - start;
+  const timePhase = async <T,>(name: string, fn: () => Promise<T>): Promise<T> => {
+    const start = Date.now();
+    try {
+      return await fn();
+    } finally {
+      timings[name] = since(start);
+      console.log(`[timing] ${name}: ${timings[name]}ms`);
+    }
+  };
+
   try {
 
     // Parse and validate input
@@ -341,19 +357,20 @@ Respond with ONLY a JSON array of 1-2 destination strings. Examples:
 
 No explanation. Just the JSON array.`;
 
-        const resolutionResponse = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "x-api-key": ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: "claude-haiku-4-5",
-            messages: [{ role: "user", content: resolutionPrompt }],
-            max_tokens: 100,
-          }),
-        });
+        const resolutionResponse = await timePhase("destination_resolution", () =>
+          fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: {
+              "x-api-key": ANTHROPIC_API_KEY,
+              "anthropic-version": "2023-06-01",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: "claude-haiku-4-5",
+              messages: [{ role: "user", content: resolutionPrompt }],
+              max_tokens: 100,
+            }),
+          }));
 
         if (resolutionResponse.ok) {
           const resolutionData = await resolutionResponse.json();
@@ -469,8 +486,8 @@ ${additionalNotes || "None provided"}
       
       // Run all searches in parallel for speed
       console.log(`Executing ${searchQueries.length} Perplexity research queries...`);
-      const searchPromises = searchQueries.map(query => searchWithPerplexity(query, PERPLEXITY_API_KEY));
-      const results = await Promise.all(searchPromises);
+      const results = await timePhase("perplexity_research", () =>
+        Promise.all(searchQueries.map(query => searchWithPerplexity(query, PERPLEXITY_API_KEY))));
       
       console.log("Perplexity research completed. Building grounded context...");
       
@@ -945,6 +962,15 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
       let buffer = "";
       let fullContent = "";
       let clientConnected = true;
+      // Diagnostics for the truncation we keep seeing. `stop_reason` is the
+      // decisive signal: "max_tokens" means the model genuinely ran out of the
+      // 32k output budget, while an absent stop_reason means the stream died
+      // before the model finished — a killed function or a dropped connection,
+      // which is a different problem with a different fix.
+      const modelStart = Date.now();
+      let firstTokenMs: number | null = null;
+      let stopReason: string | null = null;
+      let outputTokens: number | null = null;
 
       // Forward to the client only while it's still connected; once a write
       // fails the tab is gone, so we stop forwarding but keep accumulating.
@@ -974,14 +1000,41 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
             try {
               const event = JSON.parse(jsonStr);
               if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+                if (firstTokenMs === null) {
+                  firstTokenMs = Date.now() - modelStart;
+                  console.log(`[timing] model_ttft: ${firstTokenMs}ms`);
+                }
                 fullContent += event.delta.text;
                 const openAiChunk = JSON.stringify({ choices: [{ delta: { content: event.delta.text } }] });
                 await forward(`data: ${openAiChunk}\n\n`);
+              }
+              // Carries the terminal stop_reason and the final output token count.
+              if (event.type === "message_delta") {
+                stopReason = event.delta?.stop_reason ?? stopReason;
+                outputTokens = event.usage?.output_tokens ?? outputTokens;
               }
             } catch { /* skip malformed lines */ }
           }
         }
         await forward("data: [DONE]\n\n");
+
+        timings.model_generation = Date.now() - modelStart;
+        timings.total = since(t0);
+        console.log("[timing] summary " + JSON.stringify({
+          ...timings,
+          model_ttft: firstTokenMs,
+          stop_reason: stopReason,
+          output_tokens: outputTokens,
+          output_chars: fullContent.length,
+          theme: themeVariant?.id ?? "default",
+          client_disconnected: !clientConnected,
+        }));
+        // `end_turn` is the only clean finish. Anything else means the itinerary
+        // the client renders is incomplete, so say so loudly rather than
+        // persisting a truncated result that looks successful.
+        if (stopReason && stopReason !== "end_turn") {
+          console.error(`Generation did not finish cleanly: stop_reason=${stopReason}, output_tokens=${outputTokens}`);
+        }
 
         // Persist the finished itinerary for reconnecting clients.
         if (jobId) {
