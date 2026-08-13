@@ -400,6 +400,174 @@ STRICT RULES:
 - Prioritize by the user's interests ranking
 - Include real, actionable URLs from the grounded research`;
 
+const MODEL = "claude-sonnet-4-6";
+
+// ── Split generation plumbing ───────────────────────────────────────────────
+// A single call writing the whole itinerary is ~9,800 output tokens written
+// serially, which is 92% of the wall clock. The work splits cleanly: one
+// skeleton call decides everything that spans the trip (and, critically, which
+// restaurant goes where), then one call per day writes that day's prose. Days
+// have no dependency on each other once the skeleton has assigned names, so
+// they run in parallel and the wall clock drops to skeleton + slowest day.
+
+// A user-turn content block (text, image, or a text block carrying a cache
+// breakpoint). Shapes are the Anthropic Messages API's, not ours to narrow.
+type ContentBlock = Record<string, unknown>;
+
+type AnthropicJsonResult = {
+  text: string;
+  stopReason: string | null;
+  outputTokens: number;
+  cacheRead: number;
+  cacheWrite: number;
+};
+
+// Non-streaming: every call here has a modest max_tokens and the result is
+// assembled server-side anyway, so there is nothing to stream to and buffering
+// makes the error handling and JSON parsing straightforward.
+async function callAnthropicJson(params: {
+  apiKey: string;
+  system: unknown[];
+  userContent: unknown[];
+  prefill: string;
+  maxTokens: number;
+  label: string;
+}): Promise<AnthropicJsonResult> {
+  const { apiKey, system, userContent, prefill, maxTokens, label } = params;
+  // Two attempts. Splitting one call into N multiplies the failure surface, and
+  // several slices firing at once is exactly what provokes a 429.
+  const maxAttempts = 2;
+  let lastError = "";
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (attempt > 1) {
+      // Jittered so retrying slices don't re-collide on the same rate limit.
+      const backoffMs = 1000 * attempt + Math.floor(Math.random() * 750);
+      console.log(`[retry] ${label} attempt ${attempt} after ${backoffMs}ms (${lastError})`);
+      await new Promise(r => setTimeout(r, backoffMs));
+    }
+
+    try {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          system,
+          messages: [
+            { role: "user", content: userContent },
+            // Prefilling the assistant turn forces the output shape. It is the
+            // only reliable way to stop a day slice from reproducing the whole
+            // itinerary envelope described in the cached system prompt.
+            { role: "assistant", content: prefill },
+          ],
+          max_tokens: maxTokens,
+        }),
+      });
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        lastError = `${response.status} ${body.slice(0, 300)}`;
+        // 4xx other than 429 will fail identically on retry.
+        if (response.status !== 429 && response.status < 500) {
+          throw new Error(`Anthropic ${label} failed: ${lastError}`);
+        }
+        continue;
+      }
+
+      const data = await response.json();
+      const usage = data.usage ?? {};
+      const result: AnthropicJsonResult = {
+        // The API returns only the continuation, so the prefill has to be put
+        // back before the text is valid JSON.
+        text: prefill + (data.content?.[0]?.text ?? ""),
+        stopReason: data.stop_reason ?? null,
+        outputTokens: usage.output_tokens ?? 0,
+        cacheRead: usage.cache_read_input_tokens ?? 0,
+        cacheWrite: usage.cache_creation_input_tokens ?? 0,
+      };
+      console.log(
+        `[timing] cache ${label}: read=${result.cacheRead} write=${result.cacheWrite} ` +
+        `uncached_input=${usage.input_tokens ?? 0} output=${result.outputTokens} stop=${result.stopReason}`,
+      );
+      return result;
+    } catch (err) {
+      lastError = String(err);
+      if (attempt === maxAttempts) throw err;
+    }
+  }
+
+  throw new Error(`Anthropic ${label} failed after ${maxAttempts} attempts: ${lastError}`);
+}
+
+// Close a JSON document the model ran out of tokens to finish. Same bracket-stack
+// approach the client uses on truncated content, kept here so a slice that hits
+// max_tokens degrades to a short day rather than taking the whole trip down.
+function repairTruncatedJson(input: string): string {
+  let text = input.trimEnd().replace(/,\s*$/, "");
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  for (const ch of text) {
+    if (escaped) { escaped = false; continue; }
+    if (ch === "\\" && inString) { escaped = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === "{") stack.push("}");
+    else if (ch === "[") stack.push("]");
+    else if (ch === "}" || ch === "]") stack.pop();
+  }
+  if (inString) text += '"';
+  text = text.replace(/,\s*$/, "");
+  while (stack.length) text += stack.pop();
+  return text;
+}
+
+function parseModelJson<T>(raw: string, label: string): T {
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    const repaired = repairTruncatedJson(raw);
+    console.warn(`[parse] ${label} needed repair (${raw.length} chars)`);
+    return JSON.parse(repaired) as T;
+  }
+}
+
+// Group the trip's days into per-call slices. One day per call is the fast case
+// and covers every trip the form can produce at its default; longer trips group
+// up so a 60-day itinerary doesn't fan out into 60 concurrent calls.
+function planDaySlices(dayCount: number): number[][] {
+  const perSlice = dayCount <= 10 ? 1 : dayCount <= 20 ? 2 : 3;
+  const slices: number[][] = [];
+  for (let start = 0; start < dayCount; start += perSlice) {
+    const size = Math.min(perSlice, dayCount - start);
+    slices.push(Array.from({ length: size }, (_, k) => start + k + 1));
+  }
+  return slices;
+}
+
+// Bounds how many slice calls are in flight at once. All the promises are
+// created up front so the caller can await them in order, but the work itself
+// is gated here.
+function makeLimiter(limit: number) {
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  return async function run<T>(fn: () => Promise<T>): Promise<T> {
+    if (active >= limit) await new Promise<void>(resolve => waiting.push(resolve));
+    active++;
+    try {
+      return await fn();
+    } finally {
+      active--;
+      waiting.shift()?.();
+    }
+  };
+}
+
 // Helper to format dates for booking URLs
 function formatDateForBooking(dateStr: string | undefined): string {
   if (!dateStr) return '';
@@ -993,121 +1161,129 @@ ${userInputsBlock}
 
 Create a comprehensive, well-researched travel itinerary based on these preferences. Be opinionated and specific - tell me exactly what I should do.`;
 
-    // Build the single user turn. The grounded research goes inside it rather
-    // than in an assistant message of its own: the Anthropic Messages API
-    // requires the first message to use the "user" role, so an assistant-first
-    // array is rejected with a 400 before any generation happens.
-    const userContent: any[] = [];
+    // Runtime kill switch. Edge functions only deploy from main, so if the split
+    // path misbehaves in production the fix has to be something that does not
+    // require a deploy: set ITINERARY_SPLIT_GENERATION=off and every request
+    // reverts to the single-call path.
+    const splitGenerationEnabled =
+      (Deno.env.get("ITINERARY_SPLIT_GENERATION") ?? "").trim().toLowerCase() !== "off";
 
-    // Only send the research block when it actually holds research. Otherwise it
-    // is section headers wrapped around "No activity research available", which
-    // costs tokens and reads to the model as a document it failed to use.
+    // ── Shared prompt pieces ────────────────────────────────────────────────
+    // `system` is byte-identical for the skeleton call and every day slice, so
+    // all of them share the one cached core entry.
+    const systemBlocks = [
+      { type: "text", text: ITINERARY_SYSTEM_CORE, cache_control: { type: "ephemeral" } },
+      { type: "text", text: tripSystemContext },
+    ];
+
+    // The grounded research leads every user turn and carries the second cache
+    // breakpoint. The skeleton call writes that entry; the day slices then read
+    // it at a tenth of the price instead of re-prefilling several thousand
+    // tokens of research each. Only sent when it actually holds research —
+    // otherwise it is section headers wrapped around "No activity research
+    // available", which costs tokens and reads as a document the model failed
+    // to use.
+    const researchBlocks: ContentBlock[] = [];
     if (hasGroundedResearch && groundedResearchContext) {
-      userContent.push({ type: "text", text: groundedResearchContext });
+      researchBlocks.push({
+        type: "text",
+        text: groundedResearchContext,
+        cache_control: { type: "ephemeral" },
+      });
       console.log("Injected grounded research context into the user message");
     }
 
-    userContent.push({ type: "text", text: userPrompt });
-
     // Media (images/videos) - use public URLs from storage. Anthropic takes an
     // image block with a `source`; `image_url` is the OpenAI shape and 400s here.
+    // These go to the skeleton call only: they inform the destination and the
+    // trip's overall character, both of which the skeleton fixes for everyone
+    // else. They sit after the research breakpoint, so they cannot disturb the
+    // prefix the slices match against.
+    const mediaBlocks: ContentBlock[] = [];
     const mediaWithUrls = media?.filter(item => item.url && item.type === 'image') || [];
-
     for (const item of mediaWithUrls) {
       if (item.url) {
-        userContent.push({
-          type: "image",
-          source: { type: "url", url: item.url },
-        });
+        mediaBlocks.push({ type: "image", source: { type: "url", url: item.url } });
       }
     }
     if (mediaWithUrls.length > 0) {
-      console.log(`Attached ${mediaWithUrls.length} image(s) to the request`);
+      console.log(`Attached ${mediaWithUrls.length} image(s) to the skeleton request`);
     }
 
-    console.log("Calling Anthropic API");
+    // ── Pass 1: the skeleton ────────────────────────────────────────────────
+    // Everything that spans the trip, plus the day roster. The roster is the
+    // load-bearing part: day slices run in parallel and cannot see each other,
+    // so if they each picked their own restaurants they would converge on the
+    // same top-rated places. Assigning every name here, in one context that can
+    // see the whole trip, makes uniqueness structural instead of something the
+    // model has to track across ~9,800 tokens.
+    const skeletonInstruction = `${userPrompt}
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        // Two system blocks, and the order matters. The first is the ~4k-token
-        // stable core, byte-identical on every request for every trip, and it
-        // carries the cache breakpoint. The second holds everything that varies
-        // per request (theme, research regime, date-stamped booking URLs) and
-        // sits after the breakpoint, so it can change freely without
-        // invalidating the cached prefix. Watch `[timing] cache:` — read should
-        // be ~4k from the second generation onward, not 0.
-        system: [
-          { type: "text", text: ITINERARY_SYSTEM_CORE, cache_control: { type: "ephemeral" } },
-          { type: "text", text: tripSystemContext },
-        ],
-        messages: [{ role: "user", content: userContent }],
-        max_tokens: 32000,
-        stream: true,
-      }),
-    });
+## THIS CALL: PLAN ONLY — DO NOT WRITE THE DAYS
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Anthropic API error:", response.status, errorText);
+The itinerary is written in two passes and this is pass 1. A separate pass writes each day's activities and dining prose, so do NOT produce a "days" array here.
 
-      // Mark the job failed. It was registered as pending before this call, and
-      // a client that reconnects to it would otherwise poll a job that can never
-      // complete until its own timeout expires.
-      if (jobId) {
-        await supabaseAdmin.from("itinerary_jobs").update({
-          status: "error",
-          error: `Anthropic API ${response.status}: ${errorText}`.slice(0, 2000),
-          updated_at: new Date().toISOString(),
-        }).eq("id", jobId);
+Output ONLY this JSON object:
+
+{
+  "summary": { ... },
+  "budget": { ... },
+  "flights": { ... },
+  "accommodation": [ ... ],
+  "bookingChecklist": [ ... ],
+  "alternatives": [ ... ],
+  "dayPlan": [
+    {
+      "dayNumber": 1,
+      "title": "Arrival and Ponta Delgada",
+      "location": "Ponta Delgada",
+      "transitNote": "Pick up rental car at PDL Airport",
+      "dining": {
+        "Morning": ["Café do Mar", "Pastelaria Garrett"],
+        "Afternoon": ["Restaurante A Tasca"],
+        "Evening": ["Tony's Restaurant", "Restaurante Muchacho"]
       }
-
-      if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment." }), {
-          status: 429,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      return new Response(JSON.stringify({ error: "Failed to generate itinerary. Please try again." }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
     }
+  ]
+}
 
-    // Transform Anthropic SSE format → OpenAI SSE format (frontend expects OpenAI spec)
+summary, budget, flights, accommodation, bookingChecklist and alternatives follow the schema and the strict rules in the system prompt exactly.
+
+**dayPlan replaces the "days" array for this pass:**
+- One entry per day of the trip. The number of entries IS the trip length — decide it from the duration constraints above.
+- dayNumber, title, location and transitNote are the same fields as in the days[] schema. Omit transitNote on days with no travel.
+- **dining holds the ASSIGNED RESTAURANT NAMES for that day's three periods — names only.** No descriptions, no prices, no URLs; pass 2 writes those from the research.
+- Give 1 or 2 names per period. The first is the top pick. Add a second ONLY when a real, separate alternative exists within reach of where the traveler actually is at that hour — one real option beats two where the second is filler.
+- **THIS IS WHERE RESTAURANT UNIQUENESS IS DECIDED, AND IT CANNOT BE FIXED LATER.** The day passes run independently and cannot see each other's choices. Before you finish, read back over the entire dayPlan: if the same establishment appears on two different days, or twice in one day, replace one of them with a different place from the research.
+- The ONLY name that may legitimately repeat is a stay's own dining room — a hut, refuge, lodge, ryokan, safari camp, boat, or hotel where meals are included or nothing else is within reach. Where that is genuinely where the traveler eats, repeat it and say which stay it is.
+- Every name must come from the grounded research, or be the traveler's own lodging for that night. Never invent one to fill a slot.
+- Match the meal to the period (Morning = breakfast, Afternoon = lunch, Evening = dinner), and vary cuisine, vibe and neighborhood day to day.
+
+Output ONLY the JSON object. Do not include a "days" key.`;
+
+    type DayPlanEntry = {
+      dayNumber?: number;
+      title?: string;
+      location?: string;
+      transitNote?: string;
+      dining?: Record<string, string[]>;
+    };
+    type Skeleton = Record<string, unknown> & { dayPlan?: DayPlanEntry[] };
+
+    // ── Stream plumbing ─────────────────────────────────────────────────────
+    // The response goes back before any model work starts, so the client's
+    // fetch resolves immediately rather than waiting out the skeleton call. A
+    // failure after this point marks the job errored and closes the stream
+    // without [DONE]; the client already treats a stream that stops short as
+    // recoverable and polls the job, which is where it finds the error.
     const { readable, writable } = new TransformStream();
     const writer = writable.getWriter();
     const encoder = new TextEncoder();
-    const decoder = new TextDecoder();
 
-    // The pump accumulates the full itinerary, forwards deltas to the client
-    // (best-effort — the tab may be gone), and persists the final result. It is
-    // registered with EdgeRuntime.waitUntil so it runs to completion and saves
-    // even after the client disconnects (e.g. a mobile tab is discarded).
     const pump = (async () => {
-      const reader = response.body!.getReader();
-      let buffer = "";
-      let fullContent = "";
       let clientConnected = true;
-      // Diagnostics for the truncation we keep seeing. `stop_reason` is the
-      // decisive signal: "max_tokens" means the model genuinely ran out of the
-      // 32k output budget, while an absent stop_reason means the stream died
-      // before the model finished — a killed function or a dropped connection,
-      // which is a different problem with a different fix.
-      const modelStart = Date.now();
-      let firstTokenMs: number | null = null;
-      let stopReason: string | null = null;
-      let outputTokens: number | null = null;
+      let emitted = "";
 
-      // Forward to the client only while it's still connected; once a write
-      // fails the tab is gone, so we stop forwarding but keep accumulating.
       const forward = async (chunk: string) => {
         if (!clientConnected) return;
         try {
@@ -1117,7 +1293,63 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
         }
       };
 
-      try {
+      // Accumulate what the client is sent so the persisted copy and the
+      // streamed copy can never disagree.
+      const emit = async (text: string) => {
+        if (!text) return;
+        emitted += text;
+        await forward(`data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`);
+      };
+
+      const modelStart = Date.now();
+      const failedDays: number[] = [];
+      let skeletonTokens = 0;
+      let sliceTokens = 0;
+      let sliceCount = 0;
+      let dayCount = 0;
+
+      const persistComplete = async () => {
+        if (!jobId) return;
+        const { error: saveError } = await supabaseAdmin.from("itinerary_jobs").update({
+          status: "complete",
+          content: emitted,
+          updated_at: new Date().toISOString(),
+        }).eq("id", jobId);
+        if (saveError) console.error("Failed to persist itinerary result:", saveError);
+      };
+
+      // The pre-split path: one streaming call that writes the whole itinerary
+      // serially. Kept because edge functions only deploy from main, so there is
+      // no way to try the split path on a branch first — this is both the kill
+      // switch and the landing place when the skeleton pass fails.
+      const runSingleCall = async () => {
+        const response = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: MODEL,
+            system: systemBlocks,
+            messages: [{
+              role: "user",
+              content: [...researchBlocks, ...mediaBlocks, { type: "text", text: userPrompt }],
+            }],
+            max_tokens: 32000,
+            stream: true,
+          }),
+        });
+
+        if (!response.ok) {
+          const body = await response.text().catch(() => "");
+          throw new Error(`Anthropic single-call failed: ${response.status} ${body.slice(0, 300)}`);
+        }
+
+        const reader = response.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -1127,70 +1359,316 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
           for (const line of lines) {
             if (!line.startsWith("data: ")) continue;
             const jsonStr = line.slice(6).trim();
-            if (jsonStr === "[DONE]") {
-              await forward("data: [DONE]\n\n");
-              continue;
-            }
+            if (jsonStr === "[DONE]") continue;
             try {
               const event = JSON.parse(jsonStr);
               if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
-                if (firstTokenMs === null) {
-                  firstTokenMs = Date.now() - modelStart;
-                  console.log(`[timing] model_ttft: ${firstTokenMs}ms`);
-                }
-                fullContent += event.delta.text;
-                const openAiChunk = JSON.stringify({ choices: [{ delta: { content: event.delta.text } }] });
-                await forward(`data: ${openAiChunk}\n\n`);
+                await emit(event.delta.text);
               }
-              // Carries the terminal stop_reason and the final output token count.
-              if (event.type === "message_delta") {
-                stopReason = event.delta?.stop_reason ?? stopReason;
-                outputTokens = event.usage?.output_tokens ?? outputTokens;
+              const stop = event.type === "message_delta" ? event.delta?.stop_reason : null;
+              if (stop && stop !== "end_turn") {
+                console.error(`Single-call generation did not finish cleanly: stop_reason=${stop}`);
               }
-              // Confirms the system-prompt cache is actually being hit. If
-              // cache_read stays at 0 across generations, something upstream of
-              // the breakpoint is changing between requests.
-              if (event.type === "message_start") {
-                const u = event.message?.usage;
-                if (u) {
-                  console.log(`[timing] cache: read=${u.cache_read_input_tokens ?? 0} write=${u.cache_creation_input_tokens ?? 0} uncached_input=${u.input_tokens ?? 0}`);
-                }
+              if (event.type === "message_start" && event.message?.usage) {
+                const u = event.message.usage;
+                console.log(`[timing] cache single_call: read=${u.cache_read_input_tokens ?? 0} ` +
+                  `write=${u.cache_creation_input_tokens ?? 0} uncached_input=${u.input_tokens ?? 0}`);
               }
             } catch { /* skip malformed lines */ }
           }
         }
+      };
+
+      // Pass 1. Returns null when the plan can't be produced or parsed, which
+      // sends the request down the single-call path rather than failing it.
+      const trySkeleton = async (): Promise<Skeleton | null> => {
+        try {
+          const skeletonStart = Date.now();
+          const skeletonResult = await callAnthropicJson({
+            apiKey: ANTHROPIC_API_KEY,
+            system: systemBlocks,
+            userContent: [...researchBlocks, ...mediaBlocks, { type: "text", text: skeletonInstruction }],
+            prefill: "{",
+            maxTokens: 8000,
+            label: "skeleton",
+          });
+          timings.skeleton_generation = Date.now() - skeletonStart;
+          skeletonTokens = skeletonResult.outputTokens;
+          console.log(`[timing] skeleton_generation: ${timings.skeleton_generation}ms`);
+
+          const parsed = parseModelJson<Skeleton>(skeletonResult.text, "skeleton");
+          if (!Array.isArray(parsed.dayPlan) || parsed.dayPlan.length === 0) {
+            throw new Error("skeleton returned no dayPlan entries");
+          }
+          return parsed;
+        } catch (err) {
+          console.error("[split] skeleton pass failed — falling back to single-call generation:", err);
+          return null;
+        }
+      };
+
+      try {
+        // Comment lines are ignored by the client's SSE reader and by every
+        // proxy in between; this just puts a byte on the wire immediately so
+        // nothing idles the connection out during the skeleton call.
+        await forward(": generating\n\n");
+
+        if (!splitGenerationEnabled) {
+          console.log("[split] disabled by ITINERARY_SPLIT_GENERATION=off");
+        }
+        const skeleton = splitGenerationEnabled ? await trySkeleton() : null;
+
+        if (!skeleton) {
+          await runSingleCall();
+          await forward("data: [DONE]\n\n");
+          timings.model_generation = Date.now() - modelStart;
+          timings.total = since(t0);
+          console.log("[timing] summary " + JSON.stringify({
+            ...timings,
+            mode: "single_call",
+            output_chars: emitted.length,
+            theme: themeVariant?.id ?? "default",
+            grounded: hasGroundedResearch,
+            client_disconnected: !clientConnected,
+          }));
+          await persistComplete();
+          return;
+        }
+
+        const dayPlan = skeleton.dayPlan ?? [];
+        dayCount = dayPlan.length;
+
+        // Normalise the roster: the day slices are addressed by position, so
+        // dayNumber must be 1..N regardless of what the model wrote.
+        const roster = dayPlan.map((entry, i) => ({
+          dayNumber: i + 1,
+          title: typeof entry.title === "string" ? entry.title : `Day ${i + 1}`,
+          location: typeof entry.location === "string" ? entry.location : "",
+          transitNote: typeof entry.transitNote === "string" ? entry.transitNote : undefined,
+          dining: entry.dining && typeof entry.dining === "object" ? entry.dining : {},
+        }));
+
+        const slices = planDaySlices(roster.length);
+        sliceCount = slices.length;
+        console.log(`[timing] day slices: ${roster.length} days across ${slices.length} call(s)`);
+
+        // The whole roster goes to every slice: each one needs to know which
+        // names belong to other days so it does not reach for them.
+        const rosterJson = JSON.stringify(roster);
+        const sharedPlanJson = JSON.stringify({
+          summary: skeleton.summary,
+          accommodation: skeleton.accommodation,
+        });
+
+        // ── Pass 2: the days, in parallel ─────────────────────────────────
+        const limit = makeLimiter(8);
+        const slicesStart = Date.now();
+        const slicePromises = slices.map(dayNumbers => limit(async () => {
+          const label = `day${dayNumbers.join("+")}`;
+          const only = dayNumbers.length === 1
+            ? `day ${dayNumbers[0]}`
+            : `days ${dayNumbers.join(" and ")}`;
+
+          const sliceInstruction = `${userPrompt}
+
+## THIS CALL: WRITE ${only.toUpperCase()} ONLY — PASS 2
+
+Pass 1 already planned this trip. That plan is FIXED: do not re-plan it, do not change it, and do not write any day other than ${only}.
+
+<trip_plan>
+${sharedPlanJson}
+</trip_plan>
+
+<day_roster>
+${rosterJson}
+</day_roster>
+
+Output ONLY this JSON object, containing exactly ${dayNumbers.length} element(s) — ${only}:
+
+{"days": [ ${dayNumbers.map(n => `<the full days[] element for day ${n}>`).join(", ")} ]}
+
+Each element follows the days[] schema in the system prompt exactly.
+
+**Rules for this pass:**
+- dayNumber, title, location and transitNote come from the day_roster entry for your day. Keep them as written.
+- Exactly 3 periods — Morning, Afternoon, Evening — and exactly 2 activities in each.
+- **THE DINING IS ALREADY ASSIGNED.** Use exactly the names in your day's roster entry, in the order given: the first is "isPrimary": true, a second is "isPrimary": false. Do not substitute a name, do not add one, do not drop one. Your job is to write each one's description, priceRange and url from the research.
+- **EVERY OTHER DAY'S RESTAURANTS ARE LISTED IN THE ROSTER AND BELONG TO THOSE DAYS.** Never use one of them, even if it would fit yours better.
+- The other days' titles and locations tell you what the rest of the trip covers. Choose activities that do not duplicate them — the traveler should not do the same thing twice.
+- Everything else follows the strict rules in the system prompt.
+
+Output ONLY the JSON object with the "days" key.`;
+
+          const result = await callAnthropicJson({
+            apiKey: ANTHROPIC_API_KEY,
+            system: systemBlocks,
+            userContent: [...researchBlocks, { type: "text", text: sliceInstruction }],
+            prefill: '{"days": [',
+            // A day runs ~1,200 output tokens, so this leaves generous headroom
+            // per day in the slice. A cap that a 3-day slice can reach would
+            // truncate the last day of the group.
+            maxTokens: 2000 * dayNumbers.length + 1500,
+            label,
+          });
+          const parsed = parseModelJson<{ days?: unknown[] }>(result.text, label);
+          return { days: Array.isArray(parsed.days) ? parsed.days : [], tokens: result.outputTokens };
+        }).then(
+          value => ({ ok: true as const, value }),
+          // Settled at creation, not at await. Every slice starts at once but
+          // is awaited in trip order, so a later slice can reject while an
+          // earlier one is still running — with no handler attached yet that
+          // surfaces as an unhandled rejection and takes the isolate down.
+          (error: unknown) => ({ ok: false as const, error }),
+        ));
+
+        // ── Assemble and emit in order ────────────────────────────────────
+        // Days are awaited in trip order even though they complete out of
+        // order, so the JSON goes out well-formed and progressively rather
+        // than in one lump at the end.
+        //
+        // "days" is emitted FIRST and everything from the skeleton follows it.
+        // JSON key order carries no meaning to the parser, and putting the
+        // skeleton last means summary can be written once, at the end, already
+        // knowing which days failed — rather than being emitted early and then
+        // needing a second, contradictory copy appended.
+        const assembledDays: Record<string, unknown>[] = [];
+
+        // A day the model could not produce still gets its roster identity, so
+        // the trip keeps its shape and the gap is named rather than silently
+        // dropped. `periods: []` renders as an empty day, and the note added to
+        // summary.assumptions below tells the traveler which day to regenerate.
+        const placeholderDay = (dayNumber: number) => {
+          const entry = roster[dayNumber - 1];
+          failedDays.push(dayNumber);
+          return {
+            dayNumber,
+            title: entry?.title ?? `Day ${dayNumber}`,
+            location: entry?.location ?? "",
+            ...(entry?.transitNote ? { transitNote: entry.transitNote } : {}),
+            periods: [],
+            generationFailed: true,
+          };
+        };
+
+        await emit('{"days":[');
+
+        for (let i = 0; i < slicePromises.length; i++) {
+          const dayNumbers = slices[i];
+          let produced: Record<string, unknown>[] = [];
+          const settled = await slicePromises[i];
+          if (settled.ok) {
+            sliceTokens += settled.value.tokens;
+            produced = settled.value.days as Record<string, unknown>[];
+          } else {
+            // One slice failing must not cost the traveler the other six days.
+            console.error(`[slice] ${dayNumbers.join("+")} failed:`, settled.error);
+          }
+
+          // Match returned days by their own dayNumber rather than by position:
+          // a multi-day slice can emit them out of order, or hand back more days
+          // than it was asked for, and either would silently mislabel a day if
+          // we just took produced[k].
+          const byNumber = new Map<number, Record<string, unknown>>();
+          produced.forEach((d, idx) => {
+            const claimed = (d as { dayNumber?: unknown })?.dayNumber;
+            const key = typeof claimed === "number" ? claimed : dayNumbers[idx];
+            if (typeof key === "number" && !byNumber.has(key)) byNumber.set(key, d);
+          });
+
+          for (let k = 0; k < dayNumbers.length; k++) {
+            const dayNumber = dayNumbers[k];
+            const raw = byNumber.get(dayNumber) ?? produced[k];
+            const entry = roster[dayNumber - 1];
+            let day: Record<string, unknown>;
+            if (raw && typeof raw === "object" && Array.isArray((raw as { periods?: unknown }).periods)) {
+              day = {
+                ...raw,
+                // Position is ours to guarantee, not the model's.
+                dayNumber,
+                title: (raw as { title?: string }).title || entry?.title || `Day ${dayNumber}`,
+                location: (raw as { location?: string }).location || entry?.location || "",
+              };
+            } else {
+              day = placeholderDay(dayNumber);
+            }
+            assembledDays.push(day);
+            await emit(`${assembledDays.length > 1 ? "," : ""}${JSON.stringify(day)}`);
+          }
+        }
+
+        // Everything the skeleton produced, written after the days so the
+        // failure note below can go into summary.assumptions directly.
+        const tail: Record<string, unknown> = {};
+        for (const key of ["summary", "budget", "flights", "accommodation", "bookingChecklist", "alternatives"]) {
+          if (skeleton[key] !== undefined) tail[key] = skeleton[key];
+        }
+
+        // Name the gap where the traveler will actually read it, rather than
+        // shipping a blank day with no explanation.
+        if (failedDays.length > 0) {
+          const summary = (tail.summary ?? {}) as Record<string, unknown>;
+          const existing = Array.isArray(summary.assumptions) ? summary.assumptions : [];
+          const plural = failedDays.length > 1;
+          tail.summary = {
+            ...summary,
+            assumptions: [
+              ...existing,
+              `Day${plural ? "s" : ""} ${failedDays.join(", ")} could not be generated — regenerate the itinerary to fill ${plural ? "them" : "it"} in.`,
+            ],
+          };
+        }
+
+        const tailJson = JSON.stringify(tail);
+        await emit("]" + (tailJson.length > 2 ? "," + tailJson.slice(1) : "}"));
+
         await forward("data: [DONE]\n\n");
 
         timings.model_generation = Date.now() - modelStart;
+        timings.day_slices_wall = Date.now() - slicesStart;
         timings.total = since(t0);
         console.log("[timing] summary " + JSON.stringify({
           ...timings,
-          model_ttft: firstTokenMs,
-          stop_reason: stopReason,
-          output_tokens: outputTokens,
-          output_chars: fullContent.length,
+          mode: "split",
+          slice_count: sliceCount,
+          day_count: dayCount,
+          skeleton_output_tokens: skeletonTokens,
+          slice_output_tokens: sliceTokens,
+          output_tokens: skeletonTokens + sliceTokens,
+          output_chars: emitted.length,
+          failed_days: failedDays,
           theme: themeVariant?.id ?? "default",
           grounded: hasGroundedResearch,
           client_disconnected: !clientConnected,
         }));
-        // `end_turn` is the only clean finish. Anything else means the itinerary
-        // the client renders is incomplete, so say so loudly rather than
-        // persisting a truncated result that looks successful.
-        if (stopReason && stopReason !== "end_turn") {
-          console.error(`Generation did not finish cleanly: stop_reason=${stopReason}, output_tokens=${outputTokens}`);
+
+        // The constraint this whole split risks: parallel slices converging on
+        // the same restaurant. Log it so a regression shows up in production
+        // logs instead of in a traveler's itinerary. The stay's own dining room
+        // is excluded — repeating that is correct, not a collision.
+        const lodgingNames = new Set<string>();
+        for (const loc of (skeleton.accommodation as { options?: { name?: string }[] }[] | undefined) ?? []) {
+          for (const opt of loc?.options ?? []) {
+            if (opt?.name) lodgingNames.add(opt.name.trim().toLowerCase());
+          }
         }
+        const seen = new Map<string, number>();
+        for (const day of assembledDays) {
+          for (const period of ((day.periods as { dining?: { name?: string }[] }[]) ?? [])) {
+            for (const d of period?.dining ?? []) {
+              const key = d?.name?.trim().toLowerCase();
+              if (!key || lodgingNames.has(key)) continue;
+              seen.set(key, (seen.get(key) ?? 0) + 1);
+            }
+          }
+        }
+        const duplicates = [...seen.entries()].filter(([, n]) => n > 1);
+        console.log(`[quality] dining: unique=${seen.size} duplicated=${duplicates.length} ` +
+          (duplicates.length ? JSON.stringify(duplicates.map(([name, n]) => `${name} x${n}`)) : ""));
 
         // Persist the finished itinerary for reconnecting clients.
-        if (jobId) {
-          const { error: saveError } = await supabaseAdmin.from("itinerary_jobs").update({
-            status: "complete",
-            content: fullContent,
-            updated_at: new Date().toISOString(),
-          }).eq("id", jobId);
-          if (saveError) console.error("Failed to persist itinerary result:", saveError);
-        }
+        await persistComplete();
       } catch (streamError) {
-        console.error("Streaming/persist error:", streamError);
+        console.error("Generation/persist error:", streamError);
         if (jobId) {
           await supabaseAdmin.from("itinerary_jobs").update({
             status: "error",

@@ -7,7 +7,7 @@ import { toast } from "@/hooks/use-toast";
 import {
   ExternalLink, Plane, Hotel, MapPin, Clock, DollarSign,
   Sunrise, Sun, Moon, Utensils, Calendar, ChevronRight, Info,
-  ThumbsUp, ThumbsDown, MessageSquare, Loader2, Send, X
+  ThumbsUp, ThumbsDown, MessageSquare, Loader2, Send, X, AlertCircle
 } from "lucide-react";
 
 type Tab = 'overview' | 'days' | 'bookings';
@@ -504,6 +504,23 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
                   {activeDay.transitNote}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* This day's generation call failed — say so rather than showing an
+              empty day the traveler can't explain. The rest of the trip is
+              unaffected and still worth reading. */}
+          {activeDay && activeDay.periods.length === 0 && (
+            <div className="flex items-start gap-3 rounded-2xl border border-border/60 bg-muted/20 p-4">
+              <AlertCircle className="w-5 h-5 text-muted-foreground shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold text-foreground text-sm">
+                  Day {activeDay.dayNumber} didn't come through
+                </p>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  The rest of your trip is ready. Regenerate this itinerary to fill this day in.
+                </p>
+              </div>
             </div>
           )}
 
