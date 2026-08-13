@@ -62,10 +62,20 @@ cheaper runs); `EVAL_JUDGE_FALLBACK=off` disables the refusal fallback.
 
 ## CI
 
-`.github/workflows/itinerary-eval.yml` runs on manual dispatch and weekly
-(Mondays), publishes the scorecard to the job summary, and uploads
-fixtures + results as artifacts (90-day retention) so drift is diffable over
-time. Required repo secrets:
+The workflow lives at `eval/itinerary-eval.workflow.yml` — the automation
+credentials used to create this branch cannot write into `.github/workflows/`
+(GitHub requires the `workflow` OAuth scope), so install it once with your own
+credentials:
+
+```sh
+mkdir -p .github/workflows
+git mv eval/itinerary-eval.workflow.yml .github/workflows/itinerary-eval.yml
+git commit -m "Install itinerary eval workflow" && git push
+```
+
+It runs on manual dispatch and weekly (Mondays), publishes the scorecard to
+the job summary, and uploads fixtures + results as artifacts (90-day
+retention) so drift is diffable over time. Required repo secrets:
 
 - `EVAL_SUPABASE_URL`, `EVAL_SUPABASE_ANON_KEY` — the deployed project
 - `ANTHROPIC_API_KEY` — for the judge

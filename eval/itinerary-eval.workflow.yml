@@ -1,0 +1,51 @@
+name: Itinerary quality eval
+
+# Each run generates real itineraries (Perplexity + Anthropic spend), so this
+# is manual-dispatch plus a weekly baseline — not per-push.
+on:
+  workflow_dispatch:
+    inputs:
+      personas:
+        description: "Space-separated persona ids (empty = all in eval/personas.json)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC — weekly drift baseline
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Capture live itineraries
+        env:
+          SUPABASE_URL: ${{ secrets.EVAL_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.EVAL_SUPABASE_ANON_KEY }}
+        run: node eval/capture.mjs ${{ github.event.inputs.personas }}
+
+      - name: Run checks + Fable judge
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          EVAL_JUDGE_MODEL: claude-fable-5
+          EVAL_MIN_OVERALL: "6"
+        run: node eval/run.mjs
+
+      - name: Publish scorecard to job summary
+        if: always()
+        run: cat eval/results/scorecard.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload fixtures and scorecard
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: itinerary-eval-${{ github.run_id }}
+          path: |
+            eval/fixtures/
+            eval/results/
+          retention-days: 90
