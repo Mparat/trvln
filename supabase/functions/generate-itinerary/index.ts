@@ -698,6 +698,47 @@ function parseModelJson<T>(raw: string, label: string): T {
   }
 }
 
+// Enforce restaurant uniqueness across the roster, in code.
+//
+// Telling the model "every restaurant must be different" does not hold:
+// production returned 14 slots across 9 names, with two days assigned an
+// identical pair. This makes it a guarantee instead of a request — walk the
+// roster in day order and drop any name already used earlier.
+//
+// The traveler's own lodging is exempt: eating twice at the hut or hotel you
+// are staying in is correct, not a collision. Returns the names still in play
+// (so a slice can be told what is spoken for) and what was dropped.
+function dedupeRosterDining(
+  roster: { dayNumber: number; dining: Record<string, unknown> }[],
+  lodgingNames: Set<string>,
+): { assigned: string[]; dropped: string[] } {
+  const assignedNames = new Set<string>();
+  const assignedDisplay: string[] = [];
+  const dropped: string[] = [];
+
+  for (const day of roster) {
+    const dining = day.dining ?? {};
+    for (const period of Object.keys(dining)) {
+      const names = Array.isArray(dining[period]) ? dining[period] as unknown[] : [];
+      const kept: string[] = [];
+      for (const raw of names) {
+        const name = String(raw ?? "").trim();
+        const key = name.toLowerCase();
+        if (!key) continue;
+        // A stay's own dining room may legitimately recur.
+        if (lodgingNames.has(key)) { kept.push(name); continue; }
+        if (assignedNames.has(key)) { dropped.push(`day${day.dayNumber}:${name}`); continue; }
+        assignedNames.add(key);
+        assignedDisplay.push(name);
+        kept.push(name);
+      }
+      dining[period] = kept;
+    }
+  }
+
+  return { assigned: assignedDisplay, dropped };
+}
+
 // Group the trip's days into per-call slices. One day per call is the fast case
 // and covers every trip the form can produce at its default; longer trips group
 // up so a 60-day itinerary doesn't fan out into 60 concurrent calls.
@@ -1676,6 +1717,22 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
           dining: entry.dining && typeof entry.dining === "object" ? entry.dining : {},
         }));
 
+        // Uniqueness is enforced here, not left to the model — see
+        // dedupeRosterDining. The stay's own dining room is exempt.
+        const lodgingNames = new Set<string>();
+        for (const loc of (skeleton.accommodation as { options?: { name?: string }[] }[] | undefined) ?? []) {
+          for (const opt of loc?.options ?? []) {
+            if (opt?.name) lodgingNames.add(opt.name.trim().toLowerCase());
+          }
+        }
+
+        const { assigned: takenList, dropped: droppedDuplicates } =
+          dedupeRosterDining(roster, lodgingNames);
+        if (droppedDuplicates.length) {
+          console.warn(`[quality] dropped ${droppedDuplicates.length} duplicate roster name(s): ` +
+            JSON.stringify(droppedDuplicates));
+        }
+
         const slices = planDaySlices(roster.length);
         sliceCount = slices.length;
         console.log(`[timing] day slices: ${roster.length} days across ${slices.length} call(s)`);
@@ -1688,10 +1745,8 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
         const rosterNames = roster.map(d => Object.values(d.dining ?? {}).flat());
         console.log("[quality] roster dining: " + JSON.stringify(rosterNames));
 
-        // The uniqueness constraint, measured at the point it is decided rather
-        // than inferred from the finished itinerary. `slots` vs `unique` is the
-        // number to watch: 14 slots across 9 names is the failure that sent the
-        // roster to the front of the tool schema.
+        // Measured after de-duplication, so duplicated should now always be 0.
+        // If it is not, the enforcement above has a hole in it.
         const rosterSeen = new Map<string, number>();
         for (const name of rosterNames.flat()) {
           const key = String(name).trim().toLowerCase();
@@ -1743,7 +1798,11 @@ Each element follows the days[] schema in the system prompt exactly.
 - dayNumber, title, location and transitNote come from the day_roster entry for your day. Keep them as written.
 - Exactly 3 periods — Morning, Afternoon, Evening — and exactly 2 activities in each.
 - **THE DINING IS ALREADY ASSIGNED.** Use exactly the names in your day's roster entry, in the order given: the first is "isPrimary": true, a second is "isPrimary": false. Do not substitute a name, do not add one, do not drop one. Your job is to write each one's description, priceRange and url from the research.
-- **IF A PERIOD HAS NO ASSIGNED NAME, IT GETS NO DINING.** Give that period an empty dining array. The one exception is the place the traveler is staying that night, when they genuinely eat there — name that stay. Never fill an empty period with a category description like "Trattoria in the village" or "a lakeside ristorante": a search box dressed up as a recommendation is worse than showing nothing.
+- **IF A PERIOD HAS NO ASSIGNED NAME**, you may name one real establishment from the research for it — but ONLY a place that appears nowhere in <names_taken> below, and only if the research actually names one near where the traveler is at that hour. The place the traveler is staying that night also counts. Otherwise give that period an empty dining array. Never fill an empty period with a category description like "Trattoria in the village" or "a lakeside ristorante": a search box dressed up as a recommendation is worse than showing nothing.
+
+<names_taken>
+${takenList.join(", ") || "(none)"}
+</names_taken>
 - **EVERY OTHER DAY'S RESTAURANTS ARE LISTED IN THE ROSTER AND BELONG TO THOSE DAYS.** Never use one of them, even if it would fit yours better.
 - The other days' titles and locations tell you what the rest of the trip covers. Choose activities that do not duplicate them — the traveler should not do the same thing twice.
 - Everything else follows the strict rules in the system prompt.
@@ -1896,12 +1955,7 @@ Put the day(s) in the \`emit_days\` tool call. Do not write them out as text.`;
         // the same restaurant. Log it so a regression shows up in production
         // logs instead of in a traveler's itinerary. The stay's own dining room
         // is excluded — repeating that is correct, not a collision.
-        const lodgingNames = new Set<string>();
-        for (const loc of (skeleton.accommodation as { options?: { name?: string }[] }[] | undefined) ?? []) {
-          for (const opt of loc?.options ?? []) {
-            if (opt?.name) lodgingNames.add(opt.name.trim().toLowerCase());
-          }
-        }
+        // lodgingNames was computed before the roster was de-duplicated.
         const seen = new Map<string, number>();
         for (const day of assembledDays) {
           for (const period of ((day.periods as { dining?: { name?: string }[] }[]) ?? [])) {
