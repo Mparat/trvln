@@ -1049,6 +1049,16 @@ ${additionalNotes || "None provided"}
     // that it can only resolve by inventing establishments and URLs, which is
     // the exact failure the rules were written to prevent.
     const hasGroundedResearch = results.some(r => r.content.trim().length > 0);
+    // Per-query, not just an overall boolean. `grounded` is true when ANY of the
+    // seven queries returned something, so a restaurant search that came back
+    // nearly empty — the one failure that shows up directly in the itinerary as
+    // unnamed, category-only dining picks — was previously invisible here.
+    console.log("[research] " + JSON.stringify(
+      Object.fromEntries(searchSpecs.map((spec, i) => [
+        spec.key,
+        { chars: results[i].content.trim().length, citations: results[i].citations?.length ?? 0 },
+      ])),
+    ));
     console.log(`Perplexity research completed. grounded=${hasGroundedResearch}`);
     if (!hasGroundedResearch) {
       console.error("All Perplexity searches returned empty — generating without grounding.");
@@ -1288,6 +1298,8 @@ summary, budget, flights, accommodation, bookingChecklist and alternatives follo
 - One entry per day of the trip. The number of entries IS the trip length — decide it from the duration constraints above.
 - dayNumber, title, location and transitNote are the same fields as in the days[] schema. Omit transitNote on days with no travel.
 - **dining holds the ASSIGNED RESTAURANT NAMES for that day's three periods — names only.** No descriptions, no prices, no URLs; pass 2 writes those from the research.
+- **EVERY ENTRY MUST BE A REAL ESTABLISHMENT'S PROPER NAME, copied from the research.** "Ristorante Il Cavatappi", "Osteria del Beccaccino", "Bar Il Molo" are names. "Trattoria in Varenna village", "Dinner at a lakeside ristorante", "a family-run osteria", "Lakefront café" are CATEGORY DESCRIPTIONS, not names. A category description is never acceptable — not as a top pick, not as a second option, not to complete a day. It is the same failure as inventing a restaurant, and it is worse than leaving the slot empty, because the traveler is handed a search box instead of a table.
+- **RUNNING OUT OF NAMES IS AN ACCEPTABLE OUTCOME. PADDING IS NOT.** If the research does not contain enough named establishments to fill every period, leave the extra periods out — give an empty array, or omit the period key. A trip with nine real named restaurants and twelve empty slots is correct. A trip with twenty-one filled slots where half are categories is a failure. Note the shortfall in summary.assumptions.
 - Give 1 or 2 names per period. The first is the top pick. Add a second ONLY when a real, separate alternative exists within reach of where the traveler actually is at that hour — one real option beats two where the second is filler.
 - **THIS IS WHERE RESTAURANT UNIQUENESS IS DECIDED, AND IT CANNOT BE FIXED LATER.** The day passes run independently and cannot see each other's choices. Before you finish, read back over the entire dayPlan: if the same establishment appears on two different days, or twice in one day, replace one of them with a different place from the research.
 - The ONLY name that may legitimately repeat is a stay's own dining room — a hut, refuge, lodge, ryokan, safari camp, boat, or hotel where meals are included or nothing else is within reach. Where that is genuinely where the traveler eats, repeat it and say which stay it is.
@@ -1492,6 +1504,15 @@ Output ONLY the JSON object. Do not include a "days" key.`;
         sliceCount = slices.length;
         console.log(`[timing] day slices: ${roster.length} days across ${slices.length} call(s)`);
 
+        // The assigned names, before any day call has run. If these are already
+        // generic ("Trattoria in Varenna village") the skeleton could not find
+        // named establishments in the research; if they are real here but
+        // generic in the finished itinerary, a day call ignored its assignment.
+        // Without this the two failures are indistinguishable from the output.
+        console.log("[quality] roster dining: " + JSON.stringify(
+          roster.map(d => Object.values(d.dining ?? {}).flat()),
+        ));
+
         // The whole roster goes to every slice: each one needs to know which
         // names belong to other days so it does not reach for them.
         const rosterJson = JSON.stringify(roster);
@@ -1533,6 +1554,7 @@ Each element follows the days[] schema in the system prompt exactly.
 - dayNumber, title, location and transitNote come from the day_roster entry for your day. Keep them as written.
 - Exactly 3 periods — Morning, Afternoon, Evening — and exactly 2 activities in each.
 - **THE DINING IS ALREADY ASSIGNED.** Use exactly the names in your day's roster entry, in the order given: the first is "isPrimary": true, a second is "isPrimary": false. Do not substitute a name, do not add one, do not drop one. Your job is to write each one's description, priceRange and url from the research.
+- **IF A PERIOD HAS NO ASSIGNED NAME, IT GETS NO DINING.** Give that period an empty dining array. The one exception is the place the traveler is staying that night, when they genuinely eat there — name that stay. Never fill an empty period with a category description like "Trattoria in the village" or "a lakeside ristorante": a search box dressed up as a recommendation is worse than showing nothing.
 - **EVERY OTHER DAY'S RESTAURANTS ARE LISTED IN THE ROSTER AND BELONG TO THOSE DAYS.** Never use one of them, even if it would fit yours better.
 - The other days' titles and locations tell you what the rest of the trip covers. Choose activities that do not duplicate them — the traveler should not do the same thing twice.
 - Everything else follows the strict rules in the system prompt.
