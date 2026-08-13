@@ -119,7 +119,7 @@ async function runPerplexityQuery(
         messages: [
           { 
             role: 'system', 
-            content: 'You are a travel research assistant. Provide specific, detailed recommendations with exact names of restaurants, hotels, tours, and activities. When researching hotels, prioritize options within the specified price range and include nightly rates. If most options exceed the budget, explicitly note this and suggest alternatives. Include price ranges when available. Be comprehensive but concise.' 
+            content: 'You are a travel research assistant. Provide specific, detailed recommendations with exact names of restaurants, hotels, tours, and activities. When researching hotels, prioritize options within the specified price range and include nightly rates. If most options exceed the budget, explicitly note this and suggest alternatives. Include price ranges when available. Be comprehensive but concise.\n\nWhen a query carries a SOURCING instruction, treat it as part of the question rather than as advice: search the kinds of sources it names, and attribute claims as it asks. Where it tells you to check a published schedule, fee or rule against first-hand accounts, report both and say plainly when they disagree — a discrepancy is a finding, not something to average away. Never present a fact you found in one place as though it were corroborated, and say when you could not find something at all rather than substituting the nearest thing you could find.'
           },
           { role: 'user', content: query }
         ],
@@ -1011,6 +1011,132 @@ This itinerary MUST embody the "${themeVariant.name}" theme throughout.
     }
 
     // ============================================
+    // SOURCE STRATEGY PASS
+    // ============================================
+    // Which sources can answer a trip depends on what the trip is, so the query
+    // text cannot hardcode it. A crowd-averse self-guided traverse is answered
+    // by first-hand trip reports, regional forums and operator timetables; a
+    // first-time city break is answered by mainstream guides. Asking every query
+    // for both returns the average of both, which is the generic listicle.
+    //
+    // So Haiku reads the request and says, per research topic, what would
+    // actually know the answer — and turns the traveler's subjective words
+    // ("off the beaten path", "authentic") into tests a search can apply,
+    // rather than letting them pass through as keywords to match.
+    //
+    // Kicked off before destination resolution and awaited after it: this
+    // describes the shape of the trip, not the place, so it neither needs the
+    // resolved destination nor should wait behind it.
+    type SourcePlan = {
+      tripCharacter?: string;
+      interpretations?: string[];
+      sources?: Record<string, string>;
+    };
+
+    const sourcePlanPromise: Promise<SourcePlan | null> = timePhase("source_strategy", async () => {
+      try {
+        const strategyPrompt = `You are planning the RESEARCH for a trip, not the trip itself. Decide what kinds of sources could actually answer each research topic for this specific traveler.
+
+Do not favour any category of source by default. Mainstream guidebooks, tourism boards, operator and authority pages, regional or local-language blogs, forums, and first-hand trip reports are all legitimate. Choose per topic by asking which of them would plausibly KNOW the answer for this trip — a national tourism board knows opening hours and nothing about whether a traverse is passable in June; a trip report knows the opposite.
+
+Two things to get right:
+
+1. Where a fact is verifiable and changes over time — schedules, fares, opening windows, permits, capacity, closures — name the authoritative publisher (the operator, the transit authority, the park service, the booking system) AND the first-hand accounts that reveal whether reality matches what is published. Both, not either.
+
+2. Where the traveler used a subjective word — "off the beaten path", "authentic", "hidden gem", "local", "chill", "epic", "low-key" — do not let the phrase pass through as a search keyword; every listicle claims it. Say what it means for THIS trip in terms a search can check: what would have to be true of a place for it to qualify, and what kind of source would mention such a place at all. Judge it relative to the destination, not in the abstract.
+
+The traveler's request:
+- What they described: ${additionalNotes || "Not specified"}
+- Atmosphere: ${atmosphere?.join(", ") || "no preference"}
+- Interests (ranked): ${interests?.join(" > ") || "no preference"}
+- Adventure level: ${adventureLevel || "no preference"}
+- Guided vs self-serve: ${guidedLabel}
+- Food & drink: ${foodDrink?.join(", ") || "no preference"}
+- Budget: ${budgetInfo.label} (${budgetInfo.accommodation})
+- Duration: ${durationContext}
+- Timing: ${dateContext}
+${themeVariant?.name ? `- Itinerary theme: ${themeVariant.name}` : ""}
+
+Respond with ONLY a JSON object in this shape:
+{
+  "tripCharacter": "one sentence on what kind of trip this actually is",
+  "interpretations": ["Each subjective word in the request, restated as a checkable test. Empty array if the request used none."],
+  "sources": {
+    "activities": "One or two sentences on what should be sourced from where, for this trip.",
+    "restaurants": "...",
+    "accommodation": "...",
+    "nearbyAndTransport": "...",
+    "seasonal": "...",
+    "planning": "...",
+    "flights": "..."
+  }
+}
+
+Worked example, for a self-guided hut-to-hut trek by someone avoiding crowds:
+{
+  "tripCharacter": "A self-guided multi-day mountain traverse, sleeping in huts, by a traveler who wants to be away from day-trip crowds.",
+  "interpretations": ["'Off the beaten path' here means valleys and huts that the cable-car day-trip crowd cannot reach on foot in an afternoon — not merely places that are less famous than the headline peak. A place qualifies if reaching it takes a half day of walking or a connection the tour buses do not run. Regional alpine club pages and individual trip reports mention these; national tourism campaigns do not."],
+  "sources": {
+    "activities": "First-hand trip reports and regional hiking-club or alpine-club route descriptions, which name specific stages and passes. Treat national tourism-board copy as a starting list of names only, since it covers the roadside viewpoints this traveler is trying to avoid.",
+    "nearbyAndTransport": "The valley bus and cable-car operators' own published timetables, named, since services here are seasonal and change yearly — cross-checked against recent trip reports for whether the last connection of the day is actually catchable with a full pack.",
+    "planning": "The huts' own booking pages and the alpine club's reservation system for lead times and half-board rules; recent trip reports for how far ahead beds actually sell out in practice, which the official pages never state."
+  }
+}
+
+No explanation. Just the JSON object.`;
+
+        const strategyResponse = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "claude-haiku-4-5",
+            messages: [{ role: "user", content: strategyPrompt }],
+            // Seven topic directives plus the interpretations run long.
+            max_tokens: 1200,
+          }),
+        });
+
+        if (!strategyResponse.ok) {
+          console.error("Source strategy pass failed:", strategyResponse.status);
+          return null;
+        }
+
+        const strategyData = await strategyResponse.json();
+        const raw = strategyData.content?.[0]?.text?.trim() ?? "";
+        const parsed = JSON.parse(raw.replace(/```[a-z]*\n?/gi, "").trim());
+
+        // Clamp before this reaches a query: the directives are concatenated
+        // into every Perplexity prompt, and a runaway generation here would
+        // bury the actual question underneath its own sourcing advice.
+        const clamp = (s: unknown, max: number) =>
+          typeof s === "string" && s.trim() ? s.trim().slice(0, max) : undefined;
+
+        const sources: Record<string, string> = {};
+        for (const [key, value] of Object.entries(parsed?.sources ?? {})) {
+          const directive = clamp(value, 600);
+          if (directive) sources[key] = directive;
+        }
+
+        const plan: SourcePlan = {
+          tripCharacter: clamp(parsed?.tripCharacter, 300),
+          interpretations: Array.isArray(parsed?.interpretations)
+            ? parsed.interpretations.map((i: unknown) => clamp(i, 500)).filter(Boolean).slice(0, 4)
+            : [],
+          sources,
+        };
+        console.log("Source strategy:", JSON.stringify(plan, null, 2));
+        return plan;
+      } catch (err) {
+        console.error("Source strategy pass failed — using baseline sourcing only:", err);
+        return null;
+      }
+    });
+
+    // ============================================
     // DESTINATION RESOLUTION PASS
     // When no explicit city is given, ask Claude Haiku to pick the best
     // match before Perplexity runs, so all research is destination-specific.
@@ -1152,25 +1278,56 @@ ${additionalNotes || "None provided"}
     // Determine trip length for context-aware queries
     const tripDaysNum = durationDays || 7;
 
+    // Started before destination resolution; collected here.
+    const sourcePlan = await sourcePlanPromise;
+
+    // The floor, applied whether or not the strategy pass returned anything.
+    // These are the topics where the right sourcing does not depend on the
+    // traveler: a departure time is either what the operator publishes or it is
+    // wrong, and the published time is still not what a traveler with a full
+    // pack experiences. Both halves are needed, so both are always asked for.
+    // Taste topics are deliberately absent — what makes a good restaurant
+    // source varies with the trip, so it is left to the strategy pass rather
+    // than pushed toward guides or blogs by default.
+    const baselineSourceRules: Record<string, string> = {
+      nearbyAndTransport: `Take every schedule, fare and journey time from the operator's or transit authority's own published timetable, and name the operator you took it from. Then cross-check against recent first-hand accounts from travelers who made the same journey. Where the published version and the trip reports disagree, say so and say which is more current.`,
+      seasonal: `Take closure dates, opening windows and event dates from the operator, park authority or organiser that publishes them, and weather from climate records rather than from prose. Cross-check against recent first-hand accounts of what conditions were actually like.`,
+      planning: `Take booking lead times, permit rules, fees and access restrictions from the issuing authority or the booking system itself, and name it. Then add what recent first-hand accounts say happens in practice — how far ahead things really sell out, whether a rule is enforced, what the process is actually like — because the official page never states that.`,
+      flights: `Take routes and airport pairings from airline or airport published route information rather than from aggregator listicles, which keep discontinued routes online for years.`,
+    };
+
+    // Vague words the traveler used, restated as tests. Injected where taste
+    // decides the answer — asking a search engine for "hidden gems" returns the
+    // pages that call themselves that, which is the opposite of the request.
+    const interpretationClause = sourcePlan?.interpretations?.length
+      ? ` Apply the following as tests a place must pass, not as phrases to match: ${sourcePlan.interpretations.join(" ")}`
+      : "";
+
+    const sourceClause = (key: string) => {
+      const parts = [baselineSourceRules[key], sourcePlan?.sources?.[key]].filter(Boolean);
+      if (!parts.length) return "";
+      return ` SOURCING: ${parts.join(" ")} For each specific claim, say what kind of source it came from, and flag anything you could only find in a single place.`;
+    };
+
     // Keyed so a conditional query can be added without shifting the indices
     // the context block reads from.
     const searchSpecs: { key: string; query: string }[] = [
       // Activities and things to do
       {
         key: 'activities',
-        query: `Best things to do in ${destinationStr} for ${interestsStr} travelers. Include specific activity names, tour recommendations, must-visit attractions, hidden gems, and neighborhoods to explore.${themeStr ? ` Focus on ${themeStr} experiences.` : ''} ${budgetInfo.label} budget level.${notesClause}`,
+        query: `Best things to do in ${destinationStr} for ${interestsStr} travelers. Include specific activity names, tour recommendations, attractions, and neighborhoods to explore.${themeStr ? ` Focus on ${themeStr} experiences.` : ''} ${budgetInfo.label} budget level.${notesClause} Judge how well-trodden somewhere is relative to ${destinationStr} itself — what people who know this place consider the tourist trail — not by how famous it is to an outsider.${interpretationClause}${sourceClause('activities')}`,
       },
 
       // Restaurants and food scene — emphasise currently operating
       {
         key: 'restaurants',
-        query: `Best ${foodStr} restaurants currently open in ${destinationStr} as of ${currentYear}. Only include establishments confirmed to be actively operating with recent positive reviews. Include specific restaurant names, neighborhoods, price ranges, and what they are known for. Exclude any restaurants that have closed, are temporarily closed, or have uncertain operating status. ${budgetInfo.label} budget.${tripNotes ? ` The traveler describes the trip as: "${tripNotes}" — if this trip spends nights somewhere without restaurants nearby (a mountain hut, a lodge, a remote village, a boat), say so and name where meals are actually eaten there instead.` : ''}`,
+        query: `Best ${foodStr} restaurants currently open in ${destinationStr} as of ${currentYear}. Only include establishments confirmed to be actively operating with recent positive reviews. Include specific restaurant names, neighborhoods, price ranges, and what they are known for. Exclude any restaurants that have closed, are temporarily closed, or have uncertain operating status. ${budgetInfo.label} budget.${tripNotes ? ` The traveler describes the trip as: "${tripNotes}" — if this trip spends nights somewhere without restaurants nearby (a mountain hut, a lodge, a remote village, a boat), say so and name where meals are actually eaten there instead.` : ''}${interpretationClause}${sourceClause('restaurants')}`,
       },
 
       // Where to sleep, in whatever form this trip actually needs
       {
         key: 'accommodation',
-        query: `Best ${budgetInfo.label} places to stay in ${destinationStr} priced ${budgetInfo.accommodation}. ${startDate && endDate ? `For dates: check-in ${startDate}, check-out ${endDate}.` : targetMonth ? `For travel in ${targetMonth}.` : ''} Include specific names with nightly rates and where each one is.${tripNotes ? ` The traveler describes the trip as: "${tripNotes}" — include the kinds of lodging this trip actually requires (for example mountain huts or refuges, guesthouses, campsites, lodges, hostels, ryokan), not only conventional hotels, and note how each is booked and what a night includes such as half board.` : ''}`,
+        query: `Best ${budgetInfo.label} places to stay in ${destinationStr} priced ${budgetInfo.accommodation}. ${startDate && endDate ? `For dates: check-in ${startDate}, check-out ${endDate}.` : targetMonth ? `For travel in ${targetMonth}.` : ''} Include specific names with nightly rates and where each one is.${tripNotes ? ` The traveler describes the trip as: "${tripNotes}" — include the kinds of lodging this trip actually requires (for example mountain huts or refuges, guesthouses, campsites, lodges, hostels, ryokan), not only conventional hotels, and note how each is booked and what a night includes such as half board.` : ''}${interpretationClause}${sourceClause('accommodation')}`,
       },
 
       // Where the trip goes and how it moves. Deliberately not branched on
@@ -1179,13 +1336,13 @@ ${additionalNotes || "None provided"}
       // area the whole trip happens inside. One question covers both shapes.
       {
         key: 'nearbyAndTransport',
-        query: `For a ${tripDaysNum}-day trip in ${destinationStr}: which places should the itinerary actually include, how do you travel between them (trains, buses, cable cars, ferries, driving — with prices and journey times), and how many days does each deserve? If this is a single city, cover what is worth leaving it for as day trips or overnight stops. If it is a region or a route, cover how to move between its towns and valleys, and whether it works better as a base with day trips or as a point-to-point traverse.${notesClause}`,
+        query: `For a ${tripDaysNum}-day trip in ${destinationStr}: which places should the itinerary actually include, how do you travel between them (trains, buses, cable cars, ferries, driving — with prices and journey times), and how many days does each deserve? If this is a single city, cover what is worth leaving it for as day trips or overnight stops. If it is a region or a route, cover how to move between its towns and valleys, and whether it works better as a base with day trips or as a point-to-point traverse.${notesClause}${sourceClause('nearbyAndTransport')}`,
       },
 
       // Seasonal & practical information
       {
         key: 'seasonal',
-        query: `${destinationStr} travel in ${targetMonth || 'the travel season'}. Include weather, peak vs off-season pricing, festivals or events, crowd levels, and any seasonal closures.${notesClause}`,
+        query: `${destinationStr} travel in ${targetMonth || 'the travel season'}. Include weather, peak vs off-season pricing, festivals or events, crowd levels, and any seasonal closures.${notesClause}${sourceClause('seasonal')}`,
       },
 
       // Planning, booking windows, access rules, conditions and required skill.
@@ -1193,7 +1350,7 @@ ${additionalNotes || "None provided"}
       // and none of the queries above ask about them.
       {
         key: 'planning',
-        query: `Practical planning for a ${tripDaysNum}-day trip in ${destinationStr}${targetMonth ? ` in ${targetMonth}` : ''}${tripNotes ? `, described by the traveler as: "${tripNotes}"` : ''}. Answer each of these specifically for ${currentYear}: (1) How far in advance do the places to stay need to be booked, and how is each one booked — online, by email, deposit required, cash only? (2) What permits, reservations, entry fees, timed-entry slots, or vehicle and access restrictions apply, and how are they obtained? (3) What conditions, closures, or seasonal limits affect this trip, and what is the usable window? (4) What fitness or skill level, equipment, and guiding does it require, and where locally can equipment be rented or a guide hired, at what price?`,
+        query: `Practical planning for a ${tripDaysNum}-day trip in ${destinationStr}${targetMonth ? ` in ${targetMonth}` : ''}${tripNotes ? `, described by the traveler as: "${tripNotes}"` : ''}. Answer each of these specifically for ${currentYear}: (1) How far in advance do the places to stay need to be booked, and how is each one booked — online, by email, deposit required, cash only? (2) What permits, reservations, entry fees, timed-entry slots, or vehicle and access restrictions apply, and how are they obtained? (3) What conditions, closures, or seasonal limits affect this trip, and what is the usable window? (4) What fitness or skill level, equipment, and guiding does it require, and where locally can equipment be rented or a guide hired, at what price?${sourceClause('planning')}`,
       },
     ];
 
@@ -1201,7 +1358,7 @@ ${additionalNotes || "None provided"}
     if (!noFlight && departureCity) {
       searchSpecs.push({
         key: 'flights',
-        query: `Flights from ${departureCity} to ${destinationStr} in ${targetMonth || 'upcoming months'}. Which airports actually serve this destination — if it is a region rather than a city, name the realistic gateway airports and how far each is from it by road or rail. Include typical price ranges, best airlines, flight duration, and whether nonstop options exist.`,
+        query: `Flights from ${departureCity} to ${destinationStr} in ${targetMonth || 'upcoming months'}. Which airports actually serve this destination — if it is a region rather than a city, name the realistic gateway airports and how far each is from it by road or rail. Include typical price ranges, best airlines, flight duration, and whether nonstop options exist.${sourceClause('flights')}`,
       });
     }
 
@@ -1265,7 +1422,8 @@ ${additionalNotes || "None provided"}
 - ONLY recommend places, activities, and restaurants that appear in this research
 - Do NOT hallucinate establishment names or URLs
 - For anything not in the research, use the fallback URL patterns in the system prompt
-
+- The research states where its claims came from. Carry that through: name the operator behind a schedule, and keep the distinction between what is published and what travelers actually report.
+${sourcePlan?.tripCharacter ? `\n**What this trip is:** ${sourcePlan.tripCharacter}\n` : ''}
 ---
 
 ### 🗺️ NEARBY DESTINATIONS, DAY TRIPS & TRANSPORTATION
@@ -1339,7 +1497,7 @@ Use the grounded research data below to find real establishment names, accurate 
 
 ## GROUNDED RESEARCH (CRITICAL - READ BEFORE PROCEEDING)
 
-You have been provided with LIVE WEB SEARCH RESULTS at the start of the user message below. This is your FACTUAL GROUND TRUTH from real travel blogs, guides, and booking sites.
+You have been provided with LIVE WEB SEARCH RESULTS at the start of the user message below. This is your FACTUAL GROUND TRUTH, searched against whichever sources could actually answer each question for this trip — operator timetables and permit systems for logistics, first-hand accounts and regional guides for what a place is like.
 
 **STRICT RULES - YOU MUST FOLLOW THESE:**
 
@@ -1351,7 +1509,8 @@ You have been provided with LIVE WEB SEARCH RESULTS at the start of the user mes
 6. **For restaurants near activities**, use Google Maps search URLs for the neighborhood:
    - Format: https://www.google.com/maps/search/?api=1&query=restaurants+near+NEIGHBORHOOD+CITY
 7. **The only name you may use that the research did not surface is a place already in this itinerary** — the hut, lodge, or hotel the traveler is booked into that night, when they eat there because nothing else is within reach. Naming that stay's own dining room is grounded; inventing a nearby restaurant is not.
-8. **If the research is thin for part of the trip, say less rather than more.** Fewer, sourced recommendations beat a full-looking day built on invention. Note the gap in summary.assumptions.`
+8. **If the research is thin for part of the trip, say less rather than more.** Fewer, sourced recommendations beat a full-looking day built on invention. Note the gap in summary.assumptions.
+9. **The research attributes its claims, and sometimes reports a conflict** — a published timetable saying one thing and recent travelers saying another. Do not silently pick one or split the difference. Plan on the more conservative of the two, and put the discrepancy in summary.assumptions or the relevant transitNote so the traveler knows to confirm it. Anything the research flagged as found in only one place is a soft fact: state it as such rather than as a schedule to build a day around.`
       : `## Research Requirements (NO LIVE RESEARCH AVAILABLE)
 
 Live web search returned nothing for this trip, so there is no research document — do not refer to one.
