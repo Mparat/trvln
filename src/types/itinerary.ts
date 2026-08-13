@@ -95,4 +95,13 @@ export interface ItineraryData {
   bookingChecklist: BookingItem[];
   days: ItineraryDay[];
   alternatives?: { title: string; description: string; url?: string }[];
+  // What the live research was grounded in, grouped by the topic it answered.
+  // Absent on itineraries generated before sources were returned, and on the
+  // single-call fallback path, so every consumer must treat it as optional.
+  sources?: ResearchSourceGroup[];
+}
+
+export interface ResearchSourceGroup {
+  topic: string;
+  citations: string[];
 }

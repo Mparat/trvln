@@ -1400,6 +1400,32 @@ ${additionalNotes || "None provided"}
     const planningResearch = research.planning;
     const flightResearch = research.flights; // Undefined when no flight query ran
 
+    // The provenance is worth more to the traveler than it is to the model.
+    // A departure time the itinerary took from an operator's own timetable and
+    // one it took from a 2019 blog post look identical on the page, and only
+    // one of them is worth planning a morning around — so the citations that
+    // grounded each topic are returned alongside the itinerary rather than
+    // being consumed and discarded. Deduped, because a single operator page
+    // routinely answers several of the questions.
+    const SOURCE_TOPIC_LABELS: Record<string, string> = {
+      activities: "Things to do",
+      restaurants: "Food & drink",
+      accommodation: "Places to stay",
+      nearbyAndTransport: "Getting around",
+      seasonal: "Season & timing",
+      planning: "Booking & access",
+      flights: "Flights",
+    };
+    const researchSources = searchSpecs
+      .map(spec => ({
+        topic: SOURCE_TOPIC_LABELS[spec.key] ?? spec.key,
+        citations: Array.from(new Set(research[spec.key]?.citations ?? []))
+          .filter(c => typeof c === "string" && /^https?:\/\//i.test(c))
+          .slice(0, 8),
+      }))
+      .filter(s => s.citations.length > 0);
+    console.log(`Research sources: ${researchSources.reduce((n, s) => n + s.citations.length, 0)} across ${researchSources.length} topic(s)`);
+
     const citeList = (r: ResearchResult | undefined) =>
       r?.citations?.length ? r.citations.map((c, i) => `${i + 1}. ${c}`).join('\n') : 'No citations available';
 
@@ -1816,7 +1842,7 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
         if (!splitGenerationEnabled) {
           console.log("[split] disabled by ITINERARY_SPLIT_GENERATION=off");
         }
-        const skeleton = splitGenerationEnabled ? await trySkeleton() : null;
+        let skeleton = splitGenerationEnabled ? await trySkeleton() : null;
 
         if (!skeleton) {
           await runSingleCall();
@@ -1844,6 +1870,7 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
           for (const key of ["summary", "budget", "flights", "accommodation", "bookingChecklist", "alternatives"]) {
             if (skeleton[key] !== undefined) tail[key] = skeleton[key];
           }
+          if (researchSources.length) tail.sources = researchSources;
           const tailJson = JSON.stringify(tail);
           await emit('{"days":' + JSON.stringify(skeletonDays));
           await emit(tailJson.length > 2 ? "," + tailJson.slice(1) : "}");
@@ -1863,6 +1890,142 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
           await persistComplete();
           return;
         }
+
+        // ── Read the plan back before writing it out ──────────────────────
+        // A planner reads their own draft before committing to it. This is the
+        // only place that can happen: days stream to the client as they finish,
+        // so by the time day three exists it has already been sent — and prose
+        // could not fix a badly shaped week in any case. Pacing, sequencing,
+        // what got included and what got missed are all decided in the roster,
+        // so the roster is what gets read back.
+        //
+        // Haiku, because noticing "day four crosses the city twice" and "they
+        // asked to be away from crowds and this is the busiest viewpoint in the
+        // range" is recognition rather than authorship. Fails open at every
+        // step: any error, any unparseable answer, any suspicious revision, and
+        // the original plan proceeds untouched.
+        const critiqueAndRevise = async (current: Skeleton): Promise<Skeleton> => {
+          const originalPlan = current.dayPlan ?? [];
+          if (originalPlan.length === 0) return current;
+
+          let findings: string[] = [];
+          try {
+            const rosterForReview = originalPlan.map((e, i) => ({
+              day: i + 1,
+              title: e.title,
+              location: e.location,
+              transitNote: e.transitNote,
+              dining: e.dining,
+            }));
+
+            const critiquePrompt = `You are reading a travel plan before it gets written up, the way a senior planner reads a junior's draft. You are not rewriting it — you are saying what is wrong with it.
+
+The traveler asked for:
+${userInputsBlock}
+${sourcePlan?.tripCharacter ? `\nWhat this trip actually is: ${sourcePlan.tripCharacter}` : ""}${sourcePlan?.avoid?.length ? `\n\nThings that would make this feel canned to this particular traveler:\n${sourcePlan.avoid.map(a => `- ${a}`).join("\n")}` : ""}
+
+The plan, one entry per day:
+${JSON.stringify(rosterForReview, null, 2)}
+
+Trip summary: ${JSON.stringify(current.summary ?? {})}
+
+Look for these specifically:
+1. **Pacing** — every day the same intensity, a heavy day scheduled on arrival, a long run with no let-up, or a final day that assumes an evening the traveler does not have.
+2. **Geography** — a day whose stops are scattered across the map, or a move that costs more of the day than it gives back.
+3. **Fit** — anything on the canned list above, or an inclusion that contradicts something the traveler explicitly asked for.
+4. **Omission** — something they said they came for that appears nowhere, or lands so late that one bad weather day would take it from them.
+5. **Repetition** — two days that would read almost identically to the person living them.
+
+Report only problems worth changing the plan over, and name the day number and the specific fix for each. A plan with nothing wrong is a normal outcome — say so rather than inventing a finding to look useful.
+
+Respond with ONLY JSON:
+{"verdict": "ok", "findings": []}
+or
+{"verdict": "revise", "findings": ["Day 3 ...", "Day 5 ..."]}`;
+
+            const critiqueResponse = await timePhase("plan_critique", () =>
+              fetch("https://api.anthropic.com/v1/messages", {
+                method: "POST",
+                headers: {
+                  "x-api-key": ANTHROPIC_API_KEY,
+                  "anthropic-version": "2023-06-01",
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  model: "claude-haiku-4-5",
+                  messages: [{ role: "user", content: critiquePrompt }],
+                  max_tokens: 900,
+                }),
+              }));
+
+            if (!critiqueResponse.ok) {
+              console.error("[critique] failed:", critiqueResponse.status);
+              return current;
+            }
+            const critiqueData = await critiqueResponse.json();
+            const raw = (critiqueData.content?.[0]?.text ?? "").replace(/```[a-z]*\n?/gi, "").trim();
+            const parsed = JSON.parse(raw);
+            findings = Array.isArray(parsed?.findings)
+              ? parsed.findings.filter((f: unknown) => typeof f === "string" && f.trim()).slice(0, 6)
+              : [];
+            if (parsed?.verdict !== "revise" || findings.length === 0) {
+              console.log("[critique] plan passed review");
+              return current;
+            }
+            console.log(`[critique] ${findings.length} finding(s):`, JSON.stringify(findings));
+          } catch (err) {
+            console.error("[critique] skipped:", err);
+            return current;
+          }
+
+          // Only a flagged plan pays for a second pass.
+          try {
+            const revisionInstruction = `${skeletonInstruction}
+
+## REVISION — a review of your first plan found problems
+
+${findings.map((f, i) => `${i + 1}. ${f}`).join("\n")}
+
+Your previous plan was:
+${JSON.stringify({ dayPlan: current.dayPlan, summary: current.summary })}
+
+Emit the corrected plan through the \`emit_trip_plan\` tool. Fix every finding above. Keep everything the review did not object to — this is a revision, not a fresh start, and churn the traveler will never see costs them the parts that were already right. The trip must still be ${originalPlan.length} days.`;
+
+            const revisionResult = await timePhase("plan_revision", () =>
+              callAnthropicJson({
+                apiKey: ANTHROPIC_API_KEY,
+                system: systemBlocks,
+                userContent: [...researchBlocks, { type: "text", text: revisionInstruction }],
+                toolName: TRIP_PLAN_TOOL.name,
+                maxTokens: 8000,
+                label: "plan_revision",
+              }));
+
+            const revised = revisionResult.data as Skeleton;
+            const revisedPlan = revised.dayPlan;
+            // A revision that changed the trip's length did something other
+            // than what it was asked to do, and day count is the one thing the
+            // traveler specified outright. Discard it rather than silently
+            // handing back a different trip.
+            if (!Array.isArray(revisedPlan) || revisedPlan.length !== originalPlan.length) {
+              console.warn(`[critique] revision returned ${revisedPlan?.length ?? 0} days for a ` +
+                `${originalPlan.length}-day trip — keeping the original plan`);
+              return current;
+            }
+            skeletonTokens += revisionResult.outputTokens;
+            console.log("[critique] plan revised");
+            // Merged, not replaced: the revision is asked for a whole plan but
+            // may return fewer top-level keys than the first pass did, and a
+            // dropped budget or flights block would be a worse outcome than the
+            // pacing problem this set out to fix.
+            return { ...current, ...revised };
+          } catch (err) {
+            console.error("[critique] revision failed — keeping the original plan:", err);
+            return current;
+          }
+        };
+
+        skeleton = await critiqueAndRevise(skeleton);
 
         const dayPlan = skeleton.dayPlan ?? [];
         dayCount = dayPlan.length;
@@ -2072,6 +2235,7 @@ Put the day(s) in the \`emit_days\` tool call. Do not write them out as text.`;
         for (const key of ["summary", "budget", "flights", "accommodation", "bookingChecklist", "alternatives"]) {
           if (skeleton[key] !== undefined) tail[key] = skeleton[key];
         }
+        if (researchSources.length) tail.sources = researchSources;
 
         // Name the gap where the traveler will actually read it, rather than
         // shipping a blank day with no explanation.
