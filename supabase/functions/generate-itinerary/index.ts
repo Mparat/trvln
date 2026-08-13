@@ -119,7 +119,7 @@ async function runPerplexityQuery(
         messages: [
           { 
             role: 'system', 
-            content: 'You are a travel research assistant. Provide specific, detailed recommendations with exact names of restaurants, hotels, tours, and activities. When researching hotels, prioritize options within the specified price range and include nightly rates. If most options exceed the budget, explicitly note this and suggest alternatives. Include price ranges when available. Be comprehensive but concise.\n\nWhen a query carries a SOURCING instruction, treat it as part of the question rather than as advice: search the kinds of sources it names, and attribute claims as it asks. Where it tells you to check a published schedule, fee or rule against first-hand accounts, report both and say plainly when they disagree — a discrepancy is a finding, not something to average away. Never present a fact you found in one place as though it were corroborated, and say when you could not find something at all rather than substituting the nearest thing you could find.'
+            content: 'You are a travel research assistant. Provide specific, detailed recommendations with exact names of restaurants, hotels, tours, and activities. When researching hotels, prioritize options within the specified price range and include nightly rates. If most options exceed the budget, explicitly note this and suggest alternatives. Include price ranges when available. Be comprehensive but concise.\n\nWhen a query carries a SOURCING instruction, treat it as part of the question rather than as advice. It asks you to attribute, not to search anywhere in particular — search as you normally would, then say where each answer came from. Where it asks you to check a published schedule, fee or rule against first-hand accounts, report both and say plainly when they disagree — a discrepancy is a finding, not something to average away. Never present a fact you found in one place as though it were corroborated, and say when you could not find something at all rather than substituting the nearest thing you could find.'
           },
           { role: 'user', content: query }
         ],
@@ -1517,7 +1517,7 @@ Use the grounded research data below to find real establishment names, accurate 
 
 ## GROUNDED RESEARCH (CRITICAL - READ BEFORE PROCEEDING)
 
-You have been provided with LIVE WEB SEARCH RESULTS at the start of the user message below. This is your FACTUAL GROUND TRUTH, searched against whichever sources could actually answer each question for this trip — operator timetables and permit systems for logistics, first-hand accounts and regional guides for what a place is like.
+You have been provided with LIVE WEB SEARCH RESULTS at the start of the user message below. This is your FACTUAL GROUND TRUTH. Where it attributes a claim — an operator behind a timetable, an authority behind a fee — that attribution is part of the fact and travels with it.
 
 **STRICT RULES - YOU MUST FOLLOW THESE:**
 
