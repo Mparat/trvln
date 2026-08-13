@@ -7,6 +7,7 @@ import { ItinerarySwitcher } from "@/components/ItinerarySwitcher";
 import { AuthModal } from "@/components/AuthModal";
 import { SavedTripsList } from "@/components/SavedTripsList";
 import { supabase } from "@/lib/supabase";
+import { notifyWhenAway } from "@/lib/notifications";
 import { toast } from "@/hooks/use-toast";
 import { ItineraryData } from "@/types/itinerary";
 import type { Json } from "@/integrations/supabase/types";
@@ -229,6 +230,22 @@ const stripPlanningSection = (content: string): string => {
   return content;
 };
 
+// A finished variant pings the browser as well as the page. notifyWhenAway
+// stays silent unless the user opted in and the tab is actually in the
+// background, so this is safe to call from every completion path.
+const notifyVariantReady = (
+  variant: { id: string; name: string; emoji: string },
+  destination?: string,
+) => {
+  void notifyWhenAway({
+    title: `${variant.emoji} ${variant.name} is ready!`,
+    body: destination
+      ? `Your ${destination} itinerary is written — come take a look.`
+      : "Your itinerary is written — come take a look.",
+    tag: `trvln-ready-${variant.id}`,
+  });
+};
+
 // Stores a trip the user tried to save while logged out, so we can finish the
 // save once the sign-in redirect (Google / magic link) brings them back.
 const PENDING_SAVE_KEY = "trvln_pending_save";
@@ -274,6 +291,9 @@ const Index = () => {
   // Variants already kicked off, so re-opening a tab mid-generation doesn't
   // start a second run for the same theme.
   const startedVariantsRef = useRef<Set<string>>(new Set());
+  // Completion handlers outlive the render that started them — the reconnect
+  // poll runs from a mount effect — so the notification reads its label here.
+  const destinationRef = useRef<string>('');
 
   // Auth + save state
   const [user, setUser] = useState<User | null>(null);
@@ -284,6 +304,10 @@ const Index = () => {
   // redirect or magic link sent). Lets us tell "dismissed without signing in"
   // (cancel the queued action) from "left to complete sign-in" (keep it).
   const authInitiatedRef = useRef(false);
+
+  useEffect(() => {
+    destinationRef.current = preferences.cities[0] ?? '';
+  }, [preferences.cities]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -349,6 +373,10 @@ const Index = () => {
         const structuredData = parseStructuredItinerary(displayContent);
         setItineraries(prev => prev.map(it =>
           it.id === job.themeId ? { ...it, content: displayContent, structuredData } : it));
+        notifyVariantReady(
+          { id: job.themeId, name: job.name, emoji: job.emoji },
+          destinationRef.current,
+        );
       }
       setLoadingVariants(prev => ({ ...prev, [job.themeId]: false }));
     };
@@ -669,7 +697,11 @@ const Index = () => {
     generationContextRef.current = ctx;
 
     void runVariant(theme, ctx).then(result => {
-      if (result.ok || runIdRef.current !== ctx.runId) return;
+      if (result.ok) {
+        notifyVariantReady(theme, destinationRef.current);
+        return;
+      }
+      if (runIdRef.current !== ctx.runId) return;
       toast({
         title: `Couldn't load ${theme.name}`,
         description: result.error instanceof Error
@@ -756,6 +788,7 @@ const Index = () => {
       if (isStale()) return; // a newer generation took over while we streamed
 
       if (result.ok) {
+        notifyVariantReady(themes[0], destinationRef.current);
         toast({
           title: `${themes[0].emoji} ${themes[0].name} is ready!`,
           description: themes.length > 1

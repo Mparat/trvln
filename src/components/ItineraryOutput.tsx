@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
-  Clock, DollarSign, Sparkles, ExternalLink, Edit3, Send,
+  ExternalLink, Edit3, Send,
   X, Plus, Loader2, ChevronDown, Share2, MessagesSquare
 } from "lucide-react";
 import { jsPDF } from "jspdf";
@@ -14,6 +14,7 @@ import { ItemFeedbackControls } from "./ItemFeedbackControls";
 import { useItineraryItems, type ItineraryItem } from "@/hooks/useItineraryItems";
 import { toast } from "@/hooks/use-toast";
 import { StructuredItinerary } from "./StructuredItinerary";
+import { ItineraryLoadingScene } from "./ItineraryLoadingScene";
 import { ItineraryData } from "@/types/itinerary";
 
 interface ItineraryOutputProps {
@@ -703,24 +704,15 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
     });
   }, [items, themeTitle]);
 
+  const loadingDestination = tripPreferences?.cities?.[0];
+
   if (isLoading) {
     return (
-      <div className="space-y-6 animate-pulse">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-muted" />
-          <div className="space-y-2 flex-1">
-            <div className="h-4 bg-muted rounded w-1/3" />
-            <div className="h-3 bg-muted rounded w-1/2" />
-          </div>
-        </div>
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="pl-12 space-y-3">
-            <div className="h-4 bg-muted rounded w-2/3" />
-            <div className="h-3 bg-muted rounded w-full" />
-            <div className="h-3 bg-muted rounded w-4/5" />
-          </div>
-        ))}
-      </div>
+      <ItineraryLoadingScene
+        themeTitle={themeTitle}
+        destination={loadingDestination}
+        headline={themeTitle ? `Drawing up ${themeTitle}…` : "Drawing up your itinerary…"}
+      />
     );
   }
 
@@ -742,24 +734,11 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
 
   if (isStreaming && !structuredData && looksLikeJson(itinerary)) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 gap-5 text-center">
-        <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
-          <Sparkles className="w-7 h-7 text-primary animate-pulse" />
-        </div>
-        <div>
-          <p className="font-semibold text-foreground">Building your itinerary…</p>
-          <p className="text-sm text-muted-foreground mt-1">Researching destinations, hotels, and activities</p>
-        </div>
-        <div className="flex gap-1.5">
-          {[0, 1, 2].map(i => (
-            <div
-              key={i}
-              className="w-2 h-2 rounded-full bg-primary/50 animate-bounce"
-              style={{ animationDelay: `${i * 0.18}s` }}
-            />
-          ))}
-        </div>
-      </div>
+      <ItineraryLoadingScene
+        themeTitle={themeTitle}
+        destination={loadingDestination}
+        headline="Building your itinerary…"
+      />
     );
   }
 
