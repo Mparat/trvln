@@ -119,7 +119,7 @@ async function runPerplexityQuery(
         messages: [
           { 
             role: 'system', 
-            content: 'You are a travel research assistant. Provide specific, detailed recommendations with exact names of restaurants, hotels, tours, and activities. When researching hotels, prioritize options within the specified price range and include nightly rates. If most options exceed the budget, explicitly note this and suggest alternatives. Include price ranges when available. Be comprehensive but concise.' 
+            content: 'You are a travel research assistant. Provide specific, detailed recommendations with exact names of restaurants, hotels, tours, and activities. When researching hotels, prioritize options within the specified price range and include nightly rates. If most options exceed the budget, explicitly note this and suggest alternatives. Include price ranges when available. Be comprehensive but concise.\n\nWhen a query carries a SOURCING instruction, treat it as part of the question rather than as advice. It asks you to attribute, not to search anywhere in particular — search as you normally would, then say where each answer came from. Where it asks you to check a published schedule, fee or rule against first-hand accounts, report both and say plainly when they disagree — a discrepancy is a finding, not something to average away. Never present a fact you found in one place as though it were corroborated, and say when you could not find something at all rather than substituting the nearest thing you could find.'
           },
           { role: 'user', content: query }
         ],
@@ -420,7 +420,8 @@ STRICT RULES:
 - Output ONLY the JSON object — nothing before or after it
 - No markdown code fences in the actual output — the above \`\`\` are just for illustration
 - Every day must have exactly 3 periods: Morning, Afternoon, Evening
-- Each period must have EXACTLY 2 activities (no more, no fewer)
+- Give each period the number of activities the day actually warrants: 1 to 3. Two is common, but a period built around a single real thing — a long walk, a day trip, a lunch that runs into the afternoon — takes exactly one, and padding it to two is the clearest tell that an itinerary was generated rather than planned. A day that is genuinely one big thing may run one activity per period throughout.
+- Deliberate open time is a legitimate entry and often the most human thing on the page: an unstructured hour in a named neighborhood, a slow morning after a late arrival, an afternoon left free because the day before was long. Name it as an activity and say what it is for. This is not a way to fill space you could not research — that is a different thing and it reads differently.
 - Include 1 or 2 dining options for every period: Morning (breakfast), Afternoon (lunch), Evening (dinner). The first must have "isPrimary": true (top pick); include a second with "isPrimary": false ONLY when a real, separate alternative exists within reach of where the traveler actually is at that hour. One real option beats two where the second is filler.
 - NEVER INVENT A RESTAURANT TO FILL A SLOT. Every name must come from the grounded research, or be the place the traveler is already staying that day, or — where no research was available — be a long-established place you are confident still exists. If nothing for a location meets that bar, give one option, the lodging's own kitchen, rather than a second name you cannot stand behind. A slot with one sourced option is correct; a slot with an invented second option is a failure.
 - WHERE MEALS ARE INCLUDED, SAY SO INSTEAD OF INVENTING CHOICE. When a stay includes meals or has no alternative nearby — a mountain hut or refuge on half board, a lodge, a ryokan, a safari camp, an all-inclusive, a boat, a remote village — the correct answer is that establishment. The same establishment MAY serve dinner and the next morning's breakfast; state that it is the hut/lodge's own dining room and what the meal plan covers.
@@ -432,6 +433,7 @@ STRICT RULES:
 - priority must be exactly "high", "medium", or "low"
 - Use real URLs from the grounded research — fall back to the search URL patterns given in the trip context below
 - Keep ALL descriptions to 1 short sentence (25 words maximum) — be ruthlessly concise
+- Make those 25 words earn their place. Say the specific reason for this, here, at this hour — the light on the ridge before the first cable car, the one thing on the menu, why it follows what came before. Never a label that would fit any comparable place: "charming local spot", "iconic landmark", "hidden gem", "a must-see". If a description would survive being moved to a different city unchanged, it is not doing its job — rewrite it.
 - Keep activity names under 6 words
 - Omit bookingUrl entirely if it would be an empty string
 - If noFlight is true, set flights.skip to true and flights.options to []
@@ -442,6 +444,12 @@ STRICT RULES:
 - Always populate budget items with a description field explaining what the cost covers
 
 ## Guidelines
+
+**Composition — what separates a planned trip from a list of good things. These decide the day roster, so they apply when assigning what happens on which day:**
+- Give the trip a shape. The arrival day and the last day are lighter than the middle. No two consecutive days should have the same rhythm — a full day out is followed by one that stays close to home. Something the traveler explicitly said they came for should land early enough that one bad-weather day later does not cost them the trip.
+- Sequence geographically. A day should not cross the city twice. Where two activities are a short walk apart, say so; where a move is the point of the day, let it be the day.
+- Anticipate. Where the research says something depends on weather, conditions, or a booking that may not come through, name the fallback in that day's transitNote instead of leaving the traveler to improvise.
+- Let the trip build. What the traveler will remember belongs where they are acclimatised enough to appreciate it, not on the morning they land jet-lagged.
 
 - Stay within budget or clearly explain tradeoffs
 - Always include destinations from the user's inspiration
@@ -1011,6 +1019,117 @@ This itinerary MUST embody the "${themeVariant.name}" theme throughout.
     }
 
     // ============================================
+    // READING THE REQUEST
+    // ============================================
+    // What separates a planned trip from a generated one is mostly not the
+    // establishment names — it is that someone read the request closely enough
+    // to know what this person would find disappointing. That reading has to
+    // happen before anything else, because it decides what gets left out, and
+    // leaving things out is where taste lives.
+    //
+    // This pass does not pick sources. An earlier version did, and it was the
+    // wrong lever twice over: the model already knows an alpine club beats a
+    // tourism board on snowpack, and a directive naming sources competes with
+    // the actual question for retrieval. What the model cannot supply on its
+    // own is this traveler's standard for a vague word, so that is what is
+    // asked for here.
+    //
+    // Kicked off before destination resolution and awaited after it: this
+    // describes the shape of the trip, not the place, so it neither needs the
+    // resolved destination nor should wait behind it.
+    type SourcePlan = {
+      tripCharacter?: string;
+      interpretations?: string[];
+      avoid?: string[];
+    };
+
+    const sourcePlanPromise: Promise<SourcePlan | null> = timePhase("request_reading", async () => {
+      try {
+        const strategyPrompt = `Read this travel request the way an experienced human travel planner would before doing any research — not to plan the trip, but to work out what this particular person is actually asking for.
+
+Three things:
+
+1. **What kind of trip is this really?** One concrete sentence. "A first trip abroad with an anxious parent" and "a self-guided traverse by someone who hikes every weekend" produce completely different itineraries to the same destination.
+
+2. **Restate their subjective words as tests.** "Off the beaten path", "authentic", "hidden gem", "local", "chill", "romantic", "epic" are useless as search terms — every listicle claims all of them. Say what each would have to mean for a place to qualify on THIS trip, judged relative to the destination rather than in the abstract. Empty array if they used none.
+
+3. **What would make this itinerary feel canned to THIS person?** Name the obvious inclusions that would signal nobody read their request — the specific landmark, the kind of restaurant, the pacing mistake. Be concrete enough that a planner could check a draft against it.
+
+The traveler's request:
+- What they described: ${additionalNotes || "Not specified"}
+- Atmosphere: ${atmosphere?.join(", ") || "no preference"}
+- Interests (ranked): ${interests?.join(" > ") || "no preference"}
+- Adventure level: ${adventureLevel || "no preference"}
+- Guided vs self-serve: ${guidedLabel}
+- Food & drink: ${foodDrink?.join(", ") || "no preference"}
+- Budget: ${budgetInfo.label} (${budgetInfo.accommodation})
+- Duration: ${durationContext}
+- Timing: ${dateContext}
+${themeVariant?.name ? `- Itinerary theme: ${themeVariant.name}` : ""}
+
+Respond with ONLY a JSON object in this shape:
+{
+  "tripCharacter": "one concrete sentence",
+  "interpretations": ["each subjective word restated as a test a place must pass"],
+  "avoid": ["specific things that would read as generic to this traveler"]
+}
+
+Worked example, for "hut to hut, no driving, want to get away from the crowds" — six days, self-guided, active:
+{
+  "tripCharacter": "A self-guided six-day mountain traverse sleeping in huts, by someone fit enough to carry a pack who is specifically trying to get away from day-trip crowds.",
+  "interpretations": ["'Away from the crowds' here means huts and valleys the cable-car day-trippers cannot reach on foot in an afternoon — not simply places less famous than the headline peak. A place qualifies if reaching it costs a half day of walking, or a connection the tour buses do not run."],
+  "avoid": ["The photographed viewpoint ten minutes from a cable car station — it is the most crowded spot in the range and its presence would prove nobody read the request.", "A rest day parked in a resort town; this traveler wants the walking, not the shopping street.", "Restaurants in valley towns the route never descends into."]
+}
+
+No explanation. Just the JSON object.`;
+
+        const strategyResponse = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "claude-haiku-4-5",
+            messages: [{ role: "user", content: strategyPrompt }],
+            // Seven topic directives plus the interpretations run long.
+            max_tokens: 1200,
+          }),
+        });
+
+        if (!strategyResponse.ok) {
+          console.error("Source strategy pass failed:", strategyResponse.status);
+          return null;
+        }
+
+        const strategyData = await strategyResponse.json();
+        const raw = strategyData.content?.[0]?.text?.trim() ?? "";
+        const parsed = JSON.parse(raw.replace(/```[a-z]*\n?/gi, "").trim());
+
+        // Clamp before this reaches a query: the directives are concatenated
+        // into every Perplexity prompt, and a runaway generation here would
+        // bury the actual question underneath its own sourcing advice.
+        const clamp = (s: unknown, max: number) =>
+          typeof s === "string" && s.trim() ? s.trim().slice(0, max) : undefined;
+
+        const strList = (v: unknown, max: number, cap: number) =>
+          Array.isArray(v) ? v.map((i: unknown) => clamp(i, max)).filter(Boolean).slice(0, cap) as string[] : [];
+
+        const plan: SourcePlan = {
+          tripCharacter: clamp(parsed?.tripCharacter, 300),
+          interpretations: strList(parsed?.interpretations, 500, 4),
+          avoid: strList(parsed?.avoid, 300, 5),
+        };
+        console.log("Request reading:", JSON.stringify(plan, null, 2));
+        return plan;
+      } catch (err) {
+        console.error("Source strategy pass failed — using baseline sourcing only:", err);
+        return null;
+      }
+    });
+
+    // ============================================
     // DESTINATION RESOLUTION PASS
     // When no explicit city is given, ask Claude Haiku to pick the best
     // match before Perplexity runs, so all research is destination-specific.
@@ -1152,25 +1271,51 @@ ${additionalNotes || "None provided"}
     // Determine trip length for context-aware queries
     const tripDaysNum = durationDays || 7;
 
+    // Started before destination resolution; collected here.
+    const sourcePlan = await sourcePlanPromise;
+
+    // Which sources are worth reading is something the model already knows; an
+    // instruction naming them mostly competes with the question for retrieval,
+    // and an earlier version of this ran longer than the questions it was
+    // attached to. What the model will not volunteer is where a given number
+    // came from — unasked, a departure time arrives with no way to tell the
+    // operator's timetable from a blog post six years stale. That is a
+    // reporting contract, not knowledge, so it is stated, kept to one sentence,
+    // and attached only to the topics carrying facts that expire.
+    const SOURCING_CONTRACT = ` For any schedule, fare, fee, permit or opening window, name the operator or authority it came from, and say so when recent first-hand accounts contradict it. Flag anything you found in only one place.`;
+    const factualTopics = new Set(['nearbyAndTransport', 'seasonal', 'planning', 'flights']);
+    const sourceClause = (key: string) => (factualTopics.has(key) ? SOURCING_CONTRACT : '');
+
+    // Vague words the traveler used, restated as tests. Injected where taste
+    // decides the answer — asking a search engine for "hidden gems" returns the
+    // pages that call themselves that, which is the opposite of the request.
+    const interpretationClause = sourcePlan?.interpretations?.length
+      ? ` Apply the following as tests a place must pass, not as phrases to match: ${sourcePlan.interpretations.join(" ")}`
+      : "";
+
     // Keyed so a conditional query can be added without shifting the indices
     // the context block reads from.
     const searchSpecs: { key: string; query: string }[] = [
-      // Activities and things to do
+      // Activities and things to do. Asked for texture rather than a ranking:
+      // "best things to do in X" is the query the listicle was written to
+      // answer, and it returns the listicle no matter what sources are
+      // preferred. What a day is actually like is what an itinerary is built
+      // from, and what is overrated is as useful as what is good.
       {
         key: 'activities',
-        query: `Best things to do in ${destinationStr} for ${interestsStr} travelers. Include specific activity names, tour recommendations, must-visit attractions, hidden gems, and neighborhoods to explore.${themeStr ? ` Focus on ${themeStr} experiences.` : ''} ${budgetInfo.label} budget level.${notesClause}`,
+        query: `What is genuinely worth doing in ${destinationStr} for ${interestsStr} travelers, and what is each one actually like to do? For every recommendation: the specific name, what makes it worth the time, the time of day it is best and why, how long it realistically takes including getting there, and what it costs. Then cover two more things: what is overrated here and what people who know the place do instead, and which areas reward an unstructured hour on foot and what you would actually come across in them.${themeStr ? ` Weight this toward ${themeStr}.` : ''} ${budgetInfo.label} budget.${notesClause} Judge how well-trodden something is relative to ${destinationStr} itself — what people who know this place consider the tourist trail — not by how famous it is to an outsider.${interpretationClause}${sourceClause('activities')}`,
       },
 
       // Restaurants and food scene — emphasise currently operating
       {
         key: 'restaurants',
-        query: `Best ${foodStr} restaurants currently open in ${destinationStr} as of ${currentYear}. Only include establishments confirmed to be actively operating with recent positive reviews. Include specific restaurant names, neighborhoods, price ranges, and what they are known for. Exclude any restaurants that have closed, are temporarily closed, or have uncertain operating status. ${budgetInfo.label} budget.${tripNotes ? ` The traveler describes the trip as: "${tripNotes}" — if this trip spends nights somewhere without restaurants nearby (a mountain hut, a lodge, a remote village, a boat), say so and name where meals are actually eaten there instead.` : ''}`,
+        query: `Where should someone actually eat in ${destinationStr} for ${foodStr}, confirmed still open and trading as of ${currentYear}? Exclude anything closed, temporarily closed, or of uncertain operating status. For each: the name, the neighborhood, what to order there, what a meal costs, what the room and the crowd are like and which kind of evening it suits, and whether it needs booking and how far ahead. Cover the whole range a traveler on this trip would really use across a week — the everyday place that is good every time and the one worth dressing up for — not a ranked list of the same destination restaurants. ${budgetInfo.label} budget.${tripNotes ? ` The traveler describes the trip as: "${tripNotes}" — if this trip spends nights somewhere without restaurants nearby (a mountain hut, a lodge, a remote village, a boat), say so and name where meals are actually eaten there instead.` : ''}${interpretationClause}${sourceClause('restaurants')}`,
       },
 
       // Where to sleep, in whatever form this trip actually needs
       {
         key: 'accommodation',
-        query: `Best ${budgetInfo.label} places to stay in ${destinationStr} priced ${budgetInfo.accommodation}. ${startDate && endDate ? `For dates: check-in ${startDate}, check-out ${endDate}.` : targetMonth ? `For travel in ${targetMonth}.` : ''} Include specific names with nightly rates and where each one is.${tripNotes ? ` The traveler describes the trip as: "${tripNotes}" — include the kinds of lodging this trip actually requires (for example mountain huts or refuges, guesthouses, campsites, lodges, hostels, ryokan), not only conventional hotels, and note how each is booked and what a night includes such as half board.` : ''}`,
+        query: `Where should someone stay in ${destinationStr} at ${budgetInfo.label} level, ${budgetInfo.accommodation}? ${startDate && endDate ? `For dates: check-in ${startDate}, check-out ${endDate}.` : targetMonth ? `For travel in ${targetMonth}.` : ''} For each: the specific name, the nightly rate, exactly where it sits and what that means for getting around, what it is actually like to stay there, what the immediate area is like in the evening, and what a night includes.${tripNotes ?` The traveler describes the trip as: "${tripNotes}" — include the kinds of lodging this trip actually requires (for example mountain huts or refuges, guesthouses, campsites, lodges, hostels, ryokan), not only conventional hotels, and note how each is booked and what a night includes such as half board.` : ''}${interpretationClause}${sourceClause('accommodation')}`,
       },
 
       // Where the trip goes and how it moves. Deliberately not branched on
@@ -1179,13 +1324,13 @@ ${additionalNotes || "None provided"}
       // area the whole trip happens inside. One question covers both shapes.
       {
         key: 'nearbyAndTransport',
-        query: `For a ${tripDaysNum}-day trip in ${destinationStr}: which places should the itinerary actually include, how do you travel between them (trains, buses, cable cars, ferries, driving — with prices and journey times), and how many days does each deserve? If this is a single city, cover what is worth leaving it for as day trips or overnight stops. If it is a region or a route, cover how to move between its towns and valleys, and whether it works better as a base with day trips or as a point-to-point traverse.${notesClause}`,
+        query: `For a ${tripDaysNum}-day trip in ${destinationStr}: which places should the itinerary actually include, how do you travel between them (trains, buses, cable cars, ferries, driving — with prices and journey times), and how many days does each deserve? If this is a single city, cover what is worth leaving it for as day trips or overnight stops. If it is a region or a route, cover how to move between its towns and valleys, and whether it works better as a base with day trips or as a point-to-point traverse. For each move, say what it actually costs in usable hours once you count getting to the station and waiting for the connection, and whether it is worth doing at all for a stay that short.${notesClause}${sourceClause('nearbyAndTransport')}`,
       },
 
       // Seasonal & practical information
       {
         key: 'seasonal',
-        query: `${destinationStr} travel in ${targetMonth || 'the travel season'}. Include weather, peak vs off-season pricing, festivals or events, crowd levels, and any seasonal closures.${notesClause}`,
+        query: `${destinationStr} travel in ${targetMonth || 'the travel season'}. Include weather, peak vs off-season pricing, festivals or events, crowd levels, and any seasonal closures.${notesClause}${sourceClause('seasonal')}`,
       },
 
       // Planning, booking windows, access rules, conditions and required skill.
@@ -1193,7 +1338,7 @@ ${additionalNotes || "None provided"}
       // and none of the queries above ask about them.
       {
         key: 'planning',
-        query: `Practical planning for a ${tripDaysNum}-day trip in ${destinationStr}${targetMonth ? ` in ${targetMonth}` : ''}${tripNotes ? `, described by the traveler as: "${tripNotes}"` : ''}. Answer each of these specifically for ${currentYear}: (1) How far in advance do the places to stay need to be booked, and how is each one booked — online, by email, deposit required, cash only? (2) What permits, reservations, entry fees, timed-entry slots, or vehicle and access restrictions apply, and how are they obtained? (3) What conditions, closures, or seasonal limits affect this trip, and what is the usable window? (4) What fitness or skill level, equipment, and guiding does it require, and where locally can equipment be rented or a guide hired, at what price?`,
+        query: `Practical planning for a ${tripDaysNum}-day trip in ${destinationStr}${targetMonth ? ` in ${targetMonth}` : ''}${tripNotes ? `, described by the traveler as: "${tripNotes}"` : ''}. Answer each of these specifically for ${currentYear}: (1) How far in advance do the places to stay need to be booked, and how is each one booked — online, by email, deposit required, cash only? (2) What permits, reservations, entry fees, timed-entry slots, or vehicle and access restrictions apply, and how are they obtained? (3) What conditions, closures, or seasonal limits affect this trip, and what is the usable window? (4) What fitness or skill level, equipment, and guiding does it require, and where locally can equipment be rented or a guide hired, at what price?${sourceClause('planning')}`,
       },
     ];
 
@@ -1201,7 +1346,7 @@ ${additionalNotes || "None provided"}
     if (!noFlight && departureCity) {
       searchSpecs.push({
         key: 'flights',
-        query: `Flights from ${departureCity} to ${destinationStr} in ${targetMonth || 'upcoming months'}. Which airports actually serve this destination — if it is a region rather than a city, name the realistic gateway airports and how far each is from it by road or rail. Include typical price ranges, best airlines, flight duration, and whether nonstop options exist.`,
+        query: `Flights from ${departureCity} to ${destinationStr} in ${targetMonth || 'upcoming months'}. Which airports actually serve this destination — if it is a region rather than a city, name the realistic gateway airports and how far each is from it by road or rail. Include typical price ranges, best airlines, flight duration, and whether nonstop options exist.${sourceClause('flights')}`,
       });
     }
 
@@ -1255,6 +1400,32 @@ ${additionalNotes || "None provided"}
     const planningResearch = research.planning;
     const flightResearch = research.flights; // Undefined when no flight query ran
 
+    // The provenance is worth more to the traveler than it is to the model.
+    // A departure time the itinerary took from an operator's own timetable and
+    // one it took from a 2019 blog post look identical on the page, and only
+    // one of them is worth planning a morning around — so the citations that
+    // grounded each topic are returned alongside the itinerary rather than
+    // being consumed and discarded. Deduped, because a single operator page
+    // routinely answers several of the questions.
+    const SOURCE_TOPIC_LABELS: Record<string, string> = {
+      activities: "Things to do",
+      restaurants: "Food & drink",
+      accommodation: "Places to stay",
+      nearbyAndTransport: "Getting around",
+      seasonal: "Season & timing",
+      planning: "Booking & access",
+      flights: "Flights",
+    };
+    const researchSources = searchSpecs
+      .map(spec => ({
+        topic: SOURCE_TOPIC_LABELS[spec.key] ?? spec.key,
+        citations: Array.from(new Set(research[spec.key]?.citations ?? []))
+          .filter(c => typeof c === "string" && /^https?:\/\//i.test(c))
+          .slice(0, 8),
+      }))
+      .filter(s => s.citations.length > 0);
+    console.log(`Research sources: ${researchSources.reduce((n, s) => n + s.citations.length, 0)} across ${researchSources.length} topic(s)`);
+
     const citeList = (r: ResearchResult | undefined) =>
       r?.citations?.length ? r.citations.map((c, i) => `${i + 1}. ${c}`).join('\n') : 'No citations available';
 
@@ -1265,7 +1436,14 @@ ${additionalNotes || "None provided"}
 - ONLY recommend places, activities, and restaurants that appear in this research
 - Do NOT hallucinate establishment names or URLs
 - For anything not in the research, use the fallback URL patterns in the system prompt
+- The research states where its claims came from. Carry that through: name the operator behind a schedule, and keep the distinction between what is published and what travelers actually report.
+- The research is deliberately wider than one itinerary needs. Do not work through it — choose from it, and leave most of it unused.
+${sourcePlan?.tripCharacter ? `\n**What this trip is:** ${sourcePlan.tripCharacter}\n` : ''}${sourcePlan?.avoid?.length ? `
+**What would make this itinerary feel canned to this traveler** — read before selecting, and check your draft against it:
+${sourcePlan.avoid.map(a => `- ${a}`).join('\n')}
 
+Including one of these anyway is a defensible call if the trip genuinely needs it, but then say why in the activity's description rather than presenting it as an ordinary pick.
+` : ''}
 ---
 
 ### 🗺️ NEARBY DESTINATIONS, DAY TRIPS & TRANSPORTATION
@@ -1339,7 +1517,7 @@ Use the grounded research data below to find real establishment names, accurate 
 
 ## GROUNDED RESEARCH (CRITICAL - READ BEFORE PROCEEDING)
 
-You have been provided with LIVE WEB SEARCH RESULTS at the start of the user message below. This is your FACTUAL GROUND TRUTH from real travel blogs, guides, and booking sites.
+You have been provided with LIVE WEB SEARCH RESULTS at the start of the user message below. This is your FACTUAL GROUND TRUTH. Where it attributes a claim — an operator behind a timetable, an authority behind a fee — that attribution is part of the fact and travels with it.
 
 **STRICT RULES - YOU MUST FOLLOW THESE:**
 
@@ -1351,7 +1529,8 @@ You have been provided with LIVE WEB SEARCH RESULTS at the start of the user mes
 6. **For restaurants near activities**, use Google Maps search URLs for the neighborhood:
    - Format: https://www.google.com/maps/search/?api=1&query=restaurants+near+NEIGHBORHOOD+CITY
 7. **The only name you may use that the research did not surface is a place already in this itinerary** — the hut, lodge, or hotel the traveler is booked into that night, when they eat there because nothing else is within reach. Naming that stay's own dining room is grounded; inventing a nearby restaurant is not.
-8. **If the research is thin for part of the trip, say less rather than more.** Fewer, sourced recommendations beat a full-looking day built on invention. Note the gap in summary.assumptions.`
+8. **If the research is thin for part of the trip, say less rather than more.** Fewer, sourced recommendations beat a full-looking day built on invention. Note the gap in summary.assumptions.
+9. **The research attributes its claims, and sometimes reports a conflict** — a published timetable saying one thing and recent travelers saying another. Do not silently pick one or split the difference. Plan on the more conservative of the two, and put the discrepancy in summary.assumptions or the relevant transitNote so the traveler knows to confirm it. Anything the research flagged as found in only one place is a soft fact: state it as such rather than as a schedule to build a day around.`
       : `## Research Requirements (NO LIVE RESEARCH AVAILABLE)
 
 Live web search returned nothing for this trip, so there is no research document — do not refer to one.
@@ -1663,7 +1842,7 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
         if (!splitGenerationEnabled) {
           console.log("[split] disabled by ITINERARY_SPLIT_GENERATION=off");
         }
-        const skeleton = splitGenerationEnabled ? await trySkeleton() : null;
+        let skeleton = splitGenerationEnabled ? await trySkeleton() : null;
 
         if (!skeleton) {
           await runSingleCall();
@@ -1691,6 +1870,7 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
           for (const key of ["summary", "budget", "flights", "accommodation", "bookingChecklist", "alternatives"]) {
             if (skeleton[key] !== undefined) tail[key] = skeleton[key];
           }
+          if (researchSources.length) tail.sources = researchSources;
           const tailJson = JSON.stringify(tail);
           await emit('{"days":' + JSON.stringify(skeletonDays));
           await emit(tailJson.length > 2 ? "," + tailJson.slice(1) : "}");
@@ -1710,6 +1890,142 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
           await persistComplete();
           return;
         }
+
+        // ── Read the plan back before writing it out ──────────────────────
+        // A planner reads their own draft before committing to it. This is the
+        // only place that can happen: days stream to the client as they finish,
+        // so by the time day three exists it has already been sent — and prose
+        // could not fix a badly shaped week in any case. Pacing, sequencing,
+        // what got included and what got missed are all decided in the roster,
+        // so the roster is what gets read back.
+        //
+        // Haiku, because noticing "day four crosses the city twice" and "they
+        // asked to be away from crowds and this is the busiest viewpoint in the
+        // range" is recognition rather than authorship. Fails open at every
+        // step: any error, any unparseable answer, any suspicious revision, and
+        // the original plan proceeds untouched.
+        const critiqueAndRevise = async (current: Skeleton): Promise<Skeleton> => {
+          const originalPlan = current.dayPlan ?? [];
+          if (originalPlan.length === 0) return current;
+
+          let findings: string[] = [];
+          try {
+            const rosterForReview = originalPlan.map((e, i) => ({
+              day: i + 1,
+              title: e.title,
+              location: e.location,
+              transitNote: e.transitNote,
+              dining: e.dining,
+            }));
+
+            const critiquePrompt = `You are reading a travel plan before it gets written up, the way a senior planner reads a junior's draft. You are not rewriting it — you are saying what is wrong with it.
+
+The traveler asked for:
+${userInputsBlock}
+${sourcePlan?.tripCharacter ? `\nWhat this trip actually is: ${sourcePlan.tripCharacter}` : ""}${sourcePlan?.avoid?.length ? `\n\nThings that would make this feel canned to this particular traveler:\n${sourcePlan.avoid.map(a => `- ${a}`).join("\n")}` : ""}
+
+The plan, one entry per day:
+${JSON.stringify(rosterForReview, null, 2)}
+
+Trip summary: ${JSON.stringify(current.summary ?? {})}
+
+Look for these specifically:
+1. **Pacing** — every day the same intensity, a heavy day scheduled on arrival, a long run with no let-up, or a final day that assumes an evening the traveler does not have.
+2. **Geography** — a day whose stops are scattered across the map, or a move that costs more of the day than it gives back.
+3. **Fit** — anything on the canned list above, or an inclusion that contradicts something the traveler explicitly asked for.
+4. **Omission** — something they said they came for that appears nowhere, or lands so late that one bad weather day would take it from them.
+5. **Repetition** — two days that would read almost identically to the person living them.
+
+Report only problems worth changing the plan over, and name the day number and the specific fix for each. A plan with nothing wrong is a normal outcome — say so rather than inventing a finding to look useful.
+
+Respond with ONLY JSON:
+{"verdict": "ok", "findings": []}
+or
+{"verdict": "revise", "findings": ["Day 3 ...", "Day 5 ..."]}`;
+
+            const critiqueResponse = await timePhase("plan_critique", () =>
+              fetch("https://api.anthropic.com/v1/messages", {
+                method: "POST",
+                headers: {
+                  "x-api-key": ANTHROPIC_API_KEY,
+                  "anthropic-version": "2023-06-01",
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  model: "claude-haiku-4-5",
+                  messages: [{ role: "user", content: critiquePrompt }],
+                  max_tokens: 900,
+                }),
+              }));
+
+            if (!critiqueResponse.ok) {
+              console.error("[critique] failed:", critiqueResponse.status);
+              return current;
+            }
+            const critiqueData = await critiqueResponse.json();
+            const raw = (critiqueData.content?.[0]?.text ?? "").replace(/```[a-z]*\n?/gi, "").trim();
+            const parsed = JSON.parse(raw);
+            findings = Array.isArray(parsed?.findings)
+              ? parsed.findings.filter((f: unknown) => typeof f === "string" && f.trim()).slice(0, 6)
+              : [];
+            if (parsed?.verdict !== "revise" || findings.length === 0) {
+              console.log("[critique] plan passed review");
+              return current;
+            }
+            console.log(`[critique] ${findings.length} finding(s):`, JSON.stringify(findings));
+          } catch (err) {
+            console.error("[critique] skipped:", err);
+            return current;
+          }
+
+          // Only a flagged plan pays for a second pass.
+          try {
+            const revisionInstruction = `${skeletonInstruction}
+
+## REVISION — a review of your first plan found problems
+
+${findings.map((f, i) => `${i + 1}. ${f}`).join("\n")}
+
+Your previous plan was:
+${JSON.stringify({ dayPlan: current.dayPlan, summary: current.summary })}
+
+Emit the corrected plan through the \`emit_trip_plan\` tool. Fix every finding above. Keep everything the review did not object to — this is a revision, not a fresh start, and churn the traveler will never see costs them the parts that were already right. The trip must still be ${originalPlan.length} days.`;
+
+            const revisionResult = await timePhase("plan_revision", () =>
+              callAnthropicJson({
+                apiKey: ANTHROPIC_API_KEY,
+                system: systemBlocks,
+                userContent: [...researchBlocks, { type: "text", text: revisionInstruction }],
+                toolName: TRIP_PLAN_TOOL.name,
+                maxTokens: 8000,
+                label: "plan_revision",
+              }));
+
+            const revised = revisionResult.data as Skeleton;
+            const revisedPlan = revised.dayPlan;
+            // A revision that changed the trip's length did something other
+            // than what it was asked to do, and day count is the one thing the
+            // traveler specified outright. Discard it rather than silently
+            // handing back a different trip.
+            if (!Array.isArray(revisedPlan) || revisedPlan.length !== originalPlan.length) {
+              console.warn(`[critique] revision returned ${revisedPlan?.length ?? 0} days for a ` +
+                `${originalPlan.length}-day trip — keeping the original plan`);
+              return current;
+            }
+            skeletonTokens += revisionResult.outputTokens;
+            console.log("[critique] plan revised");
+            // Merged, not replaced: the revision is asked for a whole plan but
+            // may return fewer top-level keys than the first pass did, and a
+            // dropped budget or flights block would be a worse outcome than the
+            // pacing problem this set out to fix.
+            return { ...current, ...revised };
+          } catch (err) {
+            console.error("[critique] revision failed — keeping the original plan:", err);
+            return current;
+          }
+        };
+
+        skeleton = await critiqueAndRevise(skeleton);
 
         const dayPlan = skeleton.dayPlan ?? [];
         dayCount = dayPlan.length;
@@ -1919,6 +2235,7 @@ Put the day(s) in the \`emit_days\` tool call. Do not write them out as text.`;
         for (const key of ["summary", "budget", "flights", "accommodation", "bookingChecklist", "alternatives"]) {
           if (skeleton[key] !== undefined) tail[key] = skeleton[key];
         }
+        if (researchSources.length) tail.sources = researchSources;
 
         // Name the gap where the traveler will actually read it, rather than
         // shipping a blank day with no explanation.
