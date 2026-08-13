@@ -60,14 +60,50 @@ const RequestSchema = z.object({
 });
 
 
-// Helper function to call Perplexity for grounded web search
+// Helper function to call Perplexity for grounded web search.
+//
+// Every query is retried on 429. All six searches fire at once, and Perplexity
+// rate-limits the burst: production logs showed one query succeeding and five
+// returning `429 request_rate_limit_exceeded` within milliseconds. Because a
+// failed search returned empty rather than raising, that surfaced not as an
+// error but as an itinerary with no named restaurants — the model had nothing
+// to name. `label` identifies which search is retrying in the logs.
 async function searchWithPerplexity(
-  query: string, 
-  apiKey: string
+  query: string,
+  apiKey: string,
+  label = "search",
 ): Promise<{ content: string; citations: string[] }> {
+  const maxAttempts = 3;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (attempt > 1) {
+      // Jittered, or the five rejected queries retry in lockstep and collide
+      // with each other exactly as they did the first time.
+      const backoffMs = 900 * (attempt - 1) + Math.floor(Math.random() * 700);
+      console.log(`[research] ${label} retrying in ${backoffMs}ms (attempt ${attempt})`);
+      await new Promise(r => setTimeout(r, backoffMs));
+    }
+
+    const result = await runPerplexityQuery(query, apiKey, label);
+    if (result.ok) return result.value;
+    if (!result.retryable) return { content: '', citations: [] };
+  }
+
+  console.error(`[research] ${label} exhausted ${maxAttempts} attempts — returning empty`);
+  return { content: '', citations: [] };
+}
+
+async function runPerplexityQuery(
+  query: string,
+  apiKey: string,
+  label: string,
+): Promise<
+  | { ok: true; value: { content: string; citations: string[] } }
+  | { ok: false; retryable: boolean }
+> {
   try {
     console.log("Perplexity search query:", query);
-    
+
     const response = await fetch('https://api.perplexity.ai/chat/completions', {
       method: 'POST',
       headers: {
@@ -91,18 +127,22 @@ async function searchWithPerplexity(
       // exhausted balance from a malformed header, and this failure is silent
       // enough already.
       const errorBody = await response.text().catch(() => '');
-      console.error("Perplexity API error:", response.status, errorBody.slice(0, 500));
-      return { content: '', citations: [] };
+      console.error(`Perplexity API error (${label}):`, response.status, errorBody.slice(0, 500));
+      // A rate limit clears on its own; a 401/400 will not.
+      return { ok: false, retryable: response.status === 429 || response.status >= 500 };
     }
 
     const data = await response.json();
     return {
-      content: data.choices?.[0]?.message?.content || '',
-      citations: data.citations || []
+      ok: true,
+      value: {
+        content: data.choices?.[0]?.message?.content || '',
+        citations: data.citations || [],
+      },
     };
   } catch (error) {
-    console.error("Perplexity search error:", error);
-    return { content: '', citations: [] };
+    console.error(`Perplexity search error (${label}):`, error);
+    return { ok: false, retryable: true };
   }
 }
 
@@ -1100,10 +1140,18 @@ ${additionalNotes || "None provided"}
       });
     }
 
-    // Run all searches in parallel for speed
+    // Run the searches in parallel, but stagger the launches. Firing all six at
+    // the same instant is what tripped Perplexity's rate limit — five came back
+    // 429 in milliseconds, so the itinerary was built on one search out of six.
+    // A short ramp costs well under a second of wall clock (the queries still
+    // overlap, and the phase is bounded by the slowest) and avoids paying for
+    // the collision in retries.
     console.log(`Executing ${searchSpecs.length} Perplexity research queries...`);
     const results = await timePhase("perplexity_research", () =>
-      Promise.all(searchSpecs.map(spec => searchWithPerplexity(spec.query, PERPLEXITY_API_KEY))));
+      Promise.all(searchSpecs.map(async (spec, i) => {
+        if (i > 0) await new Promise(r => setTimeout(r, i * 180));
+        return searchWithPerplexity(spec.query, PERPLEXITY_API_KEY, spec.key);
+      })));
 
     type ResearchResult = { content: string; citations: string[] };
     const research: Record<string, ResearchResult | undefined> = {};
