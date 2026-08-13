@@ -1964,9 +1964,9 @@ Look for these specifically:
 4. **Omission** — something they said they came for that appears nowhere, or lands so late that one bad weather day would take it from them.
 5. **Repetition** — two days that would read almost identically to the person living them.
 
-Report **at most the three most significant** problems, worst first. Each must name its day number and the concrete fix, in one sentence. A plan with nothing wrong is a normal outcome — say so rather than filling the quota.
+Report **at most the three most significant** problems, worst first. Each must name its day number and the concrete fix, in ONE sentence of AT MOST 250 characters — anything longer is cut off mid-word before the writer sees it, so edit yourself down rather than being truncated. A plan with nothing wrong is a normal outcome — say so rather than filling the quota.
 
-Every finding will be handed to the writer of that specific day, who chooses that day's activities and how full it is. So only report what writing a day differently could fix. Do not report anything that would require moving a restaurant to another day, renaming a day, or changing where the trip goes — those are already fixed and a finding about them is wasted.
+Every finding will be handed to the writer of that specific day, who chooses that day's activities, their emphasis, and how full the day is — and nothing else. The day's location, title, and restaurants are already fixed and cannot be moved by anyone downstream of you. So "arrive somewhere else", "go to a different town", or "swap this restaurant" are wasted findings that will be ignored; "within Varenna, skip the lakefront promenade and take the chestnut-forest trail above the town instead" is one the writer can act on. Phrase every fix as what to do differently WITHIN where the day already is.
 
 Respond with ONLY JSON:
 {"verdict": "ok", "findings": []}
@@ -1998,10 +1998,24 @@ or
             const critiqueData = await critiqueResponse.json();
             const raw = (critiqueData.content?.[0]?.text ?? "").replace(/```[a-z]*\n?/gi, "").trim();
             const parsed = JSON.parse(raw);
+            // A finding that overruns the clamp gets cut at a sentence or word
+            // boundary, not mid-word: the first production run shipped
+            // "skipping Varen…" and "remove the Bel…" into day-writer prompts,
+            // where an amputated instruction reads as noise exactly where it
+            // was supposed to read as direction.
+            const clampFinding = (f: string): string => {
+              const t = f.trim();
+              if (t.length <= 300) return t;
+              const cut = t.slice(0, 300);
+              const sentenceEnd = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("; "));
+              if (sentenceEnd > 150) return cut.slice(0, sentenceEnd + 1);
+              const wordEnd = cut.lastIndexOf(" ");
+              return (wordEnd > 0 ? cut.slice(0, wordEnd) : cut) + "…";
+            };
             const findings: string[] = Array.isArray(parsed?.findings)
               ? parsed.findings
                   .filter((f: unknown): f is string => typeof f === "string" && f.trim().length > 0)
-                  .map((f: string) => f.trim().slice(0, 300))
+                  .map(clampFinding)
                   .slice(0, 3)
               : [];
             if (parsed?.verdict !== "revise" || findings.length === 0) {
