@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
-  Clock, DollarSign, Sparkles, ExternalLink, Edit3, Send,
+  ExternalLink, Edit3, Send,
   X, Plus, Loader2, ChevronDown, Share2, MessagesSquare
 } from "lucide-react";
 import { jsPDF } from "jspdf";
@@ -14,11 +14,14 @@ import { ItemFeedbackControls } from "./ItemFeedbackControls";
 import { useItineraryItems, type ItineraryItem } from "@/hooks/useItineraryItems";
 import { toast } from "@/hooks/use-toast";
 import { StructuredItinerary } from "./StructuredItinerary";
+import { ItineraryLoadingScene } from "./ItineraryLoadingScene";
 import { ItineraryData } from "@/types/itinerary";
 
 interface ItineraryOutputProps {
   itinerary: string;
   isLoading: boolean;
+  /** Overrides the loading scene's headline for pre-theme phases. */
+  loadingHeadline?: string;
   isStreaming?: boolean;
   isEditing?: boolean;
   onEdit?: (editRequest: string) => void;
@@ -38,7 +41,7 @@ const stripEmojis = (text: string): string => {
   return text.replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{1F000}-\u{1FFFF}]/gu, '').replace(/\s+/g, ' ').trim();
 };
 
-export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, onEdit, themeTitle, structuredData, tripPreferences }: ItineraryOutputProps) {
+export function ItineraryOutput({ itinerary, isLoading, loadingHeadline, isStreaming, isEditing, onEdit, themeTitle, structuredData, tripPreferences }: ItineraryOutputProps) {
   const [editMode, setEditMode] = useState(false);
   const [editRequest, setEditRequest] = useState("");
   const [addingNearMiss, setAddingNearMiss] = useState<string | null>(null);
@@ -703,24 +706,15 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
     });
   }, [items, themeTitle]);
 
+  const loadingDestination = tripPreferences?.cities?.[0];
+
   if (isLoading) {
     return (
-      <div className="space-y-6 animate-pulse">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-muted" />
-          <div className="space-y-2 flex-1">
-            <div className="h-4 bg-muted rounded w-1/3" />
-            <div className="h-3 bg-muted rounded w-1/2" />
-          </div>
-        </div>
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="pl-12 space-y-3">
-            <div className="h-4 bg-muted rounded w-2/3" />
-            <div className="h-3 bg-muted rounded w-full" />
-            <div className="h-3 bg-muted rounded w-4/5" />
-          </div>
-        ))}
-      </div>
+      <ItineraryLoadingScene
+        themeTitle={themeTitle}
+        destination={loadingDestination}
+        headline={loadingHeadline ?? (themeTitle ? `Drawing up ${themeTitle}…` : "Drawing up your itinerary…")}
+      />
     );
   }
 
@@ -742,24 +736,11 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
 
   if (isStreaming && !structuredData && looksLikeJson(itinerary)) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 gap-5 text-center">
-        <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
-          <Sparkles className="w-7 h-7 text-primary animate-pulse" />
-        </div>
-        <div>
-          <p className="font-semibold text-foreground">Building your itinerary…</p>
-          <p className="text-sm text-muted-foreground mt-1">Researching destinations, hotels, and activities</p>
-        </div>
-        <div className="flex gap-1.5">
-          {[0, 1, 2].map(i => (
-            <div
-              key={i}
-              className="w-2 h-2 rounded-full bg-primary/50 animate-bounce"
-              style={{ animationDelay: `${i * 0.18}s` }}
-            />
-          ))}
-        </div>
-      </div>
+      <ItineraryLoadingScene
+        themeTitle={themeTitle}
+        destination={loadingDestination}
+        headline="Building your itinerary…"
+      />
     );
   }
 

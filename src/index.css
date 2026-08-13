@@ -263,3 +263,94 @@
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+/* ── Itinerary loading scene ───────────────────────────────────────────────
+   The stick-art travel animation shown while an itinerary generates. Rotations
+   pivot on joints and prop bases, so every animated group sets its own
+   transform-origin in viewBox units — hence transform-box: view-box. */
+
+.doodle-scene g {
+  transform-box: view-box;
+}
+
+@keyframes doodle-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-320px); }
+}
+
+.doodle-near { animation: doodle-scroll 17s linear infinite; }
+.doodle-far { animation: doodle-scroll 42s linear infinite; }
+
+/* Walk cycle: a stride is 0.9s, and the body bobs once per step. */
+@keyframes doodle-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+
+.doodle-walker { animation: doodle-bob 0.45s ease-in-out infinite; }
+
+@keyframes doodle-stride-a {
+  0%, 100% { transform: rotate(20deg); }
+  50% { transform: rotate(-20deg); }
+}
+
+@keyframes doodle-stride-b {
+  0%, 100% { transform: rotate(-20deg); }
+  50% { transform: rotate(20deg); }
+}
+
+@keyframes doodle-swing-a {
+  0%, 100% { transform: rotate(15deg); }
+  50% { transform: rotate(-15deg); }
+}
+
+@keyframes doodle-swing-b {
+  0%, 100% { transform: rotate(-15deg); }
+  50% { transform: rotate(15deg); }
+}
+
+.doodle-leg-a { animation: doodle-stride-a 0.9s ease-in-out infinite; }
+.doodle-leg-b { animation: doodle-stride-b 0.9s ease-in-out infinite; }
+/* Arms counter-swing against the leg on the same side. */
+.doodle-arm-a { animation: doodle-swing-a 0.9s ease-in-out infinite; }
+.doodle-arm-b { animation: doodle-swing-b 0.9s ease-in-out infinite; }
+
+@keyframes doodle-drift {
+  from { transform: translateX(340px); }
+  to { transform: translateX(-70px); }
+}
+
+.doodle-cloud { animation: doodle-drift 26s linear infinite; }
+
+@keyframes doodle-spin {
+  to { transform: rotate(360deg); }
+}
+
+.doodle-spin { animation: doodle-spin 26s linear infinite; }
+
+/* Marching dashes — offsets are whole multiples of the dash pattern so the
+   loop has no visible seam. */
+@keyframes doodle-march {
+  to { stroke-dashoffset: -22; }
+}
+
+@keyframes doodle-march-ground {
+  to { stroke-dashoffset: -28; }
+}
+
+.doodle-route {
+  stroke-dasharray: 5 6;
+  animation: doodle-march 1.6s linear infinite;
+}
+
+.doodle-ground {
+  stroke-dasharray: 6 8;
+  animation: doodle-march-ground 1.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .doodle-scene,
+  .doodle-scene * {
+    animation: none !important;
+  }
+}

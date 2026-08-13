@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Sparkles, MapPin, Plane, ScanSearch, ChevronLeft, Plus, Bookmark, BookmarkCheck, Loader2 as BookmarkLoader, RefreshCw } from "lucide-react";
+import { Sparkles, MapPin, Plane, ChevronLeft, Plus, Bookmark, BookmarkCheck, Loader2 as BookmarkLoader, RefreshCw } from "lucide-react";
 import { TripInputForm, TripPreferences } from "@/components/TripInputForm";
 import { ItineraryOutput } from "@/components/ItineraryOutput";
 import { TripSummaryCard } from "@/components/TripSummaryCard";
@@ -7,6 +7,7 @@ import { ItinerarySwitcher } from "@/components/ItinerarySwitcher";
 import { AuthModal } from "@/components/AuthModal";
 import { SavedTripsList } from "@/components/SavedTripsList";
 import { supabase } from "@/lib/supabase";
+import { sendReadyText } from "@/lib/readyText";
 import { toast } from "@/hooks/use-toast";
 import { ItineraryData } from "@/types/itinerary";
 import type { Json } from "@/integrations/supabase/types";
@@ -229,6 +230,16 @@ const stripPlanningSection = (content: string): string => {
   return content;
 };
 
+// A finished variant texts the user's phone. sendReadyText is a no-op unless
+// they opted in with a number, so this is safe to call from every completion
+// path; the edge function rate-limits repeats per number.
+const notifyVariantReady = (
+  variant: { id: string; name: string; emoji: string },
+  destination?: string,
+) => {
+  void sendReadyText(variant, destination);
+};
+
 // Stores a trip the user tried to save while logged out, so we can finish the
 // save once the sign-in redirect (Google / magic link) brings them back.
 const PENDING_SAVE_KEY = "trvln_pending_save";
@@ -274,6 +285,9 @@ const Index = () => {
   // Variants already kicked off, so re-opening a tab mid-generation doesn't
   // start a second run for the same theme.
   const startedVariantsRef = useRef<Set<string>>(new Set());
+  // Completion handlers outlive the render that started them — the reconnect
+  // poll runs from a mount effect — so the notification reads its label here.
+  const destinationRef = useRef<string>('');
 
   // Auth + save state
   const [user, setUser] = useState<User | null>(null);
@@ -284,6 +298,10 @@ const Index = () => {
   // redirect or magic link sent). Lets us tell "dismissed without signing in"
   // (cancel the queued action) from "left to complete sign-in" (keep it).
   const authInitiatedRef = useRef(false);
+
+  useEffect(() => {
+    destinationRef.current = preferences.cities[0] ?? '';
+  }, [preferences.cities]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -349,6 +367,10 @@ const Index = () => {
         const structuredData = parseStructuredItinerary(displayContent);
         setItineraries(prev => prev.map(it =>
           it.id === job.themeId ? { ...it, content: displayContent, structuredData } : it));
+        notifyVariantReady(
+          { id: job.themeId, name: job.name, emoji: job.emoji },
+          destinationRef.current,
+        );
       }
       setLoadingVariants(prev => ({ ...prev, [job.themeId]: false }));
     };
@@ -669,7 +691,11 @@ const Index = () => {
     generationContextRef.current = ctx;
 
     void runVariant(theme, ctx).then(result => {
-      if (result.ok || runIdRef.current !== ctx.runId) return;
+      if (result.ok) {
+        notifyVariantReady(theme, destinationRef.current);
+        return;
+      }
+      if (runIdRef.current !== ctx.runId) return;
       toast({
         title: `Couldn't load ${theme.name}`,
         description: result.error instanceof Error
@@ -756,6 +782,7 @@ const Index = () => {
       if (isStale()) return; // a newer generation took over while we streamed
 
       if (result.ok) {
+        notifyVariantReady(themes[0], destinationRef.current);
         toast({
           title: `${themes[0].emoji} ${themes[0].name} is ready!`,
           description: themes.length > 1
@@ -872,23 +899,6 @@ const Index = () => {
         <ResultsNav />
         <main className="container pb-20">
           <div className="max-w-4xl mx-auto pt-6 space-y-6">
-            {/* Loading state */}
-            {isGenerating && itineraries.length === 0 && (
-              <div className="bg-card rounded-2xl shadow-medium p-6 flex items-center gap-4 animate-slide-up">
-                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center animate-pulse">
-                  {isAnalyzingMedia ? <ScanSearch className="w-5 h-5 text-primary" /> : <Sparkles className="w-5 h-5 text-primary" />}
-                </div>
-                <div>
-                  <p className="font-medium text-foreground">
-                    {isAnalyzingMedia ? "Analyzing your inspiration photos..." : isSuggestingThemes ? "Crafting unique theme ideas..." : "Preparing your itineraries..."}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {isAnalyzingMedia ? "AI is identifying travel destinations from your images" : "This usually takes a few seconds"}
-                  </p>
-                </div>
-              </div>
-            )}
-
             {/* Reconnect indicator — server kept generating while the tab was away */}
             {isReconnecting && (
               <div className="bg-card rounded-2xl shadow-medium p-6 flex items-center gap-4 animate-slide-up">
@@ -948,6 +958,13 @@ const Index = () => {
                     itinerary={currentItinerary?.content || ""}
                     structuredData={currentItinerary?.structuredData}
                     isLoading={isGenerating && !currentItinerary?.content}
+                    loadingHeadline={
+                      isAnalyzingMedia
+                        ? "Reading your inspiration photos…"
+                        : isSuggestingThemes
+                          ? "Dreaming up trip themes…"
+                          : undefined
+                    }
                     isStreaming={!!(currentItinerary?.content && loadingVariants[currentItinerary?.id])}
                     isEditing={currentItinerary ? loadingVariants[currentItinerary.id] && !isGenerating : false}
                     onEdit={handleEdit}
