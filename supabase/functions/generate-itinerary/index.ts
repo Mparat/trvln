@@ -420,7 +420,8 @@ STRICT RULES:
 - Output ONLY the JSON object — nothing before or after it
 - No markdown code fences in the actual output — the above \`\`\` are just for illustration
 - Every day must have exactly 3 periods: Morning, Afternoon, Evening
-- Each period must have EXACTLY 2 activities (no more, no fewer)
+- Give each period the number of activities the day actually warrants: 1 to 3. Two is common, but a period built around a single real thing — a long walk, a day trip, a lunch that runs into the afternoon — takes exactly one, and padding it to two is the clearest tell that an itinerary was generated rather than planned. A day that is genuinely one big thing may run one activity per period throughout.
+- Deliberate open time is a legitimate entry and often the most human thing on the page: an unstructured hour in a named neighborhood, a slow morning after a late arrival, an afternoon left free because the day before was long. Name it as an activity and say what it is for. This is not a way to fill space you could not research — that is a different thing and it reads differently.
 - Include 1 or 2 dining options for every period: Morning (breakfast), Afternoon (lunch), Evening (dinner). The first must have "isPrimary": true (top pick); include a second with "isPrimary": false ONLY when a real, separate alternative exists within reach of where the traveler actually is at that hour. One real option beats two where the second is filler.
 - NEVER INVENT A RESTAURANT TO FILL A SLOT. Every name must come from the grounded research, or be the place the traveler is already staying that day, or — where no research was available — be a long-established place you are confident still exists. If nothing for a location meets that bar, give one option, the lodging's own kitchen, rather than a second name you cannot stand behind. A slot with one sourced option is correct; a slot with an invented second option is a failure.
 - WHERE MEALS ARE INCLUDED, SAY SO INSTEAD OF INVENTING CHOICE. When a stay includes meals or has no alternative nearby — a mountain hut or refuge on half board, a lodge, a ryokan, a safari camp, an all-inclusive, a boat, a remote village — the correct answer is that establishment. The same establishment MAY serve dinner and the next morning's breakfast; state that it is the hut/lodge's own dining room and what the meal plan covers.
@@ -432,6 +433,7 @@ STRICT RULES:
 - priority must be exactly "high", "medium", or "low"
 - Use real URLs from the grounded research — fall back to the search URL patterns given in the trip context below
 - Keep ALL descriptions to 1 short sentence (25 words maximum) — be ruthlessly concise
+- Make those 25 words earn their place. Say the specific reason for this, here, at this hour — the light on the ridge before the first cable car, the one thing on the menu, why it follows what came before. Never a label that would fit any comparable place: "charming local spot", "iconic landmark", "hidden gem", "a must-see". If a description would survive being moved to a different city unchanged, it is not doing its job — rewrite it.
 - Keep activity names under 6 words
 - Omit bookingUrl entirely if it would be an empty string
 - If noFlight is true, set flights.skip to true and flights.options to []
@@ -442,6 +444,12 @@ STRICT RULES:
 - Always populate budget items with a description field explaining what the cost covers
 
 ## Guidelines
+
+**Composition — what separates a planned trip from a list of good things. These decide the day roster, so they apply when assigning what happens on which day:**
+- Give the trip a shape. The arrival day and the last day are lighter than the middle. No two consecutive days should have the same rhythm — a full day out is followed by one that stays close to home. Something the traveler explicitly said they came for should land early enough that one bad-weather day later does not cost them the trip.
+- Sequence geographically. A day should not cross the city twice. Where two activities are a short walk apart, say so; where a move is the point of the day, let it be the day.
+- Anticipate. Where the research says something depends on weather, conditions, or a booking that may not come through, name the fallback in that day's transitNote instead of leaving the traveler to improvise.
+- Let the trip build. What the traveler will remember belongs where they are acclimatised enough to appreciate it, not on the morning they land jet-lagged.
 
 - Stay within budget or clearly explain tradeoffs
 - Always include destinations from the user's inspiration
@@ -1011,18 +1019,20 @@ This itinerary MUST embody the "${themeVariant.name}" theme throughout.
     }
 
     // ============================================
-    // SOURCE STRATEGY PASS
+    // READING THE REQUEST
     // ============================================
-    // Which sources can answer a trip depends on what the trip is, so the query
-    // text cannot hardcode it. A crowd-averse self-guided traverse is answered
-    // by first-hand trip reports, regional forums and operator timetables; a
-    // first-time city break is answered by mainstream guides. Asking every query
-    // for both returns the average of both, which is the generic listicle.
+    // What separates a planned trip from a generated one is mostly not the
+    // establishment names — it is that someone read the request closely enough
+    // to know what this person would find disappointing. That reading has to
+    // happen before anything else, because it decides what gets left out, and
+    // leaving things out is where taste lives.
     //
-    // So Haiku reads the request and says, per research topic, what would
-    // actually know the answer — and turns the traveler's subjective words
-    // ("off the beaten path", "authentic") into tests a search can apply,
-    // rather than letting them pass through as keywords to match.
+    // This pass does not pick sources. An earlier version did, and it was the
+    // wrong lever twice over: the model already knows an alpine club beats a
+    // tourism board on snowpack, and a directive naming sources competes with
+    // the actual question for retrieval. What the model cannot supply on its
+    // own is this traveler's standard for a vague word, so that is what is
+    // asked for here.
     //
     // Kicked off before destination resolution and awaited after it: this
     // describes the shape of the trip, not the place, so it neither needs the
@@ -1030,20 +1040,20 @@ This itinerary MUST embody the "${themeVariant.name}" theme throughout.
     type SourcePlan = {
       tripCharacter?: string;
       interpretations?: string[];
-      sources?: Record<string, string>;
+      avoid?: string[];
     };
 
-    const sourcePlanPromise: Promise<SourcePlan | null> = timePhase("source_strategy", async () => {
+    const sourcePlanPromise: Promise<SourcePlan | null> = timePhase("request_reading", async () => {
       try {
-        const strategyPrompt = `You are planning the RESEARCH for a trip, not the trip itself. Decide what kinds of sources could actually answer each research topic for this specific traveler.
+        const strategyPrompt = `Read this travel request the way an experienced human travel planner would before doing any research — not to plan the trip, but to work out what this particular person is actually asking for.
 
-Do not favour any category of source by default. Mainstream guidebooks, tourism boards, operator and authority pages, regional or local-language blogs, forums, and first-hand trip reports are all legitimate. Choose per topic by asking which of them would plausibly KNOW the answer for this trip — a national tourism board knows opening hours and nothing about whether a traverse is passable in June; a trip report knows the opposite.
+Three things:
 
-Two things to get right:
+1. **What kind of trip is this really?** One concrete sentence. "A first trip abroad with an anxious parent" and "a self-guided traverse by someone who hikes every weekend" produce completely different itineraries to the same destination.
 
-1. Where a fact is verifiable and changes over time — schedules, fares, opening windows, permits, capacity, closures — name the authoritative publisher (the operator, the transit authority, the park service, the booking system) AND the first-hand accounts that reveal whether reality matches what is published. Both, not either.
+2. **Restate their subjective words as tests.** "Off the beaten path", "authentic", "hidden gem", "local", "chill", "romantic", "epic" are useless as search terms — every listicle claims all of them. Say what each would have to mean for a place to qualify on THIS trip, judged relative to the destination rather than in the abstract. Empty array if they used none.
 
-2. Where the traveler used a subjective word — "off the beaten path", "authentic", "hidden gem", "local", "chill", "epic", "low-key" — do not let the phrase pass through as a search keyword; every listicle claims it. Say what it means for THIS trip in terms a search can check: what would have to be true of a place for it to qualify, and what kind of source would mention such a place at all. Judge it relative to the destination, not in the abstract.
+3. **What would make this itinerary feel canned to THIS person?** Name the obvious inclusions that would signal nobody read their request — the specific landmark, the kind of restaurant, the pacing mistake. Be concrete enough that a planner could check a draft against it.
 
 The traveler's request:
 - What they described: ${additionalNotes || "Not specified"}
@@ -1059,28 +1069,16 @@ ${themeVariant?.name ? `- Itinerary theme: ${themeVariant.name}` : ""}
 
 Respond with ONLY a JSON object in this shape:
 {
-  "tripCharacter": "one sentence on what kind of trip this actually is",
-  "interpretations": ["Each subjective word in the request, restated as a checkable test. Empty array if the request used none."],
-  "sources": {
-    "activities": "One or two sentences on what should be sourced from where, for this trip.",
-    "restaurants": "...",
-    "accommodation": "...",
-    "nearbyAndTransport": "...",
-    "seasonal": "...",
-    "planning": "...",
-    "flights": "..."
-  }
+  "tripCharacter": "one concrete sentence",
+  "interpretations": ["each subjective word restated as a test a place must pass"],
+  "avoid": ["specific things that would read as generic to this traveler"]
 }
 
-Worked example, for a self-guided hut-to-hut trek by someone avoiding crowds:
+Worked example, for "hut to hut, no driving, want to get away from the crowds" — six days, self-guided, active:
 {
-  "tripCharacter": "A self-guided multi-day mountain traverse, sleeping in huts, by a traveler who wants to be away from day-trip crowds.",
-  "interpretations": ["'Off the beaten path' here means valleys and huts that the cable-car day-trip crowd cannot reach on foot in an afternoon — not merely places that are less famous than the headline peak. A place qualifies if reaching it takes a half day of walking or a connection the tour buses do not run. Regional alpine club pages and individual trip reports mention these; national tourism campaigns do not."],
-  "sources": {
-    "activities": "First-hand trip reports and regional hiking-club or alpine-club route descriptions, which name specific stages and passes. Treat national tourism-board copy as a starting list of names only, since it covers the roadside viewpoints this traveler is trying to avoid.",
-    "nearbyAndTransport": "The valley bus and cable-car operators' own published timetables, named, since services here are seasonal and change yearly — cross-checked against recent trip reports for whether the last connection of the day is actually catchable with a full pack.",
-    "planning": "The huts' own booking pages and the alpine club's reservation system for lead times and half-board rules; recent trip reports for how far ahead beds actually sell out in practice, which the official pages never state."
-  }
+  "tripCharacter": "A self-guided six-day mountain traverse sleeping in huts, by someone fit enough to carry a pack who is specifically trying to get away from day-trip crowds.",
+  "interpretations": ["'Away from the crowds' here means huts and valleys the cable-car day-trippers cannot reach on foot in an afternoon — not simply places less famous than the headline peak. A place qualifies if reaching it costs a half day of walking, or a connection the tour buses do not run."],
+  "avoid": ["The photographed viewpoint ten minutes from a cable car station — it is the most crowded spot in the range and its presence would prove nobody read the request.", "A rest day parked in a resort town; this traveler wants the walking, not the shopping street.", "Restaurants in valley towns the route never descends into."]
 }
 
 No explanation. Just the JSON object.`;
@@ -1115,20 +1113,15 @@ No explanation. Just the JSON object.`;
         const clamp = (s: unknown, max: number) =>
           typeof s === "string" && s.trim() ? s.trim().slice(0, max) : undefined;
 
-        const sources: Record<string, string> = {};
-        for (const [key, value] of Object.entries(parsed?.sources ?? {})) {
-          const directive = clamp(value, 600);
-          if (directive) sources[key] = directive;
-        }
+        const strList = (v: unknown, max: number, cap: number) =>
+          Array.isArray(v) ? v.map((i: unknown) => clamp(i, max)).filter(Boolean).slice(0, cap) as string[] : [];
 
         const plan: SourcePlan = {
           tripCharacter: clamp(parsed?.tripCharacter, 300),
-          interpretations: Array.isArray(parsed?.interpretations)
-            ? parsed.interpretations.map((i: unknown) => clamp(i, 500)).filter(Boolean).slice(0, 4)
-            : [],
-          sources,
+          interpretations: strList(parsed?.interpretations, 500, 4),
+          avoid: strList(parsed?.avoid, 300, 5),
         };
-        console.log("Source strategy:", JSON.stringify(plan, null, 2));
+        console.log("Request reading:", JSON.stringify(plan, null, 2));
         return plan;
       } catch (err) {
         console.error("Source strategy pass failed — using baseline sourcing only:", err);
@@ -1281,20 +1274,17 @@ ${additionalNotes || "None provided"}
     // Started before destination resolution; collected here.
     const sourcePlan = await sourcePlanPromise;
 
-    // The floor, applied whether or not the strategy pass returned anything.
-    // These are the topics where the right sourcing does not depend on the
-    // traveler: a departure time is either what the operator publishes or it is
-    // wrong, and the published time is still not what a traveler with a full
-    // pack experiences. Both halves are needed, so both are always asked for.
-    // Taste topics are deliberately absent — what makes a good restaurant
-    // source varies with the trip, so it is left to the strategy pass rather
-    // than pushed toward guides or blogs by default.
-    const baselineSourceRules: Record<string, string> = {
-      nearbyAndTransport: `Take every schedule, fare and journey time from the operator's or transit authority's own published timetable, and name the operator you took it from. Then cross-check against recent first-hand accounts from travelers who made the same journey. Where the published version and the trip reports disagree, say so and say which is more current.`,
-      seasonal: `Take closure dates, opening windows and event dates from the operator, park authority or organiser that publishes them, and weather from climate records rather than from prose. Cross-check against recent first-hand accounts of what conditions were actually like.`,
-      planning: `Take booking lead times, permit rules, fees and access restrictions from the issuing authority or the booking system itself, and name it. Then add what recent first-hand accounts say happens in practice — how far ahead things really sell out, whether a rule is enforced, what the process is actually like — because the official page never states that.`,
-      flights: `Take routes and airport pairings from airline or airport published route information rather than from aggregator listicles, which keep discontinued routes online for years.`,
-    };
+    // Which sources are worth reading is something the model already knows; an
+    // instruction naming them mostly competes with the question for retrieval,
+    // and an earlier version of this ran longer than the questions it was
+    // attached to. What the model will not volunteer is where a given number
+    // came from — unasked, a departure time arrives with no way to tell the
+    // operator's timetable from a blog post six years stale. That is a
+    // reporting contract, not knowledge, so it is stated, kept to one sentence,
+    // and attached only to the topics carrying facts that expire.
+    const SOURCING_CONTRACT = ` For any schedule, fare, fee, permit or opening window, name the operator or authority it came from, and say so when recent first-hand accounts contradict it. Flag anything you found in only one place.`;
+    const factualTopics = new Set(['nearbyAndTransport', 'seasonal', 'planning', 'flights']);
+    const sourceClause = (key: string) => (factualTopics.has(key) ? SOURCING_CONTRACT : '');
 
     // Vague words the traveler used, restated as tests. Injected where taste
     // decides the answer — asking a search engine for "hidden gems" returns the
@@ -1303,31 +1293,29 @@ ${additionalNotes || "None provided"}
       ? ` Apply the following as tests a place must pass, not as phrases to match: ${sourcePlan.interpretations.join(" ")}`
       : "";
 
-    const sourceClause = (key: string) => {
-      const parts = [baselineSourceRules[key], sourcePlan?.sources?.[key]].filter(Boolean);
-      if (!parts.length) return "";
-      return ` SOURCING: ${parts.join(" ")} For each specific claim, say what kind of source it came from, and flag anything you could only find in a single place.`;
-    };
-
     // Keyed so a conditional query can be added without shifting the indices
     // the context block reads from.
     const searchSpecs: { key: string; query: string }[] = [
-      // Activities and things to do
+      // Activities and things to do. Asked for texture rather than a ranking:
+      // "best things to do in X" is the query the listicle was written to
+      // answer, and it returns the listicle no matter what sources are
+      // preferred. What a day is actually like is what an itinerary is built
+      // from, and what is overrated is as useful as what is good.
       {
         key: 'activities',
-        query: `Best things to do in ${destinationStr} for ${interestsStr} travelers. Include specific activity names, tour recommendations, attractions, and neighborhoods to explore.${themeStr ? ` Focus on ${themeStr} experiences.` : ''} ${budgetInfo.label} budget level.${notesClause} Judge how well-trodden somewhere is relative to ${destinationStr} itself — what people who know this place consider the tourist trail — not by how famous it is to an outsider.${interpretationClause}${sourceClause('activities')}`,
+        query: `What is genuinely worth doing in ${destinationStr} for ${interestsStr} travelers, and what is each one actually like to do? For every recommendation: the specific name, what makes it worth the time, the time of day it is best and why, how long it realistically takes including getting there, and what it costs. Then cover two more things: what is overrated here and what people who know the place do instead, and which areas reward an unstructured hour on foot and what you would actually come across in them.${themeStr ? ` Weight this toward ${themeStr}.` : ''} ${budgetInfo.label} budget.${notesClause} Judge how well-trodden something is relative to ${destinationStr} itself — what people who know this place consider the tourist trail — not by how famous it is to an outsider.${interpretationClause}${sourceClause('activities')}`,
       },
 
       // Restaurants and food scene — emphasise currently operating
       {
         key: 'restaurants',
-        query: `Best ${foodStr} restaurants currently open in ${destinationStr} as of ${currentYear}. Only include establishments confirmed to be actively operating with recent positive reviews. Include specific restaurant names, neighborhoods, price ranges, and what they are known for. Exclude any restaurants that have closed, are temporarily closed, or have uncertain operating status. ${budgetInfo.label} budget.${tripNotes ? ` The traveler describes the trip as: "${tripNotes}" — if this trip spends nights somewhere without restaurants nearby (a mountain hut, a lodge, a remote village, a boat), say so and name where meals are actually eaten there instead.` : ''}${interpretationClause}${sourceClause('restaurants')}`,
+        query: `Where should someone actually eat in ${destinationStr} for ${foodStr}, confirmed still open and trading as of ${currentYear}? Exclude anything closed, temporarily closed, or of uncertain operating status. For each: the name, the neighborhood, what to order there, what a meal costs, what the room and the crowd are like and which kind of evening it suits, and whether it needs booking and how far ahead. Cover the whole range a traveler on this trip would really use across a week — the everyday place that is good every time and the one worth dressing up for — not a ranked list of the same destination restaurants. ${budgetInfo.label} budget.${tripNotes ? ` The traveler describes the trip as: "${tripNotes}" — if this trip spends nights somewhere without restaurants nearby (a mountain hut, a lodge, a remote village, a boat), say so and name where meals are actually eaten there instead.` : ''}${interpretationClause}${sourceClause('restaurants')}`,
       },
 
       // Where to sleep, in whatever form this trip actually needs
       {
         key: 'accommodation',
-        query: `Best ${budgetInfo.label} places to stay in ${destinationStr} priced ${budgetInfo.accommodation}. ${startDate && endDate ? `For dates: check-in ${startDate}, check-out ${endDate}.` : targetMonth ? `For travel in ${targetMonth}.` : ''} Include specific names with nightly rates and where each one is.${tripNotes ? ` The traveler describes the trip as: "${tripNotes}" — include the kinds of lodging this trip actually requires (for example mountain huts or refuges, guesthouses, campsites, lodges, hostels, ryokan), not only conventional hotels, and note how each is booked and what a night includes such as half board.` : ''}${interpretationClause}${sourceClause('accommodation')}`,
+        query: `Where should someone stay in ${destinationStr} at ${budgetInfo.label} level, ${budgetInfo.accommodation}? ${startDate && endDate ? `For dates: check-in ${startDate}, check-out ${endDate}.` : targetMonth ? `For travel in ${targetMonth}.` : ''} For each: the specific name, the nightly rate, exactly where it sits and what that means for getting around, what it is actually like to stay there, what the immediate area is like in the evening, and what a night includes.${tripNotes ?` The traveler describes the trip as: "${tripNotes}" — include the kinds of lodging this trip actually requires (for example mountain huts or refuges, guesthouses, campsites, lodges, hostels, ryokan), not only conventional hotels, and note how each is booked and what a night includes such as half board.` : ''}${interpretationClause}${sourceClause('accommodation')}`,
       },
 
       // Where the trip goes and how it moves. Deliberately not branched on
@@ -1336,7 +1324,7 @@ ${additionalNotes || "None provided"}
       // area the whole trip happens inside. One question covers both shapes.
       {
         key: 'nearbyAndTransport',
-        query: `For a ${tripDaysNum}-day trip in ${destinationStr}: which places should the itinerary actually include, how do you travel between them (trains, buses, cable cars, ferries, driving — with prices and journey times), and how many days does each deserve? If this is a single city, cover what is worth leaving it for as day trips or overnight stops. If it is a region or a route, cover how to move between its towns and valleys, and whether it works better as a base with day trips or as a point-to-point traverse.${notesClause}${sourceClause('nearbyAndTransport')}`,
+        query: `For a ${tripDaysNum}-day trip in ${destinationStr}: which places should the itinerary actually include, how do you travel between them (trains, buses, cable cars, ferries, driving — with prices and journey times), and how many days does each deserve? If this is a single city, cover what is worth leaving it for as day trips or overnight stops. If it is a region or a route, cover how to move between its towns and valleys, and whether it works better as a base with day trips or as a point-to-point traverse. For each move, say what it actually costs in usable hours once you count getting to the station and waiting for the connection, and whether it is worth doing at all for a stay that short.${notesClause}${sourceClause('nearbyAndTransport')}`,
       },
 
       // Seasonal & practical information
@@ -1423,7 +1411,13 @@ ${additionalNotes || "None provided"}
 - Do NOT hallucinate establishment names or URLs
 - For anything not in the research, use the fallback URL patterns in the system prompt
 - The research states where its claims came from. Carry that through: name the operator behind a schedule, and keep the distinction between what is published and what travelers actually report.
-${sourcePlan?.tripCharacter ? `\n**What this trip is:** ${sourcePlan.tripCharacter}\n` : ''}
+- The research is deliberately wider than one itinerary needs. Do not work through it — choose from it, and leave most of it unused.
+${sourcePlan?.tripCharacter ? `\n**What this trip is:** ${sourcePlan.tripCharacter}\n` : ''}${sourcePlan?.avoid?.length ? `
+**What would make this itinerary feel canned to this traveler** — read before selecting, and check your draft against it:
+${sourcePlan.avoid.map(a => `- ${a}`).join('\n')}
+
+Including one of these anyway is a defensible call if the trip genuinely needs it, but then say why in the activity's description rather than presenting it as an ordinary pick.
+` : ''}
 ---
 
 ### 🗺️ NEARBY DESTINATIONS, DAY TRIPS & TRANSPORTATION
