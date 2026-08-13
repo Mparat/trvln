@@ -528,12 +528,47 @@ function repairTruncatedJson(input: string): string {
 }
 
 function parseModelJson<T>(raw: string, label: string): T {
+  // Progressively more aggressive cleanups. The model is told not to wrap its
+  // output in a code fence and is prefilled with an opening brace, but it does
+  // it anyway often enough that a bare JSON.parse is not a safe single attempt —
+  // and here a parse failure costs the whole split path.
+  const candidates = [raw];
+
+  const defenced = raw.replace(/```[a-z]*/gi, "").trim();
+  if (defenced !== raw) candidates.push(defenced);
+
+  // A fence arriving after the prefill leaves a stray leading brace, so also try
+  // the outermost object found in the text.
+  const open = defenced.indexOf("{");
+  const close = defenced.lastIndexOf("}");
+  if (open !== -1 && close > open) {
+    candidates.push(defenced.slice(open, close + 1));
+    // …and the object after a duplicated opening brace ("{" + "{...}").
+    const second = defenced.indexOf("{", open + 1);
+    if (second !== -1 && /^\{\s*$/.test(defenced.slice(open, second))) {
+      candidates.push(defenced.slice(second, close + 1));
+    }
+  }
+
+  for (const [i, candidate] of candidates.entries()) {
+    try {
+      const parsed = JSON.parse(candidate) as T;
+      if (i > 0) console.warn(`[parse] ${label} recovered at cleanup ${i} (${raw.length} chars)`);
+      return parsed;
+    } catch { /* try the next shape */ }
+  }
+
+  // Last resort: the model ran out of tokens mid-document.
   try {
-    return JSON.parse(raw) as T;
-  } catch {
-    const repaired = repairTruncatedJson(raw);
-    console.warn(`[parse] ${label} needed repair (${raw.length} chars)`);
-    return JSON.parse(repaired) as T;
+    const repaired = repairTruncatedJson(candidates[candidates.length - 1]);
+    const parsed = JSON.parse(repaired) as T;
+    console.warn(`[parse] ${label} needed truncation repair (${raw.length} chars)`);
+    return parsed;
+  } catch (err) {
+    // Log what actually came back. Without this the only signal is a fallback
+    // to the slow path with no way to tell why.
+    console.error(`[parse] ${label} unparseable (${raw.length} chars). Head: ${JSON.stringify(raw.slice(0, 400))}`);
+    throw err;
   }
 }
 
@@ -1398,7 +1433,12 @@ Output ONLY the JSON object. Do not include a "days" key.`;
 
           const parsed = parseModelJson<Skeleton>(skeletonResult.text, "skeleton");
           if (!Array.isArray(parsed.dayPlan) || parsed.dayPlan.length === 0) {
-            throw new Error("skeleton returned no dayPlan entries");
+            // The cached system prompt describes a "days" array in detail, so
+            // the likeliest miss is the model writing that instead of dayPlan.
+            // Name the keys it did return rather than reporting a bare absence.
+            throw new Error(
+              `skeleton returned no dayPlan entries (top-level keys: ${Object.keys(parsed).join(", ") || "none"})`,
+            );
           }
           return parsed;
         } catch (err) {
