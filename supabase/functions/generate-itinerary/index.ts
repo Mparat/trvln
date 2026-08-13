@@ -760,6 +760,7 @@ function normalizeItineraryTail(tail: Record<string, unknown>): Record<string, u
   const budget = (tail.budget ?? {}) as Record<string, unknown>;
   const flights = (tail.flights ?? {}) as Record<string, unknown>;
   const flightOptions = Array.isArray(flights.options) ? flights.options : [];
+  const budgetTotal = typeof budget.total === "string" ? budget.total : "";
 
   return {
     ...tail,
@@ -767,11 +768,17 @@ function normalizeItineraryTail(tail: Record<string, unknown>): Record<string, u
       ...summary,
       highlights: Array.isArray(summary.highlights) ? summary.highlights : [],
       assumptions: Array.isArray(summary.assumptions) ? summary.assumptions : [],
+      // summary.totalBudget and budget.total are the same figure shown twice,
+      // and they are now written by two different calls — the headline before
+      // the breakdown exists. The itemised total is the one derived from real
+      // nightly rates, so the headline follows it rather than the reverse.
+      // Falls back to whatever the plan wrote if the extras call produced none.
+      totalBudget: budgetTotal || (typeof summary.totalBudget === "string" ? summary.totalBudget : ""),
     },
     budget: {
       ...budget,
       items: Array.isArray(budget.items) ? budget.items : [],
-      total: typeof budget.total === "string" ? budget.total : "",
+      total: budgetTotal,
     },
     flights: {
       ...flights,
@@ -1555,6 +1562,7 @@ Call the \`emit_trip_extras\` tool with:
 Each follows the schema and the strict rules in the system prompt exactly.
 
 - The budget must reconcile with the accommodation in the plan: use those nightly rates and that number of nights, not invented ones.
+- The plan already states a headline figure in summary.totalBudget. Your budget.total is the itemised version of that same number — make the items add up to a total consistent with it, and set budget.total to the figure your items actually support.
 - If noFlight is true, set flights.skip to true and flights.options to [].
 - The booking checklist covers what has a real lead time, permit, reservation, or access restriction — drawn from the research, not guessed.
 
@@ -1853,7 +1861,10 @@ Put all of it in the \`emit_trip_extras\` tool call. Do not write it out as text
           system: systemBlocks,
           userContent: [...researchBlocks, { type: "text", text: extrasInstruction(sharedPlanJson) }],
           toolName: TRIP_EXTRAS_TOOL.name,
-          maxTokens: 4000,
+          // Generous: a tool call cut off by max_tokens loses the entire result,
+          // not just its tail, and this content ran ~2,500 tokens inside the
+          // combined call it was split out of.
+          maxTokens: 6000,
           label: "extras",
         }).then(
           value => ({ ok: true as const, value }),
