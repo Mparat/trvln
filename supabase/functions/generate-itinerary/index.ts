@@ -414,26 +414,79 @@ const MODEL = "claude-sonnet-4-6";
 // breakpoint). Shapes are the Anthropic Messages API's, not ours to narrow.
 type ContentBlock = Record<string, unknown>;
 
+// The two output shapes, as forced tool calls. `claude-sonnet-4-6` rejects
+// assistant prefill with a 400 ("This model does not support assistant message
+// prefill"), and structured outputs (output_config.format) is not available on
+// it either — so a forced tool_choice is the only way to guarantee the shape at
+// the API level rather than by asking the model nicely. That guarantee is what
+// stops the plan pass from writing a full itinerary, and it makes a stray ```json
+// fence impossible: tool input arrives already parsed.
+//
+// Both tools are declared on EVERY call and the caller picks one with
+// tool_choice. Tools render before the system prompt, so a per-call tools array
+// would give the skeleton and the day slices different cache prefixes; keeping
+// the array byte-identical means they share one cached entry, and tool_choice
+// does not invalidate it.
+const TRIP_PLAN_TOOL = {
+  name: "emit_trip_plan",
+  description:
+    "Record the trip-level plan and the per-day roster. This is pass 1: it does NOT contain the written-out days.",
+  input_schema: {
+    type: "object",
+    properties: {
+      summary: { type: "object", description: "The summary object from the schema." },
+      budget: { type: "object", description: "The budget object from the schema." },
+      flights: { type: "object", description: "The flights object from the schema." },
+      accommodation: { type: "array", description: "The accommodation array from the schema." },
+      bookingChecklist: { type: "array", description: "The bookingChecklist array from the schema." },
+      alternatives: { type: "array", description: "The alternatives array from the schema." },
+      dayPlan: {
+        type: "array",
+        description:
+          "One entry per day of the trip: dayNumber, title, location, optional transitNote, and a dining object mapping Morning/Afternoon/Evening to the assigned restaurant names.",
+      },
+    },
+    required: ["summary", "dayPlan"],
+  },
+};
+
+const DAYS_TOOL = {
+  name: "emit_days",
+  description: "Record the finished day objects for the day(s) assigned to this call.",
+  input_schema: {
+    type: "object",
+    properties: {
+      days: {
+        type: "array",
+        description: "Full days[] elements, exactly as the schema in the system prompt defines them.",
+      },
+    },
+    required: ["days"],
+  },
+};
+
+const ITINERARY_TOOLS = [TRIP_PLAN_TOOL, DAYS_TOOL];
+
 type AnthropicJsonResult = {
-  text: string;
+  data: Record<string, unknown>;
   stopReason: string | null;
   outputTokens: number;
   cacheRead: number;
   cacheWrite: number;
 };
 
-// Non-streaming: every call here has a modest max_tokens and the result is
-// assembled server-side anyway, so there is nothing to stream to and buffering
-// makes the error handling and JSON parsing straightforward.
+// Non-streaming, and the shape is forced with tool_choice rather than asked for
+// in prose: the result is a parsed object straight off the tool call, so there
+// is no JSON to extract and no code fence to survive.
 async function callAnthropicJson(params: {
   apiKey: string;
   system: unknown[];
   userContent: unknown[];
-  prefill: string;
+  toolName: string;
   maxTokens: number;
   label: string;
 }): Promise<AnthropicJsonResult> {
-  const { apiKey, system, userContent, prefill, maxTokens, label } = params;
+  const { apiKey, system, userContent, toolName, maxTokens, label } = params;
   // Two attempts. Splitting one call into N multiplies the failure surface, and
   // several slices firing at once is exactly what provokes a 429.
   const maxAttempts = 2;
@@ -458,13 +511,9 @@ async function callAnthropicJson(params: {
         body: JSON.stringify({
           model: MODEL,
           system,
-          messages: [
-            { role: "user", content: userContent },
-            // Prefilling the assistant turn forces the output shape. It is the
-            // only reliable way to stop a day slice from reproducing the whole
-            // itinerary envelope described in the cached system prompt.
-            { role: "assistant", content: prefill },
-          ],
+          messages: [{ role: "user", content: userContent }],
+          tools: ITINERARY_TOOLS,
+          tool_choice: { type: "tool", name: toolName },
           max_tokens: maxTokens,
         }),
       });
@@ -481,10 +530,28 @@ async function callAnthropicJson(params: {
 
       const data = await response.json();
       const usage = data.usage ?? {};
+      const blocks: { type?: string; name?: string; input?: unknown; text?: string }[] =
+        Array.isArray(data.content) ? data.content : [];
+
+      const toolCall = blocks.find(b => b?.type === "tool_use" && b?.name === toolName);
+      let payload: Record<string, unknown> | null =
+        toolCall && toolCall.input && typeof toolCall.input === "object"
+          ? toolCall.input as Record<string, unknown>
+          : null;
+
+      // tool_choice makes a tool call mandatory, so this should not happen —
+      // but a text answer is recoverable and losing the call is not.
+      if (!payload) {
+        const text = blocks.filter(b => b?.type === "text").map(b => b.text ?? "").join("");
+        if (!text.trim()) {
+          throw new Error(`Anthropic ${label} returned no ${toolName} tool call and no text`);
+        }
+        console.warn(`[tool] ${label} answered with text instead of ${toolName}; parsing it`);
+        payload = parseModelJson<Record<string, unknown>>(text, label);
+      }
+
       const result: AnthropicJsonResult = {
-        // The API returns only the continuation, so the prefill has to be put
-        // back before the text is valid JSON.
-        text: prefill + (data.content?.[0]?.text ?? ""),
+        data: payload,
         stopReason: data.stop_reason ?? null,
         outputTokens: usage.output_tokens ?? 0,
         cacheRead: usage.cache_read_input_tokens ?? 0,
@@ -1268,7 +1335,7 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
 
 The itinerary is written in two passes and this is pass 1. A separate pass writes each day's activities and dining prose, so do NOT produce a "days" array here.
 
-Output ONLY this JSON object. **"dayPlan" comes first and there is NO "days" key** — writing out the days here is the one thing this pass must not do.
+Call the \`emit_trip_plan\` tool. Its input takes these fields — and **there is NO "days" key**: writing out the days here is the one thing this pass must not do.
 
 {
   "dayPlan": [
@@ -1306,7 +1373,7 @@ summary, budget, flights, accommodation, bookingChecklist and alternatives follo
 - Every name must come from the grounded research, or be the traveler's own lodging for that night. Never invent one to fill a slot.
 - Match the meal to the period (Morning = breakfast, Afternoon = lunch, Evening = dinner), and vary cuisine, vibe and neighborhood day to day.
 
-Output ONLY the JSON object. Do not include a "days" key.`;
+Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary out as text.`;
 
     type DayPlanEntry = {
       dayNumber?: number;
@@ -1435,11 +1502,11 @@ Output ONLY the JSON object. Do not include a "days" key.`;
             apiKey: ANTHROPIC_API_KEY,
             system: systemBlocks,
             userContent: [...researchBlocks, ...mediaBlocks, { type: "text", text: skeletonInstruction }],
-            // Prefilling the key, not just the brace. The cached system prompt
-            // describes a "days" array at length, and a bare "{" leaves the
-            // model free to open with it and write the whole itinerary here —
-            // which is what drops the request onto the slow single-call path.
-            prefill: '{"dayPlan": [',
+            // Forcing the plan tool is what makes the roster structurally
+            // unskippable: the cached system prompt describes a "days" array at
+            // length, and left to prose the model writes that instead and drops
+            // the request onto the slow single-call path.
+            toolName: TRIP_PLAN_TOOL.name,
             maxTokens: 8000,
             label: "skeleton",
           });
@@ -1447,7 +1514,7 @@ Output ONLY the JSON object. Do not include a "days" key.`;
           skeletonTokens = skeletonResult.outputTokens;
           console.log(`[timing] skeleton_generation: ${timings.skeleton_generation}ms`);
 
-          const parsed = parseModelJson<Skeleton>(skeletonResult.text, "skeleton");
+          const parsed = skeletonResult.data as Skeleton;
           const hasPlan = Array.isArray(parsed.dayPlan) && parsed.dayPlan.length > 0;
           // The cached system prompt describes a "days" array in detail, so the
           // likeliest miss is the model writing that instead of dayPlan. That is
@@ -1585,7 +1652,7 @@ ${sharedPlanJson}
 ${rosterJson}
 </day_roster>
 
-Output ONLY this JSON object, containing exactly ${dayNumbers.length} element(s) — ${only}:
+Call the \`emit_days\` tool with exactly ${dayNumbers.length} element(s) in its "days" array — ${only}:
 
 {"days": [ ${dayNumbers.map(n => `<the full days[] element for day ${n}>`).join(", ")} ]}
 
@@ -1600,20 +1667,20 @@ Each element follows the days[] schema in the system prompt exactly.
 - The other days' titles and locations tell you what the rest of the trip covers. Choose activities that do not duplicate them — the traveler should not do the same thing twice.
 - Everything else follows the strict rules in the system prompt.
 
-Output ONLY the JSON object with the "days" key.`;
+Put the day(s) in the \`emit_days\` tool call. Do not write them out as text.`;
 
           const result = await callAnthropicJson({
             apiKey: ANTHROPIC_API_KEY,
             system: systemBlocks,
             userContent: [...researchBlocks, { type: "text", text: sliceInstruction }],
-            prefill: '{"days": [',
+            toolName: DAYS_TOOL.name,
             // A day runs ~1,200 output tokens, so this leaves generous headroom
             // per day in the slice. A cap that a 3-day slice can reach would
             // truncate the last day of the group.
             maxTokens: 2000 * dayNumbers.length + 1500,
             label,
           });
-          const parsed = parseModelJson<{ days?: unknown[] }>(result.text, label);
+          const parsed = result.data as { days?: unknown[] };
           return { days: Array.isArray(parsed.days) ? parsed.days : [], tokens: result.outputTokens };
         }).then(
           value => ({ ok: true as const, value }),
