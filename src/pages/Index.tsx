@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { Sparkles, MapPin, Plane, ScanSearch, ChevronLeft, Plus, Bookmark, BookmarkCheck, Loader2 as BookmarkLoader, RefreshCw } from "lucide-react";
+import { Sparkles, MapPin, Plane, ChevronLeft, Plus, Bookmark, BookmarkCheck, Loader2 as BookmarkLoader, RefreshCw } from "lucide-react";
 import { TripInputForm, TripPreferences } from "@/components/TripInputForm";
 import { ItineraryOutput } from "@/components/ItineraryOutput";
 import { TripSummaryCard } from "@/components/TripSummaryCard";
@@ -7,7 +7,7 @@ import { ItinerarySwitcher } from "@/components/ItinerarySwitcher";
 import { AuthModal } from "@/components/AuthModal";
 import { SavedTripsList } from "@/components/SavedTripsList";
 import { supabase } from "@/lib/supabase";
-import { notifyWhenAway } from "@/lib/notifications";
+import { sendReadyText } from "@/lib/readyText";
 import { toast } from "@/hooks/use-toast";
 import { ItineraryData } from "@/types/itinerary";
 import type { Json } from "@/integrations/supabase/types";
@@ -230,20 +230,14 @@ const stripPlanningSection = (content: string): string => {
   return content;
 };
 
-// A finished variant pings the browser as well as the page. notifyWhenAway
-// stays silent unless the user opted in and the tab is actually in the
-// background, so this is safe to call from every completion path.
+// A finished variant texts the user's phone. sendReadyText is a no-op unless
+// they opted in with a number, so this is safe to call from every completion
+// path; the edge function rate-limits repeats per number.
 const notifyVariantReady = (
   variant: { id: string; name: string; emoji: string },
   destination?: string,
 ) => {
-  void notifyWhenAway({
-    title: `${variant.emoji} ${variant.name} is ready!`,
-    body: destination
-      ? `Your ${destination} itinerary is written — come take a look.`
-      : "Your itinerary is written — come take a look.",
-    tag: `trvln-ready-${variant.id}`,
-  });
+  void sendReadyText(variant, destination);
 };
 
 // Stores a trip the user tried to save while logged out, so we can finish the
@@ -905,23 +899,6 @@ const Index = () => {
         <ResultsNav />
         <main className="container pb-20">
           <div className="max-w-4xl mx-auto pt-6 space-y-6">
-            {/* Loading state */}
-            {isGenerating && itineraries.length === 0 && (
-              <div className="bg-card rounded-2xl shadow-medium p-6 flex items-center gap-4 animate-slide-up">
-                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center animate-pulse">
-                  {isAnalyzingMedia ? <ScanSearch className="w-5 h-5 text-primary" /> : <Sparkles className="w-5 h-5 text-primary" />}
-                </div>
-                <div>
-                  <p className="font-medium text-foreground">
-                    {isAnalyzingMedia ? "Analyzing your inspiration photos..." : isSuggestingThemes ? "Crafting unique theme ideas..." : "Preparing your itineraries..."}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {isAnalyzingMedia ? "AI is identifying travel destinations from your images" : "This usually takes a few seconds"}
-                  </p>
-                </div>
-              </div>
-            )}
-
             {/* Reconnect indicator — server kept generating while the tab was away */}
             {isReconnecting && (
               <div className="bg-card rounded-2xl shadow-medium p-6 flex items-center gap-4 animate-slide-up">
@@ -981,6 +958,13 @@ const Index = () => {
                     itinerary={currentItinerary?.content || ""}
                     structuredData={currentItinerary?.structuredData}
                     isLoading={isGenerating && !currentItinerary?.content}
+                    loadingHeadline={
+                      isAnalyzingMedia
+                        ? "Reading your inspiration photos…"
+                        : isSuggestingThemes
+                          ? "Dreaming up trip themes…"
+                          : undefined
+                    }
                     isStreaming={!!(currentItinerary?.content && loadingVariants[currentItinerary?.id])}
                     isEditing={currentItinerary ? loadingVariants[currentItinerary.id] && !isGenerating : false}
                     onEdit={handleEdit}

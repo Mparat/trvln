@@ -20,6 +20,8 @@ import { ItineraryData } from "@/types/itinerary";
 interface ItineraryOutputProps {
   itinerary: string;
   isLoading: boolean;
+  /** Overrides the loading scene's headline for pre-theme phases. */
+  loadingHeadline?: string;
   isStreaming?: boolean;
   isEditing?: boolean;
   onEdit?: (editRequest: string) => void;
@@ -39,7 +41,7 @@ const stripEmojis = (text: string): string => {
   return text.replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{1F000}-\u{1FFFF}]/gu, '').replace(/\s+/g, ' ').trim();
 };
 
-export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, onEdit, themeTitle, structuredData, tripPreferences }: ItineraryOutputProps) {
+export function ItineraryOutput({ itinerary, isLoading, loadingHeadline, isStreaming, isEditing, onEdit, themeTitle, structuredData, tripPreferences }: ItineraryOutputProps) {
   const [editMode, setEditMode] = useState(false);
   const [editRequest, setEditRequest] = useState("");
   const [addingNearMiss, setAddingNearMiss] = useState<string | null>(null);
@@ -711,7 +713,7 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
       <ItineraryLoadingScene
         themeTitle={themeTitle}
         destination={loadingDestination}
-        headline={themeTitle ? `Drawing up ${themeTitle}…` : "Drawing up your itinerary…"}
+        headline={loadingHeadline ?? (themeTitle ? `Drawing up ${themeTitle}…` : "Drawing up your itinerary…")}
       />
     );
   }

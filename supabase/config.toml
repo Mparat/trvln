@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.extract-social-video]
 verify_jwt = false
+
+[functions.send-ready-text]
+verify_jwt = false
