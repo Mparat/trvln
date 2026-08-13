@@ -957,7 +957,7 @@ const Index = () => {
                   <ItineraryOutput
                     itinerary={currentItinerary?.content || ""}
                     structuredData={currentItinerary?.structuredData}
-                    isLoading={isGenerating && !currentItinerary?.content}
+                    isLoading={(isGenerating || !!(currentItinerary && loadingVariants[currentItinerary.id])) && !currentItinerary?.content}
                     loadingHeadline={
                       isAnalyzingMedia
                         ? "Reading your inspiration photos…"
