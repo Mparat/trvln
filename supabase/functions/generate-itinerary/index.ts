@@ -1268,15 +1268,9 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
 
 The itinerary is written in two passes and this is pass 1. A separate pass writes each day's activities and dining prose, so do NOT produce a "days" array here.
 
-Output ONLY this JSON object:
+Output ONLY this JSON object. **"dayPlan" comes first and there is NO "days" key** — writing out the days here is the one thing this pass must not do.
 
 {
-  "summary": { ... },
-  "budget": { ... },
-  "flights": { ... },
-  "accommodation": [ ... ],
-  "bookingChecklist": [ ... ],
-  "alternatives": [ ... ],
   "dayPlan": [
     {
       "dayNumber": 1,
@@ -1289,7 +1283,13 @@ Output ONLY this JSON object:
         "Evening": ["Tony's Restaurant", "Restaurante Muchacho"]
       }
     }
-  ]
+  ],
+  "summary": { ... },
+  "budget": { ... },
+  "flights": { ... },
+  "accommodation": [ ... ],
+  "bookingChecklist": [ ... ],
+  "alternatives": [ ... ]
 }
 
 summary, budget, flights, accommodation, bookingChecklist and alternatives follow the schema and the strict rules in the system prompt exactly.
@@ -1315,7 +1315,7 @@ Output ONLY the JSON object. Do not include a "days" key.`;
       transitNote?: string;
       dining?: Record<string, string[]>;
     };
-    type Skeleton = Record<string, unknown> & { dayPlan?: DayPlanEntry[] };
+    type Skeleton = Record<string, unknown> & { dayPlan?: DayPlanEntry[]; days?: unknown[] };
 
     // ── Stream plumbing ─────────────────────────────────────────────────────
     // The response goes back before any model work starts, so the client's
@@ -1435,7 +1435,11 @@ Output ONLY the JSON object. Do not include a "days" key.`;
             apiKey: ANTHROPIC_API_KEY,
             system: systemBlocks,
             userContent: [...researchBlocks, ...mediaBlocks, { type: "text", text: skeletonInstruction }],
-            prefill: "{",
+            // Prefilling the key, not just the brace. The cached system prompt
+            // describes a "days" array at length, and a bare "{" leaves the
+            // model free to open with it and write the whole itinerary here —
+            // which is what drops the request onto the slow single-call path.
+            prefill: '{"dayPlan": [',
             maxTokens: 8000,
             label: "skeleton",
           });
@@ -1444,13 +1448,21 @@ Output ONLY the JSON object. Do not include a "days" key.`;
           console.log(`[timing] skeleton_generation: ${timings.skeleton_generation}ms`);
 
           const parsed = parseModelJson<Skeleton>(skeletonResult.text, "skeleton");
-          if (!Array.isArray(parsed.dayPlan) || parsed.dayPlan.length === 0) {
-            // The cached system prompt describes a "days" array in detail, so
-            // the likeliest miss is the model writing that instead of dayPlan.
-            // Name the keys it did return rather than reporting a bare absence.
+          const hasPlan = Array.isArray(parsed.dayPlan) && parsed.dayPlan.length > 0;
+          // The cached system prompt describes a "days" array in detail, so the
+          // likeliest miss is the model writing that instead of dayPlan. That is
+          // not a failure worth throwing away: it means the plan pass already
+          // wrote the whole itinerary, and re-running it as a single call — what
+          // used to happen — pays twice for one result. The caller uses those
+          // days directly.
+          const hasDays = Array.isArray(parsed.days) && parsed.days.length > 0;
+          if (!hasPlan && !hasDays) {
             throw new Error(
-              `skeleton returned no dayPlan entries (top-level keys: ${Object.keys(parsed).join(", ") || "none"})`,
+              `skeleton returned neither dayPlan nor days (top-level keys: ${Object.keys(parsed).join(", ") || "none"})`,
             );
+          }
+          if (!hasPlan) {
+            console.warn("[split] skeleton wrote a full days array instead of dayPlan — using it as-is");
           }
           return parsed;
         } catch (err) {
@@ -1478,6 +1490,35 @@ Output ONLY the JSON object. Do not include a "days" key.`;
           console.log("[timing] summary " + JSON.stringify({
             ...timings,
             mode: "single_call",
+            output_chars: emitted.length,
+            theme: themeVariant?.id ?? "default",
+            grounded: hasGroundedResearch,
+            client_disconnected: !clientConnected,
+          }));
+          await persistComplete();
+          return;
+        }
+
+        // The plan pass wrote the finished days rather than a roster. Emit them
+        // and stop — there is nothing left for pass 2 to do, and this costs one
+        // call instead of the two the fallback used to spend.
+        const skeletonDays = Array.isArray(skeleton.days) ? skeleton.days : [];
+        if ((skeleton.dayPlan?.length ?? 0) === 0 && skeletonDays.length > 0) {
+          const tail: Record<string, unknown> = {};
+          for (const key of ["summary", "budget", "flights", "accommodation", "bookingChecklist", "alternatives"]) {
+            if (skeleton[key] !== undefined) tail[key] = skeleton[key];
+          }
+          const tailJson = JSON.stringify(tail);
+          await emit('{"days":' + JSON.stringify(skeletonDays));
+          await emit(tailJson.length > 2 ? "," + tailJson.slice(1) : "}");
+          await forward("data: [DONE]\n\n");
+          timings.model_generation = Date.now() - modelStart;
+          timings.total = since(t0);
+          console.log("[timing] summary " + JSON.stringify({
+            ...timings,
+            mode: "skeleton_complete",
+            day_count: skeletonDays.length,
+            skeleton_output_tokens: skeletonTokens,
             output_chars: emitted.length,
             theme: themeVariant?.id ?? "default",
             grounded: hasGroundedResearch,
