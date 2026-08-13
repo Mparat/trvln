@@ -534,6 +534,16 @@ const DAYS_TOOL = {
 
 const ITINERARY_TOOLS = [TRIP_PLAN_TOOL, DAYS_TOOL];
 
+// Supabase kills the isolate at 150s of wall clock. Everything optional has to
+// know how much of that is already gone, because the failure mode is not a
+// slower itinerary — it is no itinerary at all, mid-stream.
+const WALL_CLOCK_BUDGET_MS = 150_000;
+// The plan review costs ~11s and only earns that back if the days it comments
+// on actually get written. Measured: research ~32s + plan ~77s puts a normal
+// request at ~110s here, so the cutoff has to sit above that to run at all,
+// while still refusing on a request that is already late.
+const REVIEW_BUDGET_CUTOFF_MS = 115_000;
+
 type AnthropicJsonResult = {
   data: Record<string, unknown>;
   stopReason: string | null;
@@ -1892,42 +1902,60 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
         }
 
         // ── Read the plan back before writing it out ──────────────────────
-        // A planner reads their own draft before committing to it. This is the
-        // only place that can happen: days stream to the client as they finish,
-        // so by the time day three exists it has already been sent — and prose
-        // could not fix a badly shaped week in any case. Pacing, sequencing,
-        // what got included and what got missed are all decided in the roster,
-        // so the roster is what gets read back.
+        // A planner reads their own draft before committing to it, and the
+        // roster is the only thing there is to read: days stream to the client
+        // as they finish, so by the time day three exists it has already been
+        // sent. Pacing, sequencing, what got included and what got missed are
+        // all decided here anyway.
         //
-        // Haiku, because noticing "day four crosses the city twice" and "they
-        // asked to be away from crowds and this is the busiest viewpoint in the
-        // range" is recognition rather than authorship. Fails open at every
-        // step: any error, any unparseable answer, any suspicious revision, and
-        // the original plan proceeds untouched.
-        const critiqueAndRevise = async (current: Skeleton): Promise<Skeleton> => {
-          const originalPlan = current.dayPlan ?? [];
-          if (originalPlan.length === 0) return current;
+        // The findings do NOT go back through a second plan pass. That was the
+        // first design and it could not fit: the plan call costs ~77s of a
+        // ~150s wall clock, so regenerating it lands the request at ~197s
+        // before a single day is written, and production duly timed out with
+        // the revision in flight. Findings go to the day writers instead —
+        // they choose each day's activities, so "day 1 is too packed after a
+        // train journey" is theirs to act on, and routing it there costs no
+        // wall clock at all rather than a second plan.
+        //
+        // Haiku, because noticing a problem is recognition rather than
+        // authorship. Fails open at every step: any error, any unparseable
+        // answer, or a request already too far into its budget, and the plan
+        // proceeds unreviewed.
+        const reviewPlan = async (current: Skeleton): Promise<string[]> => {
+          const plan = current.dayPlan ?? [];
+          if (plan.length === 0) return [];
 
-          let findings: string[] = [];
+          // The review is worth ~11s only while there is time left to write the
+          // days it comments on. Past this point the days are what matter, and
+          // a review that pushes them over the wall costs the traveler the
+          // whole itinerary to improve a plan they will never see.
+          const elapsed = since(t0);
+          if (elapsed > REVIEW_BUDGET_CUTOFF_MS) {
+            console.warn(`[critique] skipped — ${Math.round(elapsed / 1000)}s elapsed of a ` +
+              `${Math.round(WALL_CLOCK_BUDGET_MS / 1000)}s budget, leaving the time to the days`);
+            return [];
+          }
+
           try {
-            const rosterForReview = originalPlan.map((e, i) => ({
+            const rosterForReview = plan.map((e, i) => ({
               day: i + 1,
               title: e.title,
               location: e.location,
               transitNote: e.transitNote,
-              dining: e.dining,
             }));
 
+            // Deliberately not the whole userInputsBlock. The review needs what
+            // the traveler wanted, not every field they filled in, and the
+            // prompt is on the critical path.
             const critiquePrompt = `You are reading a travel plan before it gets written up, the way a senior planner reads a junior's draft. You are not rewriting it — you are saying what is wrong with it.
 
-The traveler asked for:
-${userInputsBlock}
-${sourcePlan?.tripCharacter ? `\nWhat this trip actually is: ${sourcePlan.tripCharacter}` : ""}${sourcePlan?.avoid?.length ? `\n\nThings that would make this feel canned to this particular traveler:\n${sourcePlan.avoid.map(a => `- ${a}`).join("\n")}` : ""}
+The traveler asked for: ${durationContext}, ${budgetInfo.label} budget, ${dateContext}.
+Interests: ${interests?.join(" > ") || "none stated"}. Atmosphere: ${atmosphere?.join(", ") || "none stated"}. Adventure level: ${adventureLevel || "none stated"}.
+In their words: ${tripNotes || "nothing further"}
+${sourcePlan?.tripCharacter ? `What this trip actually is: ${sourcePlan.tripCharacter}` : ""}${sourcePlan?.avoid?.length ? `\n\nThings that would make this feel canned to this traveler:\n${sourcePlan.avoid.map(a => `- ${a}`).join("\n")}` : ""}
 
 The plan, one entry per day:
-${JSON.stringify(rosterForReview, null, 2)}
-
-Trip summary: ${JSON.stringify(current.summary ?? {})}
+${JSON.stringify(rosterForReview)}
 
 Look for these specifically:
 1. **Pacing** — every day the same intensity, a heavy day scheduled on arrival, a long run with no let-up, or a final day that assumes an evening the traveler does not have.
@@ -1936,12 +1964,14 @@ Look for these specifically:
 4. **Omission** — something they said they came for that appears nowhere, or lands so late that one bad weather day would take it from them.
 5. **Repetition** — two days that would read almost identically to the person living them.
 
-Report only problems worth changing the plan over, and name the day number and the specific fix for each. A plan with nothing wrong is a normal outcome — say so rather than inventing a finding to look useful.
+Report **at most the three most significant** problems, worst first. Each must name its day number and the concrete fix, in ONE sentence of AT MOST 250 characters — anything longer is cut off mid-word before the writer sees it, so edit yourself down rather than being truncated. A plan with nothing wrong is a normal outcome — say so rather than filling the quota.
+
+Every finding will be handed to the writer of that specific day, who chooses that day's activities, their emphasis, and how full the day is — and nothing else. The day's location, title, and restaurants are already fixed and cannot be moved by anyone downstream of you. So "arrive somewhere else", "go to a different town", or "swap this restaurant" are wasted findings that will be ignored; "within Varenna, skip the lakefront promenade and take the chestnut-forest trail above the town instead" is one the writer can act on. Phrase every fix as what to do differently WITHIN where the day already is.
 
 Respond with ONLY JSON:
 {"verdict": "ok", "findings": []}
 or
-{"verdict": "revise", "findings": ["Day 3 ...", "Day 5 ..."]}`;
+{"verdict": "revise", "findings": ["Day 3: ...", "Day 5: ..."]}`;
 
             const critiqueResponse = await timePhase("plan_critique", () =>
               fetch("https://api.anthropic.com/v1/messages", {
@@ -1954,78 +1984,53 @@ or
                 body: JSON.stringify({
                   model: "claude-haiku-4-5",
                   messages: [{ role: "user", content: critiquePrompt }],
-                  max_tokens: 900,
+                  // Three one-sentence findings. The first cut allowed 900 and
+                  // got six sprawling ones back, which cost latency to generate
+                  // and then had to be trimmed anyway.
+                  max_tokens: 400,
                 }),
               }));
 
             if (!critiqueResponse.ok) {
               console.error("[critique] failed:", critiqueResponse.status);
-              return current;
+              return [];
             }
             const critiqueData = await critiqueResponse.json();
             const raw = (critiqueData.content?.[0]?.text ?? "").replace(/```[a-z]*\n?/gi, "").trim();
             const parsed = JSON.parse(raw);
-            findings = Array.isArray(parsed?.findings)
-              ? parsed.findings.filter((f: unknown) => typeof f === "string" && f.trim()).slice(0, 6)
+            // A finding that overruns the clamp gets cut at a sentence or word
+            // boundary, not mid-word: the first production run shipped
+            // "skipping Varen…" and "remove the Bel…" into day-writer prompts,
+            // where an amputated instruction reads as noise exactly where it
+            // was supposed to read as direction.
+            const clampFinding = (f: string): string => {
+              const t = f.trim();
+              if (t.length <= 300) return t;
+              const cut = t.slice(0, 300);
+              const sentenceEnd = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("; "));
+              if (sentenceEnd > 150) return cut.slice(0, sentenceEnd + 1);
+              const wordEnd = cut.lastIndexOf(" ");
+              return (wordEnd > 0 ? cut.slice(0, wordEnd) : cut) + "…";
+            };
+            const findings: string[] = Array.isArray(parsed?.findings)
+              ? parsed.findings
+                  .filter((f: unknown): f is string => typeof f === "string" && f.trim().length > 0)
+                  .map(clampFinding)
+                  .slice(0, 3)
               : [];
             if (parsed?.verdict !== "revise" || findings.length === 0) {
               console.log("[critique] plan passed review");
-              return current;
+              return [];
             }
             console.log(`[critique] ${findings.length} finding(s):`, JSON.stringify(findings));
+            return findings;
           } catch (err) {
             console.error("[critique] skipped:", err);
-            return current;
-          }
-
-          // Only a flagged plan pays for a second pass.
-          try {
-            const revisionInstruction = `${skeletonInstruction}
-
-## REVISION — a review of your first plan found problems
-
-${findings.map((f, i) => `${i + 1}. ${f}`).join("\n")}
-
-Your previous plan was:
-${JSON.stringify({ dayPlan: current.dayPlan, summary: current.summary })}
-
-Emit the corrected plan through the \`emit_trip_plan\` tool. Fix every finding above. Keep everything the review did not object to — this is a revision, not a fresh start, and churn the traveler will never see costs them the parts that were already right. The trip must still be ${originalPlan.length} days.`;
-
-            const revisionResult = await timePhase("plan_revision", () =>
-              callAnthropicJson({
-                apiKey: ANTHROPIC_API_KEY,
-                system: systemBlocks,
-                userContent: [...researchBlocks, { type: "text", text: revisionInstruction }],
-                toolName: TRIP_PLAN_TOOL.name,
-                maxTokens: 8000,
-                label: "plan_revision",
-              }));
-
-            const revised = revisionResult.data as Skeleton;
-            const revisedPlan = revised.dayPlan;
-            // A revision that changed the trip's length did something other
-            // than what it was asked to do, and day count is the one thing the
-            // traveler specified outright. Discard it rather than silently
-            // handing back a different trip.
-            if (!Array.isArray(revisedPlan) || revisedPlan.length !== originalPlan.length) {
-              console.warn(`[critique] revision returned ${revisedPlan?.length ?? 0} days for a ` +
-                `${originalPlan.length}-day trip — keeping the original plan`);
-              return current;
-            }
-            skeletonTokens += revisionResult.outputTokens;
-            console.log("[critique] plan revised");
-            // Merged, not replaced: the revision is asked for a whole plan but
-            // may return fewer top-level keys than the first pass did, and a
-            // dropped budget or flights block would be a worse outcome than the
-            // pacing problem this set out to fix.
-            return { ...current, ...revised };
-          } catch (err) {
-            console.error("[critique] revision failed — keeping the original plan:", err);
-            return current;
+            return [];
           }
         };
 
-        skeleton = await critiqueAndRevise(skeleton);
+        const planFindings = await reviewPlan(skeleton);
 
         const dayPlan = skeleton.dayPlan ?? [];
         dayCount = dayPlan.length;
@@ -2088,6 +2093,16 @@ Emit the corrected plan through the \`emit_trip_plan\` tool. Fix every finding a
           accommodation: skeleton.accommodation,
         });
 
+        // Each finding names the day it is about, so it reaches only the writer
+        // who can act on it. A finding that names no day is trip-wide and goes
+        // to every slice — rarer, since the review is asked to name one, and
+        // cheaper to repeat than to drop.
+        const findingsForSlice = (dayNumbers: number[]): string[] =>
+          planFindings.filter(f => {
+            const mentioned = [...f.matchAll(/\bday\s*(\d+)/gi)].map(m => Number(m[1]));
+            return mentioned.length === 0 || mentioned.some(n => dayNumbers.includes(n));
+          });
+
         // ── Pass 2: the days, in parallel ─────────────────────────────────
         const limit = makeLimiter(8);
         const slicesStart = Date.now();
@@ -2128,6 +2143,18 @@ ${takenList.join(", ") || "(none)"}
 </names_taken>
 - **EVERY OTHER DAY'S RESTAURANTS ARE LISTED IN THE ROSTER AND BELONG TO THOSE DAYS.** Never use one of them, even if it would fit yours better.
 - The other days' titles and locations tell you what the rest of the trip covers. Choose activities that do not duplicate them — the traveler should not do the same thing twice.
+${(() => {
+  const mine = findingsForSlice(dayNumbers);
+  return mine.length
+    ? `
+**A REVIEW OF THE PLAN FLAGGED THIS DAY.** The plan itself is fixed, but how full this day is and what goes in it are yours:
+
+${mine.map(f => `- ${f}`).join("\n")}
+
+Write the day so this is no longer true. If it says the day is too packed, give a period one activity instead of three, or make one of them open time with a reason — a lighter day that answers the note beats a full one that ignores it.
+`
+    : "";
+})()}
 - Everything else follows the strict rules in the system prompt.
 
 Put the day(s) in the \`emit_days\` tool call. Do not write them out as text.`;
