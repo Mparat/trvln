@@ -70,32 +70,47 @@ serve(async (req) => {
       );
     }
 
-    const title = `${themeEmoji ? `${themeEmoji} ` : ""}${themeName}`;
-    const where = destination ? ` Your ${destination} itinerary is written.` : " Your itinerary is written.";
-    const message = `${title} is ready!${where} Come back to Travellin' to take a look.`;
-
-    const twilioResponse = await fetch(
-      `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
-      {
+    const sendSms = (body: string) =>
+      fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
         method: "POST",
         headers: {
           Authorization: `Basic ${btoa(`${authUser}:${authPass}`)}`,
           "Content-Type": "application/x-www-form-urlencoded",
         },
-        body: new URLSearchParams({ To: phone, From: fromNumber, Body: message }),
-      },
-    );
+        body: new URLSearchParams({ To: phone, From: fromNumber, Body: body }),
+      });
+
+    const title = `${themeEmoji ? `${themeEmoji} ` : ""}${themeName}`;
+    const where = destination ? ` Your ${destination} itinerary is written.` : " Your itinerary is written.";
+    const message = `${title} is ready!${where} Come back to Travellin' to take a look.`;
+
+    let twilioResponse = await sendSms(message);
 
     if (!twilioResponse.ok) {
-      const detail = await twilioResponse.json().catch(() => ({}));
-      console.error("Twilio send failed:", twilioResponse.status, detail);
-      // Twilio's 400s (bad/unreachable number) are the caller's to fix;
-      // anything else is on us.
-      const status = twilioResponse.status === 400 ? 400 : 502;
-      return new Response(
-        JSON.stringify({ error: detail?.message || "Couldn't send the text" }),
-        { status, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+      let detail = await twilioResponse.json().catch(() => ({}));
+
+      // Trial accounts can't send free-form bodies — only Twilio's predefined
+      // templates. Fall back to the closest one (the appointment reminder) so
+      // the flow still works before the account is upgraded; the wording is
+      // goofy but the ping arrives. Upgrading the account makes the real
+      // message go out with no code change.
+      if (typeof detail?.message === "string" && detail.message.includes("predefined SMS templates")) {
+        console.warn("Trial account detected — retrying with a predefined template body");
+        const when = destination || "Travellin'";
+        twilioResponse = await sendSms(`Your appointment is coming up on ${themeName} at ${when}`);
+        detail = twilioResponse.ok ? detail : await twilioResponse.json().catch(() => ({}));
+      }
+
+      if (!twilioResponse.ok) {
+        console.error("Twilio send failed:", twilioResponse.status, detail);
+        // Twilio's 400s (bad/unreachable number) are the caller's to fix;
+        // anything else is on us.
+        const status = twilioResponse.status === 400 ? 400 : 502;
+        return new Response(
+          JSON.stringify({ error: detail?.message || "Couldn't send the text" }),
+          { status, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
     }
 
     lastSentAt.set(phone, Date.now());
