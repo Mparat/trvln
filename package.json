@@ -8,7 +8,10 @@
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "eval:capture": "node eval/capture.mjs",
+    "eval": "node eval/run.mjs",
+    "eval:test": "node eval/checks.test.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

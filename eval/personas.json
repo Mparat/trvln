@@ -1,0 +1,143 @@
+{
+  "personas": [
+    {
+      "id": "cdmx-food",
+      "label": "Mexico City food-first long weekend",
+      "expectations": "Named taquerías/fondas/mercado stalls with dishes to order; neighborhoods sequenced sanely (Roma/Condesa vs Centro vs Coyoacán); no invented restaurants; Teotihuacan or Lucha Libre only if they fit the food framing.",
+      "preferences": {
+        "cities": ["Mexico City, Mexico"],
+        "budgetAccommodation": 50,
+        "budgetFlight": 50,
+        "dateFlexibility": "month",
+        "targetMonth": "November",
+        "durationFlexibility": "long-weekend",
+        "durationDays": 5,
+        "noFlight": false,
+        "departureCity": "New York",
+        "flightDirectness": "nonstop",
+        "atmosphere": ["urban", "vibrant", "local"],
+        "adventureLevel": "active",
+        "guidedPreference": "self-guided",
+        "foodDrink": ["street-food", "coffee", "cocktails", "fine-dining-once"],
+        "interests": ["food", "markets", "art", "architecture"],
+        "additionalNotes": "This trip is about eating. We want the places locals actually queue for, not the top-10 listicle spots. One nice dinner is fine but the rest should be street food, markets, and neighborhood spots. We walk a lot and don't want to cross the city twice in a day."
+      }
+    },
+    {
+      "id": "dolomites-hut",
+      "label": "Dolomites self-guided hut-to-hut traverse",
+      "expectations": "Real rifugios named as both lodging and dining (half board named as such, not padded with invented village restaurants); booking windows and cable-car logistics in bookingChecklist; crowd-avoidance honored relative to the range; no restaurant choice invented where none exists.",
+      "preferences": {
+        "cities": ["Dolomites, Italy"],
+        "budgetAccommodation": 45,
+        "budgetFlight": 50,
+        "dateFlexibility": "month",
+        "targetMonth": "September",
+        "durationFlexibility": "strict",
+        "durationDays": 6,
+        "noFlight": false,
+        "departureCity": "London",
+        "flightDirectness": "short-layover",
+        "atmosphere": ["mountains", "remote", "quiet"],
+        "adventureLevel": "very-active",
+        "guidedPreference": "self-guided",
+        "foodDrink": ["hearty-local", "wine"],
+        "interests": ["hiking", "nature", "photography"],
+        "additionalNotes": "Hut to hut, no driving once we're there. We hike every weekend and can do 6-7 hour days with packs. We specifically want to get away from the cable-car day-trip crowds."
+      }
+    },
+    {
+      "id": "azores-slow",
+      "label": "Azores slow nature week for two",
+      "expectations": "Island logistics realistic (rental car, weather fallbacks in transitNotes); open time used deliberately; whale watching / thermal pools with operators named; budget arithmetic coherent for two people.",
+      "preferences": {
+        "cities": ["São Miguel, Azores"],
+        "budgetAccommodation": 40,
+        "budgetFlight": 40,
+        "dateFlexibility": "month",
+        "targetMonth": "May",
+        "durationFlexibility": "1-week",
+        "durationDays": 7,
+        "noFlight": false,
+        "departureCity": "Boston",
+        "flightDirectness": "nonstop",
+        "atmosphere": ["nature", "relaxed", "coastal"],
+        "adventureLevel": "moderate",
+        "guidedPreference": "some-guided",
+        "foodDrink": ["seafood", "local-specialties"],
+        "interests": ["nature", "hiking", "hot-springs", "food"],
+        "additionalNotes": "Couple in our 30s. We want slow mornings, one or two proper hikes, and to not feel scheduled every hour. Weather can be moody in May — tell us what to do when it rains."
+      }
+    },
+    {
+      "id": "kyoto-depth",
+      "label": "Kyoto culture-deep week, comfortable budget",
+      "expectations": "Temples sequenced to dodge crowds (time-of-day reasoning); ryokan/kaiseki night with meals named as included; specific tea houses/kissaten rather than generic cafés; day-trip judgment (Nara vs staying put) defended.",
+      "preferences": {
+        "cities": ["Kyoto, Japan"],
+        "budgetAccommodation": 70,
+        "budgetFlight": 60,
+        "dateFlexibility": "month",
+        "targetMonth": "October",
+        "durationFlexibility": "1-week",
+        "durationDays": 7,
+        "noFlight": false,
+        "departureCity": "San Francisco",
+        "flightDirectness": "short-layover",
+        "atmosphere": ["cultural", "calm", "traditional"],
+        "adventureLevel": "relaxed",
+        "guidedPreference": "some-guided",
+        "foodDrink": ["kaiseki", "ramen", "tea", "izakaya"],
+        "interests": ["temples", "gardens", "crafts", "food", "history"],
+        "additionalNotes": "Second time in Japan, first time in Kyoto. We'd rather see fewer temples properly than many quickly. One ryokan night with dinner included would be special. We are fine getting up early to beat crowds."
+      }
+    },
+    {
+      "id": "pnw-roadtrip",
+      "label": "No-flight Pacific Northwest road trip",
+      "expectations": "flights.skip true with no flight filler; drive segments given as the day's spine with realistic hours; campground/lodge mix matching budget; weather-dependent alternatives named.",
+      "preferences": {
+        "cities": ["Olympic Peninsula, Washington"],
+        "budgetAccommodation": 35,
+        "budgetFlight": 0,
+        "dateFlexibility": "month",
+        "targetMonth": "August",
+        "durationFlexibility": "strict",
+        "durationDays": 6,
+        "noFlight": true,
+        "departureCity": "Seattle",
+        "flightDirectness": "short-layover",
+        "atmosphere": ["nature", "remote", "coastal"],
+        "adventureLevel": "active",
+        "guidedPreference": "self-guided",
+        "foodDrink": ["casual", "seafood", "coffee"],
+        "interests": ["hiking", "beaches", "rainforest", "camping"],
+        "additionalNotes": "Driving our own car from Seattle. Mix of camping and the occasional real bed. We want the loop to make sense as a drive — no backtracking."
+      }
+    },
+    {
+      "id": "lisbon-theme",
+      "label": "Lisbon with an explicit theme variant",
+      "themeVariant": { "id": "azulejos-and-fado", "name": "Azulejos & Fado", "emoji": "🎶" },
+      "expectations": "Theme visible in the roster, not just the summary: tile workshops/museums, fado houses named with booking notes, evenings built around music; a generic Lisbon greatest-hits list is a failure here.",
+      "preferences": {
+        "cities": ["Lisbon, Portugal"],
+        "budgetAccommodation": 55,
+        "budgetFlight": 50,
+        "dateFlexibility": "anytime",
+        "targetMonth": "",
+        "durationFlexibility": "long-weekend",
+        "durationDays": 4,
+        "noFlight": false,
+        "departureCity": "Paris",
+        "flightDirectness": "nonstop",
+        "atmosphere": ["romantic", "historic", "musical"],
+        "adventureLevel": "relaxed",
+        "guidedPreference": "some-guided",
+        "foodDrink": ["seafood", "wine", "pastries"],
+        "interests": ["music", "history", "art", "food"],
+        "additionalNotes": "We're coming for the azulejos and the fado. We'd rather spend an evening in a real fado house than see every viewpoint."
+      }
+    }
+  ]
+}

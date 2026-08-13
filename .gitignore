@@ -24,3 +24,7 @@ dist-ssr
 *.sw?
 .env
 supabase/.temp/
+
+# itinerary eval outputs (captured per run, uploaded as CI artifacts)
+eval/fixtures/
+eval/results/
