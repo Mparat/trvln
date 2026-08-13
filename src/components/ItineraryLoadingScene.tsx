@@ -3,6 +3,10 @@ import { cn } from "@/lib/utils";
 import { usePrefersReducedMotion } from "@/hooks/use-reduced-motion";
 import { NotifyWhenReadyButton } from "./NotifyWhenReadyButton";
 
+// The "text me when it's ready" CTA ships dark until the Twilio number clears
+// A2P registration — set VITE_ENABLE_READY_TEXTS=true to turn it on.
+const READY_TEXTS_ENABLED = import.meta.env.VITE_ENABLE_READY_TEXTS === 'true';
+
 /**
  * A hand-drawn stick figure walking through the trip you're waiting on: the
  * scenery, the thing in their hand, and the status lines are all picked from
@@ -725,7 +729,7 @@ export function ItineraryLoadingScene({
         </p>
       </div>
 
-      <NotifyWhenReadyButton />
+      {READY_TEXTS_ENABLED && <NotifyWhenReadyButton />}
     </div>
   );
 }
