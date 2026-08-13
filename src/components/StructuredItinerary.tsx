@@ -68,7 +68,10 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
   const [feedbacks, setFeedbacks] = useState<Record<ActivityKey, FeedbackState>>({});
   const [openComment, setOpenComment] = useState<ActivityKey | null>(null);
 
-  const activeDay = data.days[activeDayIdx];
+  // days is always present on a well-formed itinerary, but a trip saved
+  // during an earlier broken run may not have one — render empty, don't throw.
+  const days = data.days ?? [];
+  const activeDay = days[activeDayIdx];
   const activePeriod = activeDay?.periods[activePeriodIdx];
 
   const activityKey = (d: number, p: number, a: number) => `d${d}-p${p}-a${a}`;
@@ -208,7 +211,7 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
                     : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                {tab === 'overview' ? 'Overview' : tab === 'days' ? `Days (${data.days.length})` : 'Bookings'}
+                {tab === 'overview' ? 'Overview' : tab === 'days' ? `Days (${days.length})` : 'Bookings'}
                 {activeTab === tab && (
                   <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-primary rounded-full" />
                 )}
@@ -251,7 +254,7 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
 
           {/* Highlights */}
           <div className="space-y-3">
-            {data.summary.highlights.map((h, i) => (
+            {(data.summary?.highlights ?? []).map((h, i) => (
               <div key={i} className="flex items-start gap-3">
                 <span className="text-primary font-bold text-base mt-0.5 leading-none">+</span>
                 <p className="text-sm text-foreground leading-relaxed">{h}</p>
@@ -260,17 +263,17 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
           </div>
 
           {/* Getting there / Flights */}
-          {!data.flights.skip && data.flights.options.length > 0 && (
+          {!data.flights?.skip && (data.flights?.options?.length ?? 0) > 0 && (
             <div>
               <h4 className="flex items-center gap-2 text-base font-bold text-foreground mb-1">
                 <Plane className="w-4 h-4 text-primary" />
                 Getting there
               </h4>
-              {data.flights.context && (
+              {data.flights?.context && (
                 <p className="text-sm text-muted-foreground mb-3">{data.flights.context}</p>
               )}
               <div className="space-y-2 mt-3">
-                {data.flights.options.map((f, i) => {
+                {(data.flights?.options ?? []).map((f, i) => {
                   const isStructured = !!f.airlineCode;
                   return (
                     <a
@@ -330,7 +333,7 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
               Budget breakdown
             </h4>
             <div>
-              {data.budget.items.map((item, i) => (
+              {(data.budget?.items ?? []).map((item, i) => (
                 <div key={i}>
                   {i > 0 && <div className="border-t border-border/40" />}
                   <div className="flex items-start justify-between py-3 gap-4">
@@ -347,7 +350,7 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
               <div className="border-t border-foreground/15" />
               <div className="flex items-center justify-between pt-3">
                 <span className="text-sm font-bold text-foreground">Total estimate</span>
-                <span className="text-sm font-bold text-primary">{data.budget.total}</span>
+                <span className="text-sm font-bold text-primary">{data.budget?.total}</span>
               </div>
             </div>
           </div>
@@ -470,7 +473,7 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
         <div className="space-y-4">
           {/* Day selector pills */}
           <div className="flex gap-1.5 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
-            {data.days.map((day, i) => (
+            {days.map((day, i) => (
               <button
                 key={i}
                 onClick={() => { setActiveDayIdx(i); setActivePeriodIdx(0); }}
@@ -867,7 +870,7 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
       {/* ── Bookings ── */}
       {activeTab === 'bookings' && (
         <div className="space-y-6">
-          {data.bookingChecklist.length === 0 && (
+          {(data.bookingChecklist?.length ?? 0) === 0 && (
             <p className="text-sm text-muted-foreground text-center py-6">No booking items generated.</p>
           )}
           {([
@@ -875,7 +878,7 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
             { key: 'medium', label: 'Book soon', emoji: '🟡' },
             { key: 'low', label: 'Book anytime', emoji: '🟢' },
           ] as const).map(({ key, label, emoji }) => {
-            const items = data.bookingChecklist.filter(b => b.priority === key);
+            const items = (data.bookingChecklist ?? []).filter(b => b.priority === key);
             if (items.length === 0) return null;
             return (
               <div key={key}>

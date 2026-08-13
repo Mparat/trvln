@@ -496,7 +496,7 @@ const TRIP_PLAN_TOOL = {
       dayPlan: {
         type: "array",
         description:
-          "Write this FIRST. One entry per day of the trip: dayNumber, title, location, optional transitNote, and a dining object mapping Morning/Afternoon/Evening to the assigned restaurant names.",
+          "Write this FIRST. One entry per day of the trip: dayNumber, title, location, optional transitNote, and a dining object mapping Morning/Afternoon/Evening to the assigned restaurant names. Vary the restaurants across the trip — repeat a place only where the research genuinely offers no alternative near the traveler, or where it is the stay's own dining room.",
       },
       summary: { type: "object", description: "The summary object from the schema." },
       accommodation: { type: "array", description: "The accommodation array from the schema." },
@@ -745,6 +745,45 @@ function dedupeRosterDining(
   }
 
   return { assigned: assignedDisplay, dropped };
+}
+
+// Fill in any part of the itinerary envelope the model left out.
+//
+// The client indexes several of these without guards — data.budget.items,
+// data.flights.skip, data.bookingChecklist.length, data.summary.highlights — so
+// a missing field is not a thinner page, it is a blank one. That matters more
+// now that budget and flights come from a second call that is allowed to fail:
+// shipping six good days with no budget block has to degrade, not crash. The
+// same applies to a model that simply omits an optional field.
+function normalizeItineraryTail(tail: Record<string, unknown>): Record<string, unknown> {
+  const summary = (tail.summary ?? {}) as Record<string, unknown>;
+  const budget = (tail.budget ?? {}) as Record<string, unknown>;
+  const flights = (tail.flights ?? {}) as Record<string, unknown>;
+  const flightOptions = Array.isArray(flights.options) ? flights.options : [];
+
+  return {
+    ...tail,
+    summary: {
+      ...summary,
+      highlights: Array.isArray(summary.highlights) ? summary.highlights : [],
+      assumptions: Array.isArray(summary.assumptions) ? summary.assumptions : [],
+    },
+    budget: {
+      ...budget,
+      items: Array.isArray(budget.items) ? budget.items : [],
+      total: typeof budget.total === "string" ? budget.total : "",
+    },
+    flights: {
+      ...flights,
+      // No options and nothing said means there is nothing to show, which is
+      // what skip is for — not an empty flights card.
+      skip: typeof flights.skip === "boolean" ? flights.skip : flightOptions.length === 0,
+      options: flightOptions,
+    },
+    accommodation: Array.isArray(tail.accommodation) ? tail.accommodation : [],
+    bookingChecklist: Array.isArray(tail.bookingChecklist) ? tail.bookingChecklist : [],
+    alternatives: Array.isArray(tail.alternatives) ? tail.alternatives : [],
+  };
 }
 
 // Group the trip's days into per-call slices. One day per call is the fast case
@@ -1722,7 +1761,7 @@ Put all of it in the \`emit_trip_extras\` tool call. Do not write it out as text
           for (const key of ["summary", "budget", "flights", "accommodation", "bookingChecklist", "alternatives"]) {
             if (skeleton[key] !== undefined) tail[key] = skeleton[key];
           }
-          const tailJson = JSON.stringify(tail);
+          const tailJson = JSON.stringify(normalizeItineraryTail(tail));
           await emit('{"days":' + JSON.stringify(skeletonDays));
           await emit(tailJson.length > 2 ? "," + tailJson.slice(1) : "}");
           await forward("data: [DONE]\n\n");
@@ -2000,7 +2039,7 @@ Put the day(s) in the \`emit_days\` tool call. Do not write them out as text.`;
           };
         }
 
-        const tailJson = JSON.stringify(tail);
+        const tailJson = JSON.stringify(normalizeItineraryTail(tail));
         await emit("]" + (tailJson.length > 2 ? "," + tailJson.slice(1) : "}"));
 
         await forward("data: [DONE]\n\n");
