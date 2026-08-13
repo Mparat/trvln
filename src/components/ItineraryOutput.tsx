@@ -726,9 +726,21 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
 
   if (!itinerary && !structuredData) return null;
 
-  // Only intercept streaming when content looks like JSON (starts with '{').
-  // Markdown content should fall through and render as it streams in.
-  if (isStreaming && !structuredData && itinerary.trimStart().startsWith('{')) {
+  // Only intercept when the content is a JSON payload; genuine markdown should
+  // fall through and render as it streams in.
+  //
+  // Testing for a leading '{' alone is not enough: the model sometimes wraps
+  // the object in a ```json fence despite being told not to, and that content
+  // then reached the markdown renderer and streamed out as a bullet list of raw
+  // JSON. The final parse recovers (it scans for the object inside the fence),
+  // so this only ever showed up mid-stream — which is exactly when the user is
+  // watching. Look past an opening fence, and treat a fence that is still being
+  // streamed ('`', '``', '```js…') as JSON too, so there is no window where the
+  // payload renders as markdown before the fence completes.
+  const looksLikeJson = (text: string) =>
+    /^\s*(?:`{1,3}[a-z]*\s*)?\{/i.test(text) || /^\s*`{1,3}[a-z]*\s*$/i.test(text);
+
+  if (isStreaming && !structuredData && looksLikeJson(itinerary)) {
     return (
       <div className="flex flex-col items-center justify-center py-16 gap-5 text-center">
         <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
@@ -752,7 +764,7 @@ export function ItineraryOutput({ itinerary, isLoading, isStreaming, isEditing, 
   }
 
   // JSON was detected but failed to parse — don't render raw JSON as markdown
-  if (!isStreaming && !structuredData && itinerary.trimStart().startsWith('{')) {
+  if (!isStreaming && !structuredData && looksLikeJson(itinerary)) {
     return (
       <div className="flex flex-col items-center justify-center py-16 gap-4 text-center">
         <div className="w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center">

@@ -27,6 +27,11 @@ export interface ItineraryDay {
   location: string;
   transitNote?: string;
   periods: DayPeriod[];
+  // Days are generated in parallel, one model call per day. When one of those
+  // calls fails the rest of the trip is still worth showing, so the day is kept
+  // with its planned title and location but no periods, and flagged here so the
+  // gap is explained rather than rendering as a blank day.
+  generationFailed?: boolean;
 }
 
 export interface AccommodationOption {
