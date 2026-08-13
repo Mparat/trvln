@@ -482,7 +482,7 @@ type ContentBlock = Record<string, unknown>;
 const TRIP_PLAN_TOOL = {
   name: "emit_trip_plan",
   description:
-    "Record the day roster plus the trip context the day passes need. Everything else about the trip is recorded separately.",
+    "Record the trip-level plan and the per-day roster. This is pass 1: it does NOT contain the written-out days.",
   input_schema: {
     type: "object",
     properties: {
@@ -496,36 +496,35 @@ const TRIP_PLAN_TOOL = {
       dayPlan: {
         type: "array",
         description:
-          "Write this FIRST. One entry per day of the trip: dayNumber, title, location, optional transitNote, and a dining object mapping Morning/Afternoon/Evening to the assigned restaurant names. Vary the restaurants across the trip — repeat a place only where the research genuinely offers no alternative near the traveler, or where it is the stay's own dining room.",
+          "Write this FIRST. One entry per day of the trip: dayNumber, title, location, optional transitNote, and a dining object mapping Morning/Afternoon/Evening to the assigned restaurant names. Every restaurant name across the whole array must be different, except a stay's own dining room.",
       },
       summary: { type: "object", description: "The summary object from the schema." },
+      budget: { type: "object", description: "The budget object from the schema." },
+      flights: { type: "object", description: "The flights object from the schema." },
       accommodation: { type: "array", description: "The accommodation array from the schema." },
+      bookingChecklist: { type: "array", description: "The bookingChecklist array from the schema." },
+      alternatives: { type: "array", description: "The alternatives array from the schema." },
     },
     required: ["dayPlan", "summary"],
   },
 };
 
-// Everything the day passes do NOT need. Splitting these out is what takes them
-// off the critical path: they are generated alongside the day calls instead of
-// ahead of them. In production the combined plan call was 72s of 89s of model
-// time, and roughly half of it was this content, which nothing was waiting on.
-const TRIP_EXTRAS_TOOL = {
-  name: "emit_trip_extras",
-  description:
-    "Record the budget, flights, booking checklist and alternatives for a trip whose plan is already fixed.",
+const DAYS_TOOL = {
+  name: "emit_days",
+  description: "Record the finished day objects for the day(s) assigned to this call.",
   input_schema: {
     type: "object",
     properties: {
-      budget: { type: "object", description: "The budget object from the schema." },
-      flights: { type: "object", description: "The flights object from the schema." },
-      bookingChecklist: { type: "array", description: "The bookingChecklist array from the schema." },
-      alternatives: { type: "array", description: "The alternatives array from the schema." },
+      days: {
+        type: "array",
+        description: "Full days[] elements, exactly as the schema in the system prompt defines them.",
+      },
     },
-    required: ["budget"],
+    required: ["days"],
   },
 };
 
-const ITINERARY_TOOLS = [TRIP_PLAN_TOOL, TRIP_EXTRAS_TOOL, DAYS_TOOL];
+const ITINERARY_TOOLS = [TRIP_PLAN_TOOL, DAYS_TOOL];
 
 type AnthropicJsonResult = {
   data: Record<string, unknown>;
@@ -745,52 +744,6 @@ function dedupeRosterDining(
   }
 
   return { assigned: assignedDisplay, dropped };
-}
-
-// Fill in any part of the itinerary envelope the model left out.
-//
-// The client indexes several of these without guards — data.budget.items,
-// data.flights.skip, data.bookingChecklist.length, data.summary.highlights — so
-// a missing field is not a thinner page, it is a blank one. That matters more
-// now that budget and flights come from a second call that is allowed to fail:
-// shipping six good days with no budget block has to degrade, not crash. The
-// same applies to a model that simply omits an optional field.
-function normalizeItineraryTail(tail: Record<string, unknown>): Record<string, unknown> {
-  const summary = (tail.summary ?? {}) as Record<string, unknown>;
-  const budget = (tail.budget ?? {}) as Record<string, unknown>;
-  const flights = (tail.flights ?? {}) as Record<string, unknown>;
-  const flightOptions = Array.isArray(flights.options) ? flights.options : [];
-  const budgetTotal = typeof budget.total === "string" ? budget.total : "";
-
-  return {
-    ...tail,
-    summary: {
-      ...summary,
-      highlights: Array.isArray(summary.highlights) ? summary.highlights : [],
-      assumptions: Array.isArray(summary.assumptions) ? summary.assumptions : [],
-      // summary.totalBudget and budget.total are the same figure shown twice,
-      // and they are now written by two different calls — the headline before
-      // the breakdown exists. The itemised total is the one derived from real
-      // nightly rates, so the headline follows it rather than the reverse.
-      // Falls back to whatever the plan wrote if the extras call produced none.
-      totalBudget: budgetTotal || (typeof summary.totalBudget === "string" ? summary.totalBudget : ""),
-    },
-    budget: {
-      ...budget,
-      items: Array.isArray(budget.items) ? budget.items : [],
-      total: budgetTotal,
-    },
-    flights: {
-      ...flights,
-      // No options and nothing said means there is nothing to show, which is
-      // what skip is for — not an empty flights card.
-      skip: typeof flights.skip === "boolean" ? flights.skip : flightOptions.length === 0,
-      options: flightOptions,
-    },
-    accommodation: Array.isArray(tail.accommodation) ? tail.accommodation : [],
-    bookingChecklist: Array.isArray(tail.bookingChecklist) ? tail.bookingChecklist : [],
-    alternatives: Array.isArray(tail.alternatives) ? tail.alternatives : [],
-  };
 }
 
 // Group the trip's days into per-call slices. One day per call is the fast case
@@ -1500,7 +1453,7 @@ Create a comprehensive, well-researched travel itinerary based on these preferen
 
 The itinerary is written in two passes and this is pass 1. A separate pass writes each day's activities and dining prose, so do NOT produce a "days" array here.
 
-Call the \`emit_trip_plan\` tool. Its input takes exactly these three fields — and **there is NO "days" key**: writing out the days here is the one thing this pass must not do. Budget, flights, the booking checklist and alternatives are recorded separately and are not your job here either.
+Call the \`emit_trip_plan\` tool. Its input takes these fields — and **there is NO "days" key**: writing out the days here is the one thing this pass must not do.
 
 {
   "dayPlan": [
@@ -1517,10 +1470,14 @@ Call the \`emit_trip_plan\` tool. Its input takes exactly these three fields —
     }
   ],
   "summary": { ... },
-  "accommodation": [ ... ]
+  "budget": { ... },
+  "flights": { ... },
+  "accommodation": [ ... ],
+  "bookingChecklist": [ ... ],
+  "alternatives": [ ... ]
 }
 
-summary and accommodation follow the schema and the strict rules in the system prompt exactly.
+summary, budget, flights, accommodation, bookingChecklist and alternatives follow the schema and the strict rules in the system prompt exactly.
 
 **dayPlan replaces the "days" array for this pass:**
 - One entry per day of the trip. The number of entries IS the trip length — decide it from the duration constraints above.
@@ -1535,38 +1492,6 @@ summary and accommodation follow the schema and the strict rules in the system p
 - Match the meal to the period (Morning = breakfast, Afternoon = lunch, Evening = dinner), and vary cuisine, vibe and neighborhood day to day.
 
 Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary out as text.`;
-
-    // Pass 1b: everything nothing else waits on. Runs concurrently with the day
-    // passes, so its cost lands inside their wall clock rather than before it.
-    // It receives the plan so the budget stays consistent with the lodging that
-    // was actually chosen.
-    const extrasInstruction = (planJson: string) => `${userPrompt}
-
-## THIS CALL: BUDGET, FLIGHTS, BOOKING AND ALTERNATIVES
-
-The trip is already planned. Below is the plan — the destination, the shape of the trip, and where the traveler is staying. Do not re-plan it and do not write out the days; another pass is writing those right now.
-
-<trip_plan>
-${planJson}
-</trip_plan>
-
-Call the \`emit_trip_extras\` tool with:
-
-{
-  "budget": { ... },
-  "flights": { ... },
-  "bookingChecklist": [ ... ],
-  "alternatives": [ ... ]
-}
-
-Each follows the schema and the strict rules in the system prompt exactly.
-
-- The budget must reconcile with the accommodation in the plan: use those nightly rates and that number of nights, not invented ones.
-- The plan already states a headline figure in summary.totalBudget. Your budget.total is the itemised version of that same number — make the items add up to a total consistent with it, and set budget.total to the figure your items actually support.
-- If noFlight is true, set flights.skip to true and flights.options to [].
-- The booking checklist covers what has a real lead time, permit, reservation, or access restriction — drawn from the research, not guessed.
-
-Put all of it in the \`emit_trip_extras\` tool call. Do not write it out as text.`;
 
     type DayPlanEntry = {
       dayNumber?: number;
@@ -1611,7 +1536,6 @@ Put all of it in the \`emit_trip_extras\` tool call. Do not write it out as text
       const modelStart = Date.now();
       const failedDays: number[] = [];
       let skeletonTokens = 0;
-      let extrasTokens = 0;
       let sliceTokens = 0;
       let sliceCount = 0;
       let dayCount = 0;
@@ -1769,7 +1693,7 @@ Put all of it in the \`emit_trip_extras\` tool call. Do not write it out as text
           for (const key of ["summary", "budget", "flights", "accommodation", "bookingChecklist", "alternatives"]) {
             if (skeleton[key] !== undefined) tail[key] = skeleton[key];
           }
-          const tailJson = JSON.stringify(normalizeItineraryTail(tail));
+          const tailJson = JSON.stringify(tail);
           await emit('{"days":' + JSON.stringify(skeletonDays));
           await emit(tailJson.length > 2 ? "," + tailJson.slice(1) : "}");
           await forward("data: [DONE]\n\n");
@@ -1849,27 +1773,6 @@ Put all of it in the \`emit_trip_extras\` tool call. Do not write it out as text
           summary: skeleton.summary,
           accommodation: skeleton.accommodation,
         });
-
-        // ── Pass 1b: the trip extras, alongside the days ──────────────────
-        // Launched before the slices and awaited after them, so its time lands
-        // inside their wall clock instead of ahead of it. Settled at creation
-        // for the same reason the slices are: it is awaited much later, and an
-        // unhandled rejection in between would take the isolate down.
-        const extrasStart = Date.now();
-        const extrasPromise = callAnthropicJson({
-          apiKey: ANTHROPIC_API_KEY,
-          system: systemBlocks,
-          userContent: [...researchBlocks, { type: "text", text: extrasInstruction(sharedPlanJson) }],
-          toolName: TRIP_EXTRAS_TOOL.name,
-          // Generous: a tool call cut off by max_tokens loses the entire result,
-          // not just its tail, and this content ran ~2,500 tokens inside the
-          // combined call it was split out of.
-          maxTokens: 6000,
-          label: "extras",
-        }).then(
-          value => ({ ok: true as const, value }),
-          (error: unknown) => ({ ok: false as const, error }),
-        );
 
         // ── Pass 2: the days, in parallel ─────────────────────────────────
         const limit = makeLimiter(8);
@@ -2012,27 +1915,11 @@ Put the day(s) in the \`emit_days\` tool call. Do not write them out as text.`;
           }
         }
 
-        // The extras were generated while the days were being written, so by now
-        // they are usually already in hand. Losing them costs the budget and the
-        // booking checklist, not the trip — emit the rest rather than failing.
-        const settledExtras = await extrasPromise;
-        timings.extras_wall = Date.now() - extrasStart;
-        let extras: Record<string, unknown> = {};
-        if (settledExtras.ok) {
-          extras = settledExtras.value.data;
-          extrasTokens = settledExtras.value.outputTokens;
-        } else {
-          console.error("[extras] failed — itinerary will ship without budget/flights:", settledExtras.error);
-        }
-
-        // Written after the days so the failure note below can go into
-        // summary.assumptions directly.
+        // Everything the skeleton produced, written after the days so the
+        // failure note below can go into summary.assumptions directly.
         const tail: Record<string, unknown> = {};
-        for (const key of ["summary", "accommodation"]) {
+        for (const key of ["summary", "budget", "flights", "accommodation", "bookingChecklist", "alternatives"]) {
           if (skeleton[key] !== undefined) tail[key] = skeleton[key];
-        }
-        for (const key of ["budget", "flights", "bookingChecklist", "alternatives"]) {
-          if (extras[key] !== undefined) tail[key] = extras[key];
         }
 
         // Name the gap where the traveler will actually read it, rather than
@@ -2050,7 +1937,7 @@ Put the day(s) in the \`emit_days\` tool call. Do not write them out as text.`;
           };
         }
 
-        const tailJson = JSON.stringify(normalizeItineraryTail(tail));
+        const tailJson = JSON.stringify(tail);
         await emit("]" + (tailJson.length > 2 ? "," + tailJson.slice(1) : "}"));
 
         await forward("data: [DONE]\n\n");
@@ -2064,10 +1951,8 @@ Put the day(s) in the \`emit_days\` tool call. Do not write them out as text.`;
           slice_count: sliceCount,
           day_count: dayCount,
           skeleton_output_tokens: skeletonTokens,
-          extras_output_tokens: extrasTokens,
-          extras_ok: settledExtras.ok,
           slice_output_tokens: sliceTokens,
-          output_tokens: skeletonTokens + extrasTokens + sliceTokens,
+          output_tokens: skeletonTokens + sliceTokens,
           output_chars: emitted.length,
           failed_days: failedDays,
           theme: themeVariant?.id ?? "default",
