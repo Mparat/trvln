@@ -464,7 +464,6 @@ ${additionalNotes || "None provided"}
     console.log("Starting Perplexity grounded research...");
 
     const destinationStr = resolvedCities.length > 0 ? resolvedCities.join(', ') : 'popular travel destinations';
-    const primaryCity = resolvedCities[0] || 'the destination';
     const interestsStr = interests?.length > 0 ? interests.join(', ') : 'general sightseeing';
     const foodStr = foodDrink?.length > 0 ? foodDrink.join(', ') : 'local cuisine';
     const themeStr = themeVariant?.name || '';
@@ -481,8 +480,6 @@ ${additionalNotes || "None provided"}
 
     // Determine trip length for context-aware queries
     const tripDaysNum = durationDays || 7;
-    const isSingleCity = resolvedCities.length === 1;
-    const isLongTrip = tripDaysNum >= 7;
 
     // Keyed so a conditional query can be added without shifting the indices
     // the context block reads from.
@@ -505,12 +502,13 @@ ${additionalNotes || "None provided"}
         query: `Best ${budgetInfo.label} places to stay in ${destinationStr} priced ${budgetInfo.accommodation}. ${startDate && endDate ? `For dates: check-in ${startDate}, check-out ${endDate}.` : targetMonth ? `For travel in ${targetMonth}.` : ''} Include specific names with nightly rates and where each one is.${tripNotes ? ` The traveler describes the trip as: "${tripNotes}" — include the kinds of lodging this trip actually requires (for example mountain huts or refuges, guesthouses, campsites, lodges, hostels, ryokan), not only conventional hotels, and note how each is booked and what a night includes such as half board.` : ''}`,
       },
 
-      // Nearby destinations + transportation (combined)
+      // Where the trip goes and how it moves. Deliberately not branched on
+      // whether the destination is one city: a region resolves to a single
+      // string too, and the old branch then asked what to visit *outside* an
+      // area the whole trip happens inside. One question covers both shapes.
       {
         key: 'nearbyAndTransport',
-        query: isSingleCity && isLongTrip
-          ? `For a ${tripDaysNum}-day trip based in ${primaryCity}: what other cities should I visit, how to travel between them (trains, buses, flights with prices and times), and how many days to spend in each? Include day trips and overnight options.${notesClause}`
-          : `Best day trips and nearby destinations from ${destinationStr} for a ${tripDaysNum}-day trip. Include travel time, transport options with prices, and why each is worth visiting.${notesClause}`,
+        query: `For a ${tripDaysNum}-day trip in ${destinationStr}: which places should the itinerary actually include, how do you travel between them (trains, buses, cable cars, ferries, driving — with prices and journey times), and how many days does each deserve? If this is a single city, cover what is worth leaving it for as day trips or overnight stops. If it is a region or a route, cover how to move between its towns and valleys, and whether it works better as a base with day trips or as a point-to-point traverse.${notesClause}`,
       },
 
       // Seasonal & practical information
@@ -532,7 +530,7 @@ ${additionalNotes || "None provided"}
     if (!noFlight && departureCity) {
       searchSpecs.push({
         key: 'flights',
-        query: `Flights from ${departureCity} to ${primaryCity} in ${targetMonth || 'upcoming months'}. Include typical price ranges, best airlines, flight duration, and whether nonstop options exist.`,
+        query: `Flights from ${departureCity} to ${destinationStr} in ${targetMonth || 'upcoming months'}. Which airports actually serve this destination — if it is a region rather than a city, name the realistic gateway airports and how far each is from it by road or rail. Include typical price ranges, best airlines, flight duration, and whether nonstop options exist.`,
       });
     }
 
