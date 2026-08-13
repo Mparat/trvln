@@ -28,12 +28,23 @@ serve(async (req) => {
   }
 
   try {
+    // Two supported auth shapes, in order of preference:
+    //  - API key: TWILIO_API_KEY_SID (SK...) + TWILIO_API_KEY_SECRET — revocable
+    //    without rotating the account, so use this one when both are set.
+    //  - Account auth token: TWILIO_AUTH_TOKEN.
+    // TWILIO_ACCOUNT_SID (AC...) is required either way; it names the account
+    // in the URL.
     const accountSid = Deno.env.get("TWILIO_ACCOUNT_SID");
+    const apiKeySid = Deno.env.get("TWILIO_API_KEY_SID");
+    const apiKeySecret = Deno.env.get("TWILIO_API_KEY_SECRET");
     const authToken = Deno.env.get("TWILIO_AUTH_TOKEN");
     const fromNumber = Deno.env.get("TWILIO_FROM_NUMBER");
 
-    if (!accountSid || !authToken || !fromNumber) {
-      console.error("Twilio secrets not configured (TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_FROM_NUMBER)");
+    const authUser = apiKeySid && apiKeySecret ? apiKeySid : accountSid;
+    const authPass = apiKeySid && apiKeySecret ? apiKeySecret : authToken;
+
+    if (!accountSid || !authUser || !authPass || !fromNumber) {
+      console.error("Twilio secrets not configured: need TWILIO_ACCOUNT_SID, TWILIO_FROM_NUMBER, and either TWILIO_API_KEY_SID + TWILIO_API_KEY_SECRET or TWILIO_AUTH_TOKEN");
       return new Response(
         JSON.stringify({ error: "Text notifications aren't set up yet" }),
         { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -68,7 +79,7 @@ serve(async (req) => {
       {
         method: "POST",
         headers: {
-          Authorization: `Basic ${btoa(`${accountSid}:${authToken}`)}`,
+          Authorization: `Basic ${btoa(`${authUser}:${authPass}`)}`,
           "Content-Type": "application/x-www-form-urlencoded",
         },
         body: new URLSearchParams({ To: phone, From: fromNumber, Body: message }),
