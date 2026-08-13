@@ -944,10 +944,14 @@ const Index = () => {
                   </p>
                 </div>
                 <div className="p-6 md:p-8">
+                  {/* isLoading covers on-demand variants too, not only the initial
+                      generation: a variant opened later streams nothing until the
+                      server's plan pass completes (~100s), and gating on
+                      isGenerating alone rendered a blank card for that window. */}
                   <ItineraryOutput
                     itinerary={currentItinerary?.content || ""}
                     structuredData={currentItinerary?.structuredData}
-                    isLoading={isGenerating && !currentItinerary?.content}
+                    isLoading={(isGenerating || !!(currentItinerary && loadingVariants[currentItinerary.id])) && !currentItinerary?.content}
                     isStreaming={!!(currentItinerary?.content && loadingVariants[currentItinerary?.id])}
                     isEditing={currentItinerary ? loadingVariants[currentItinerary.id] && !isGenerating : false}
                     onEdit={handleEdit}
