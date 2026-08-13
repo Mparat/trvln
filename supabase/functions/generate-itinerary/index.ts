@@ -73,13 +73,16 @@ async function searchWithPerplexity(
   apiKey: string,
   label = "search",
 ): Promise<{ content: string; citations: string[] }> {
-  const maxAttempts = 3;
+  const maxAttempts = 4;
+  let retryAfterMs = 0;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     if (attempt > 1) {
-      // Jittered, or the five rejected queries retry in lockstep and collide
-      // with each other exactly as they did the first time.
-      const backoffMs = 900 * (attempt - 1) + Math.floor(Math.random() * 700);
+      // Prefer the server's own retry-after. Otherwise back off steeply and
+      // jittered — the first fix used ~1s and production still showed the same
+      // query 429ing on its retry, so the delay has to clear the window rather
+      // than land just after it.
+      const backoffMs = retryAfterMs || 1500 * (attempt - 1) + Math.floor(Math.random() * 1200);
       console.log(`[research] ${label} retrying in ${backoffMs}ms (attempt ${attempt})`);
       await new Promise(r => setTimeout(r, backoffMs));
     }
@@ -87,6 +90,7 @@ async function searchWithPerplexity(
     const result = await runPerplexityQuery(query, apiKey, label);
     if (result.ok) return result.value;
     if (!result.retryable) return { content: '', citations: [] };
+    retryAfterMs = result.retryAfterMs ?? 0;
   }
 
   console.error(`[research] ${label} exhausted ${maxAttempts} attempts — returning empty`);
@@ -99,7 +103,7 @@ async function runPerplexityQuery(
   label: string,
 ): Promise<
   | { ok: true; value: { content: string; citations: string[] } }
-  | { ok: false; retryable: boolean }
+  | { ok: false; retryable: boolean; retryAfterMs?: number }
 > {
   try {
     console.log("Perplexity search query:", query);
@@ -128,8 +132,16 @@ async function runPerplexityQuery(
       // enough already.
       const errorBody = await response.text().catch(() => '');
       console.error(`Perplexity API error (${label}):`, response.status, errorBody.slice(0, 500));
+      // Perplexity does not always send retry-after; when it does, it beats guessing.
+      const retryAfter = Number(response.headers.get("retry-after"));
       // A rate limit clears on its own; a 401/400 will not.
-      return { ok: false, retryable: response.status === 429 || response.status >= 500 };
+      return {
+        ok: false,
+        retryable: response.status === 429 || response.status >= 500,
+        retryAfterMs: Number.isFinite(retryAfter) && retryAfter > 0
+          ? Math.min(retryAfter * 1000, 8000)
+          : undefined,
+      };
     }
 
     const data = await response.json();
@@ -474,19 +486,26 @@ const TRIP_PLAN_TOOL = {
   input_schema: {
     type: "object",
     properties: {
+      // dayPlan FIRST, deliberately. A tool's input is generated in schema
+      // order, and with the roster last the model was choosing every restaurant
+      // for the trip roughly 3,000 tokens deep — the exact "tracking names
+      // across a long generation" problem the roster exists to remove.
+      // Production bore that out: 14 slots, 9 distinct names, days 1 and 2 an
+      // identical pair. Written first, the roster is chosen while the research
+      // is the freshest thing in context.
+      dayPlan: {
+        type: "array",
+        description:
+          "Write this FIRST. One entry per day of the trip: dayNumber, title, location, optional transitNote, and a dining object mapping Morning/Afternoon/Evening to the assigned restaurant names. Every restaurant name across the whole array must be different, except a stay's own dining room.",
+      },
       summary: { type: "object", description: "The summary object from the schema." },
       budget: { type: "object", description: "The budget object from the schema." },
       flights: { type: "object", description: "The flights object from the schema." },
       accommodation: { type: "array", description: "The accommodation array from the schema." },
       bookingChecklist: { type: "array", description: "The bookingChecklist array from the schema." },
       alternatives: { type: "array", description: "The alternatives array from the schema." },
-      dayPlan: {
-        type: "array",
-        description:
-          "One entry per day of the trip: dayNumber, title, location, optional transitNote, and a dining object mapping Morning/Afternoon/Evening to the assigned restaurant names.",
-      },
     },
-    required: ["summary", "dayPlan"],
+    required: ["dayPlan", "summary"],
   },
 };
 
@@ -1143,13 +1162,14 @@ ${additionalNotes || "None provided"}
     // Run the searches in parallel, but stagger the launches. Firing all six at
     // the same instant is what tripped Perplexity's rate limit — five came back
     // 429 in milliseconds, so the itinerary was built on one search out of six.
-    // A short ramp costs well under a second of wall clock (the queries still
-    // overlap, and the phase is bounded by the slowest) and avoids paying for
-    // the collision in retries.
+    // The ramp has to be wide enough to clear the limit: at 180ms apart, all
+    // seven still landed inside ~1.3s and production logs showed queries 429ing
+    // on their retries too. The queries still overlap, so the phase stays
+    // bounded by the slowest plus the ramp — cheaper than paying in retries.
     console.log(`Executing ${searchSpecs.length} Perplexity research queries...`);
     const results = await timePhase("perplexity_research", () =>
       Promise.all(searchSpecs.map(async (spec, i) => {
-        if (i > 0) await new Promise(r => setTimeout(r, i * 180));
+        if (i > 0) await new Promise(r => setTimeout(r, i * 700));
         return searchWithPerplexity(spec.query, PERPLEXITY_API_KEY, spec.key);
       })));
 
@@ -1665,9 +1685,22 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
         // named establishments in the research; if they are real here but
         // generic in the finished itinerary, a day call ignored its assignment.
         // Without this the two failures are indistinguishable from the output.
-        console.log("[quality] roster dining: " + JSON.stringify(
-          roster.map(d => Object.values(d.dining ?? {}).flat()),
-        ));
+        const rosterNames = roster.map(d => Object.values(d.dining ?? {}).flat());
+        console.log("[quality] roster dining: " + JSON.stringify(rosterNames));
+
+        // The uniqueness constraint, measured at the point it is decided rather
+        // than inferred from the finished itinerary. `slots` vs `unique` is the
+        // number to watch: 14 slots across 9 names is the failure that sent the
+        // roster to the front of the tool schema.
+        const rosterSeen = new Map<string, number>();
+        for (const name of rosterNames.flat()) {
+          const key = String(name).trim().toLowerCase();
+          if (key) rosterSeen.set(key, (rosterSeen.get(key) ?? 0) + 1);
+        }
+        const rosterDupes = [...rosterSeen.entries()].filter(([, n]) => n > 1);
+        console.log(`[quality] roster uniqueness: slots=${rosterNames.flat().length} ` +
+          `unique=${rosterSeen.size} duplicated=${rosterDupes.length} ` +
+          (rosterDupes.length ? JSON.stringify(rosterDupes.map(([n, c]) => `${n} x${c}`)) : ""));
 
         // The whole roster goes to every slice: each one needs to know which
         // names belong to other days so it does not reach for them.
