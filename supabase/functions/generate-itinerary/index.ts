@@ -698,21 +698,27 @@ function parseModelJson<T>(raw: string, label: string): T {
   }
 }
 
-// Enforce restaurant uniqueness across the roster, in code.
+// Cap how often one restaurant can recur across the roster.
 //
 // Telling the model "every restaurant must be different" does not hold:
 // production returned 14 slots across 9 names, with two days assigned an
-// identical pair. This makes it a guarantee instead of a request — walk the
-// roster in day order and drop any name already used earlier.
+// identical pair and one place appearing three times. So the limit is enforced
+// here rather than requested — but it is a CAP, not a uniqueness rule. Some
+// repetition is correct: a small lake village may genuinely have two places
+// worth eating at, and a real restaurant twice beats an invented one once.
+// This drops only the excess beyond MAX_USES, which kills "the same place four
+// times" without flattening a destination that truly has few options.
 //
-// The traveler's own lodging is exempt: eating twice at the hut or hotel you
-// are staying in is correct, not a collision. Returns the names still in play
-// (so a slice can be told what is spoken for) and what was dropped.
+// The traveler's own lodging is exempt entirely: eating repeatedly at the hut
+// or hotel you are sleeping in is where you are, not a failure of variety.
+const MAX_RESTAURANT_USES = 2;
+
 function dedupeRosterDining(
   roster: { dayNumber: number; dining: Record<string, unknown> }[],
   lodgingNames: Set<string>,
+  maxUses = MAX_RESTAURANT_USES,
 ): { assigned: string[]; dropped: string[] } {
-  const assignedNames = new Set<string>();
+  const useCount = new Map<string, number>();
   const assignedDisplay: string[] = [];
   const dropped: string[] = [];
 
@@ -725,11 +731,12 @@ function dedupeRosterDining(
         const name = String(raw ?? "").trim();
         const key = name.toLowerCase();
         if (!key) continue;
-        // A stay's own dining room may legitimately recur.
+        // A stay's own dining room may recur without limit.
         if (lodgingNames.has(key)) { kept.push(name); continue; }
-        if (assignedNames.has(key)) { dropped.push(`day${day.dayNumber}:${name}`); continue; }
-        assignedNames.add(key);
-        assignedDisplay.push(name);
+        const used = useCount.get(key) ?? 0;
+        if (used >= maxUses) { dropped.push(`day${day.dayNumber}:${name}`); continue; }
+        useCount.set(key, used + 1);
+        if (used === 0) assignedDisplay.push(name);
         kept.push(name);
       }
       dining[period] = kept;
@@ -1203,14 +1210,16 @@ ${additionalNotes || "None provided"}
     // Run the searches in parallel, but stagger the launches. Firing all six at
     // the same instant is what tripped Perplexity's rate limit — five came back
     // 429 in milliseconds, so the itinerary was built on one search out of six.
-    // The ramp has to be wide enough to clear the limit: at 180ms apart, all
-    // seven still landed inside ~1.3s and production logs showed queries 429ing
-    // on their retries too. The queries still overlap, so the phase stays
-    // bounded by the slowest plus the ramp — cheaper than paying in retries.
+    // The ramp has to be wide enough that the FIRST attempt lands. 180ms apart
+    // put all seven inside ~1.3s and everything 429'd; 700ms got every search
+    // through, but only by retrying — the phase went from 11.9s to 34.7s, and
+    // all of that was backoff. Retrying past a rate limit is far more expensive
+    // than simply not tripping it, so the ramp is wider than feels necessary.
+    // Watch for `[research] ... retrying` in the logs: none means this is right.
     console.log(`Executing ${searchSpecs.length} Perplexity research queries...`);
     const results = await timePhase("perplexity_research", () =>
       Promise.all(searchSpecs.map(async (spec, i) => {
-        if (i > 0) await new Promise(r => setTimeout(r, i * 700));
+        if (i > 0) await new Promise(r => setTimeout(r, i * 1500));
         return searchWithPerplexity(spec.query, PERPLEXITY_API_KEY, spec.key);
       })));
 
