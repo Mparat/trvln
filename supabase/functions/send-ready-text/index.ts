@@ -40,11 +40,16 @@ serve(async (req) => {
     const authToken = Deno.env.get("TWILIO_AUTH_TOKEN");
     const fromNumber = Deno.env.get("TWILIO_FROM_NUMBER");
 
+    // With a messaging service (MG...), Twilio picks the sender from the
+    // service's registered number pool — preferred for US A2P traffic. A bare
+    // from-number works too.
+    const messagingServiceSid = Deno.env.get("TWILIO_MESSAGING_SERVICE_SID");
+
     const authUser = apiKeySid && apiKeySecret ? apiKeySid : accountSid;
     const authPass = apiKeySid && apiKeySecret ? apiKeySecret : authToken;
 
-    if (!accountSid || !authUser || !authPass || !fromNumber) {
-      console.error("Twilio secrets not configured: need TWILIO_ACCOUNT_SID, TWILIO_FROM_NUMBER, and either TWILIO_API_KEY_SID + TWILIO_API_KEY_SECRET or TWILIO_AUTH_TOKEN");
+    if (!accountSid || !authUser || !authPass || (!fromNumber && !messagingServiceSid)) {
+      console.error("Twilio secrets not configured: need TWILIO_ACCOUNT_SID, TWILIO_FROM_NUMBER or TWILIO_MESSAGING_SERVICE_SID, and either TWILIO_API_KEY_SID + TWILIO_API_KEY_SECRET or TWILIO_AUTH_TOKEN");
       return new Response(
         JSON.stringify({ error: "Text notifications aren't set up yet" }),
         { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -77,7 +82,13 @@ serve(async (req) => {
           Authorization: `Basic ${btoa(`${authUser}:${authPass}`)}`,
           "Content-Type": "application/x-www-form-urlencoded",
         },
-        body: new URLSearchParams({ To: phone, From: fromNumber, Body: body }),
+        body: new URLSearchParams({
+          To: phone,
+          Body: body,
+          ...(messagingServiceSid
+            ? { MessagingServiceSid: messagingServiceSid }
+            : { From: fromNumber! }),
+        }),
       });
 
     const title = `${themeEmoji ? `${themeEmoji} ` : ""}${themeName}`;
