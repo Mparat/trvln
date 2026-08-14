@@ -674,7 +674,70 @@ const Index = () => {
     return { ok: result.status === 'complete', stillPending, error };
   }, [generateSingleItinerary]);
 
+  // One generation at a time. Three variants running concurrently share the
+  // same Perplexity and Anthropic rate limits, and in production they starved
+  // each other past the edge function's 150s wall clock: 21 simultaneous
+  // search calls pushed one variant's research from ~30s to ~114s, another's
+  // plan pass from ~79s to ~96s, and both were killed mid-generation while the
+  // third — the one that won the race for throughput — finished first. The
+  // traveler can only watch one variant anyway, so the others wait their turn,
+  // with their loading flag set immediately so the loading scene shows while
+  // queued.
+  const generationChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const enqueueVariant = useCallback((
+    theme: { id: string; name: string; emoji: string },
+    ctx: GenerationContext,
+  ): Promise<{ ok: boolean; stillPending: boolean; error?: unknown }> => {
+    setLoadingVariants(prev => ({ ...prev, [theme.id]: true }));
+    const run = generationChainRef.current.then(() => {
+      // The queue outlives any single trip: a variant enqueued before a
+      // regenerate or reset should not run against the old context.
+      if (runIdRef.current !== ctx.runId) {
+        setLoadingVariants(prev => ({ ...prev, [theme.id]: false }));
+        return { ok: false, stillPending: false };
+      }
+      return runVariant(theme, ctx);
+    });
+    // Failures propagate to the caller, not down the chain to the next variant.
+    generationChainRef.current = run.then(() => undefined, () => undefined);
+    return run;
+  }, [runVariant]);
+
   // Opening a variant that hasn't been generated yet starts it.
+  // A variant whose stream was cut off is otherwise stuck: its partial content
+  // passes the "already has content" guard and its id is in startedVariants, so
+  // re-clicking the tab does nothing and the error card's advice to regenerate
+  // had no button. This clears both gates and queues a fresh run.
+  const handleRetryVariant = useCallback(() => {
+    const theme = itineraries[activeVariant];
+    if (!theme || loadingVariants[theme.id]) return;
+    startedVariantsRef.current.delete(theme.id);
+    setItineraries(prev => prev.map(it =>
+      it.id === theme.id ? { ...it, content: "", structuredData: undefined } : it));
+
+    const ctx: GenerationContext = generationContextRef.current ?? {
+      preferences,
+      batchId: crypto.randomUUID(),
+      jobIdByTheme: {},
+      runId: runIdRef.current,
+    };
+    generationContextRef.current = ctx;
+    // A fresh job id: the old one belongs to the run that died.
+    delete ctx.jobIdByTheme[theme.id];
+
+    void enqueueVariant(theme, ctx).then(result => {
+      if (result.ok) {
+        notifyVariantReady(theme, destinationRef.current);
+      } else if (runIdRef.current === ctx.runId) {
+        toast({
+          title: `Couldn't rebuild ${theme.name}`,
+          description: "Please try again in a moment.",
+          variant: "destructive",
+        });
+      }
+    });
+  }, [itineraries, activeVariant, loadingVariants, preferences, enqueueVariant]);
+
   const handleSelectVariant = useCallback((index: number) => {
     setActiveVariant(index);
     const theme = itineraries[index];
@@ -690,7 +753,7 @@ const Index = () => {
     };
     generationContextRef.current = ctx;
 
-    void runVariant(theme, ctx).then(result => {
+    void enqueueVariant(theme, ctx).then(result => {
       if (result.ok) {
         notifyVariantReady(theme, destinationRef.current);
         return;
@@ -706,7 +769,7 @@ const Index = () => {
         variant: "destructive",
       });
     });
-  }, [itineraries, preferences, runVariant]);
+  }, [itineraries, preferences, enqueueVariant]);
 
   // ── Generate ───────────────────────────────────────────────────────────────
   const handleGenerate = useCallback(async (pendingCity?: string) => {
@@ -778,7 +841,7 @@ const Index = () => {
       generationContextRef.current = ctx;
       startedVariantsRef.current = new Set();
 
-      const result = await runVariant(themes[0], ctx);
+      const result = await enqueueVariant(themes[0], ctx);
       if (isStale()) return; // a newer generation took over while we streamed
 
       if (result.ok) {
@@ -813,7 +876,7 @@ const Index = () => {
         setIsAnalyzingMedia(false);
       }
     }
-  }, [preferences, suggestThemes, runVariant, analyzeInspiration]);
+  }, [preferences, suggestThemes, enqueueVariant, analyzeInspiration]);
 
   const handleEdit = useCallback(async (editRequest: string) => {
     const current = itineraries[activeVariant];
@@ -967,6 +1030,7 @@ const Index = () => {
                     }
                     isStreaming={!!(currentItinerary?.content && loadingVariants[currentItinerary?.id])}
                     isEditing={currentItinerary ? loadingVariants[currentItinerary.id] && !isGenerating : false}
+                    onRetry={handleRetryVariant}
                     onEdit={handleEdit}
                     themeTitle={currentItinerary ? `${currentItinerary.emoji} ${currentItinerary.name}` : undefined}
                     tripPreferences={preferences}

@@ -24,6 +24,8 @@ interface ItineraryOutputProps {
   loadingHeadline?: string;
   isStreaming?: boolean;
   isEditing?: boolean;
+  /** Re-runs this variant's generation after a cut-off stream. */
+  onRetry?: () => void;
   onEdit?: (editRequest: string) => void;
   themeTitle?: string;
   structuredData?: ItineraryData;
@@ -41,7 +43,7 @@ const stripEmojis = (text: string): string => {
   return text.replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{1F000}-\u{1FFFF}]/gu, '').replace(/\s+/g, ' ').trim();
 };
 
-export function ItineraryOutput({ itinerary, isLoading, loadingHeadline, isStreaming, isEditing, onEdit, themeTitle, structuredData, tripPreferences }: ItineraryOutputProps) {
+export function ItineraryOutput({ itinerary, isLoading, loadingHeadline, isStreaming, isEditing, onRetry, onEdit, themeTitle, structuredData, tripPreferences }: ItineraryOutputProps) {
   const [editMode, setEditMode] = useState(false);
   const [editRequest, setEditRequest] = useState("");
   const [addingNearMiss, setAddingNearMiss] = useState<string | null>(null);
@@ -753,8 +755,13 @@ export function ItineraryOutput({ itinerary, isLoading, loadingHeadline, isStrea
         </div>
         <div>
           <p className="font-semibold text-foreground">Itinerary generation incomplete</p>
-          <p className="text-sm text-muted-foreground mt-1">The response was cut off before finishing. Please regenerate.</p>
+          <p className="text-sm text-muted-foreground mt-1">The response was cut off before finishing.</p>
         </div>
+        {onRetry && (
+          <Button onClick={onRetry} variant="outline">
+            Regenerate this version
+          </Button>
+        )}
       </div>
     );
   }
