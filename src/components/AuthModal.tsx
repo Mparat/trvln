@@ -1,24 +1,20 @@
 import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { supabase } from "@/lib/supabase";
-import { Loader2, Mail, CheckCircle2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 
 interface AuthModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  // Fired the moment a sign-in is actually kicked off (Google redirect begins or
-  // a magic link is sent), so the caller knows a later modal close means
-  // "completing sign-in" rather than "cancelled".
+  // Fired the moment a sign-in is actually kicked off (Google redirect begins),
+  // so the caller knows a later modal close means "completing sign-in" rather
+  // than "cancelled".
   onSignInStart?: () => void;
 }
 
 export function AuthModal({ open, onOpenChange, onSignInStart }: AuthModalProps) {
-  const [email, setEmail] = useState("");
-  const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
   const handleGoogle = async () => {
@@ -38,32 +34,8 @@ export function AuthModal({ open, onOpenChange, onSignInStart }: AuthModalProps)
     // On success the browser redirects away — nothing more to do
   };
 
-  const handleMagicLink = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email.trim()) return;
-    setSending(true);
-    const { error } = await supabase.auth.signInWithOtp({
-      email: email.trim(),
-      options: { emailRedirectTo: window.location.origin },
-    });
-    setSending(false);
-    if (error) {
-      toast({ title: "Couldn't send link", description: error.message, variant: "destructive" });
-    } else {
-      setSent(true);
-      // The link is out; completing sign-in reloads the tab. Keep any queued
-      // action (e.g. a pending save) alive even if the modal is closed now.
-      onSignInStart?.();
-    }
-  };
-
-  const handleOpenChange = (next: boolean) => {
-    if (!next) { setSent(false); setEmail(""); }
-    onOpenChange(next);
-  };
-
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader className="text-center">
           <DialogTitle className="text-xl">Save your trip</DialogTitle>
@@ -72,8 +44,7 @@ export function AuthModal({ open, onOpenChange, onSignInStart }: AuthModalProps)
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 pt-1">
-          {/* Google */}
+        <div className="pt-1">
           <Button
             variant="outline"
             className="w-full gap-2.5 h-11"
@@ -83,40 +54,6 @@ export function AuthModal({ open, onOpenChange, onSignInStart }: AuthModalProps)
             {googleLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <GoogleIcon />}
             Continue with Google
           </Button>
-
-          <div className="flex items-center gap-3">
-            <div className="flex-1 border-t border-border" />
-            <span className="text-xs text-muted-foreground">or</span>
-            <div className="flex-1 border-t border-border" />
-          </div>
-
-          {/* Magic link */}
-          {sent ? (
-            <div className="text-center py-4 space-y-2">
-              <CheckCircle2 className="w-9 h-9 text-green-500 mx-auto" />
-              <p className="font-semibold text-sm text-foreground">Check your inbox</p>
-              <p className="text-xs text-muted-foreground">
-                We sent a sign-in link to <span className="font-medium">{email}</span>
-              </p>
-            </div>
-          ) : (
-            <form onSubmit={handleMagicLink} className="space-y-3">
-              <Input
-                type="email"
-                placeholder="your@email.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                disabled={sending}
-                required
-              />
-              <Button type="submit" className="w-full h-11" disabled={sending || !email.trim()}>
-                {sending
-                  ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Sending...</>
-                  : <><Mail className="w-4 h-4 mr-2" />Send magic link</>
-                }
-              </Button>
-            </form>
-          )}
         </div>
       </DialogContent>
     </Dialog>

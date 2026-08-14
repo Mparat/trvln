@@ -241,7 +241,7 @@ const notifyVariantReady = (
 };
 
 // Stores a trip the user tried to save while logged out, so we can finish the
-// save once the sign-in redirect (Google / magic link) brings them back.
+// save once the Google sign-in redirect brings them back.
 const PENDING_SAVE_KEY = "trvln_pending_save";
 // Records where a sign-in should land the user when they reach the auth modal
 // from a flow that isn't "save" (e.g. tapping "Saved trips" while logged out).
@@ -295,7 +295,7 @@ const Index = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   // True once the user actually kicks off a sign-in from the auth modal (Google
-  // redirect or magic link sent). Lets us tell "dismissed without signing in"
+  // redirect begun). Lets us tell "dismissed without signing in"
   // (cancel the queued action) from "left to complete sign-in" (keep it).
   const authInitiatedRef = useRef(false);
 
@@ -508,8 +508,8 @@ const Index = () => {
     }
   }, []);
 
-  // Resume whatever the user set out to do before the sign-in redirect (Google /
-  // magic link) sent them away. Exactly one action is queued at a time: either a
+  // Resume whatever the user set out to do before the Google sign-in redirect
+  // sent them away. Exactly one action is queued at a time: either a
   // pending save (from the "Save trip" flow) or a redirect (from "Saved trips").
   // Consuming a save must NOT also honor a redirect, and vice versa — signing in
   // from "Saved trips" should never resurrect a save the user abandoned earlier.
@@ -571,8 +571,8 @@ const Index = () => {
   }, [user]);
 
   // Dismissing the auth modal without starting a sign-in cancels whatever action
-  // (save / view saved) prompted it. A started sign-in (Google redirect or magic
-  // link sent) leaves it queued so it can complete after the round-trip.
+  // (save / view saved) prompted it. A started sign-in (Google redirect begun)
+  // leaves it queued so it can complete after the round-trip.
   const handleAuthModalOpenChange = useCallback((open: boolean) => {
     if (!open && !authInitiatedRef.current) clearPendingAuthAction();
     setShowAuthModal(open);
