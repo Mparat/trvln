@@ -136,6 +136,7 @@ export type CostRow = {
   mode?: string | null;
   grounded?: boolean | null;
   request_id?: string | null;
+  user_id?: string | null;
 };
 
 // Fail-soft by design: cost accounting must never take a generation down, and

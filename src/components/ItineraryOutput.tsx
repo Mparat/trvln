@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { functionHeaders } from "@/lib/supabase";
 import { ItemFeedbackControls } from "./ItemFeedbackControls";
 import { useItineraryItems, type ItineraryItem } from "@/hooks/useItineraryItems";
 import { toast } from "@/hooks/use-toast";
@@ -325,10 +326,7 @@ export function ItineraryOutput({ itinerary, isLoading, loadingHeadline, isStrea
     try {
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-itinerary-item`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
+        headers: await functionHeaders(),
         body: JSON.stringify({
           itemContent: current.content,
           itemContext: current.context,
@@ -379,10 +377,7 @@ export function ItineraryOutput({ itinerary, isLoading, loadingHeadline, isStrea
     try {
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/add-near-miss`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-        },
+        headers: await functionHeaders(),
         body: JSON.stringify({
           nearMissContent: nearMissItem.content,
           fullItinerary: itineraryText,

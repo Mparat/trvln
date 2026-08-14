@@ -16,6 +16,22 @@ const supabaseAdmin = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
 );
 
+// Resolve the caller from the Authorization header when it carries a user
+// access token. verify_jwt stays off for this function (signed-out previews
+// are allowed), so an absent, anon-key, or invalid token yields null rather
+// than an error.
+async function resolveUserId(req: Request): Promise<string | null> {
+  const auth = req.headers.get("Authorization");
+  if (!auth?.startsWith("Bearer ")) return null;
+  try {
+    const { data, error } = await supabaseAdmin.auth.getUser(auth.slice(7));
+    if (error) return null;
+    return data.user?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // Input validation schemas
 const PreferencesSchema = z.object({
   media: z.array(z.object({
@@ -821,6 +837,10 @@ serve(async (req) => {
   // rather than leaving it pending for reconnecting clients to poll.
   let registeredJobId: string | undefined;
 
+  // Set once the caller is resolved; read by finalizeCosts, which is defined
+  // before resolution happens.
+  let callerUserId: string | null = null;
+
   // Phase timings. Generation is slow and we have been guessing at which stage
   // owns the wall clock; every phase below reports its own duration so a single
   // log line per request tells us where the time actually goes.
@@ -856,6 +876,7 @@ serve(async (req) => {
       day_count: meta.dayCount ?? null,
       mode: meta.mode,
       grounded: meta.grounded ?? null,
+      user_id: callerUserId,
     });
   };
   const since = (start: number) => Date.now() - start;
@@ -892,8 +913,14 @@ serve(async (req) => {
     const { preferences, themeVariant, jobId, batchId } = validationResult.data;
     registeredJobId = jobId;
 
+    // Attribution only for now: which signed-in user (if any) this generation
+    // belongs to. Tier gating builds on this.
+    const userId = await resolveUserId(req);
+    callerUserId = userId;
+
     console.log("Received preferences:", JSON.stringify(preferences, null, 2));
     console.log("Theme variant:", themeVariant || "default");
+    if (userId) console.log("Caller user_id:", userId);
 
     // Register the job as pending so a reconnecting client can poll its status.
     if (jobId) {
@@ -906,6 +933,7 @@ serve(async (req) => {
         status: "pending",
         content: null,
         error: null,
+        user_id: userId,
         updated_at: new Date().toISOString(),
       });
       if (jobError) console.error("Failed to register itinerary job:", jobError);

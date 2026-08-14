@@ -3,6 +3,7 @@ import { ItineraryData } from "@/types/itinerary";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { functionHeaders } from "@/lib/supabase";
 import { toast } from "@/hooks/use-toast";
 import {
   ExternalLink, Plane, Hotel, MapPin, Clock, DollarSign,
@@ -118,10 +119,7 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-itinerary-item`,
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
+          headers: await functionHeaders(),
           body: JSON.stringify({
             itemContent,
             itemContext,

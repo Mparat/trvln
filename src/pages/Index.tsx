@@ -6,7 +6,7 @@ import { TripSummaryCard } from "@/components/TripSummaryCard";
 import { ItinerarySwitcher } from "@/components/ItinerarySwitcher";
 import { AuthModal } from "@/components/AuthModal";
 import { SavedTripsList } from "@/components/SavedTripsList";
-import { supabase } from "@/lib/supabase";
+import { supabase, functionHeaders } from "@/lib/supabase";
 import { sendReadyText } from "@/lib/readyText";
 import { toast } from "@/hooks/use-toast";
 import { ItineraryData } from "@/types/itinerary";
@@ -386,16 +386,13 @@ const Index = () => {
     return () => { unmounted = true; };
   }, []);
 
-  const getHeaders = useCallback(() => ({
-    "Content-Type": "application/json",
-    "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-  }), []);
+  const getHeaders = useCallback(() => functionHeaders(), []);
 
   const analyzeInspiration = useCallback(async (mediaUrls: string[]): Promise<IdentifiedDestination[]> => {
     if (mediaUrls.length === 0) return [];
     const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-inspiration`, {
       // The edge function accepts at most 20 images per call
-      method: "POST", headers: getHeaders(), body: JSON.stringify({ mediaUrls: mediaUrls.slice(0, 20) }),
+      method: "POST", headers: await getHeaders(), body: JSON.stringify({ mediaUrls: mediaUrls.slice(0, 20) }),
     });
     if (!response.ok) return [];
     const data = await response.json();
@@ -404,7 +401,7 @@ const Index = () => {
 
   const suggestThemes = useCallback(async (prefs: TripPreferences) => {
     const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/suggest-themes`, {
-      method: "POST", headers: getHeaders(), body: JSON.stringify({ preferences: prefs }),
+      method: "POST", headers: await getHeaders(), body: JSON.stringify({ preferences: prefs }),
     });
     if (!response.ok) { const e = await response.json().catch(() => ({})); throw new Error(e.error || "Failed to suggest themes"); }
     const data = await response.json();
@@ -418,7 +415,7 @@ const Index = () => {
     jobIds?: { jobId: string; batchId: string }
   ) => {
     const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-itinerary`, {
-      method: "POST", headers: getHeaders(), body: JSON.stringify({ preferences: prefs, themeVariant, ...jobIds }),
+      method: "POST", headers: await getHeaders(), body: JSON.stringify({ preferences: prefs, themeVariant, ...jobIds }),
     });
     if (!response.ok) {
       const e = await response.json().catch(() => ({}));
@@ -885,7 +882,7 @@ const Index = () => {
     setLoadingVariants(prev => ({ ...prev, [current.id]: true }));
     try {
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/edit-itinerary`, {
-        method: "POST", headers: getHeaders(),
+        method: "POST", headers: await getHeaders(),
         body: JSON.stringify({ editRequest, currentItinerary: current.content, themeTitle: `${current.emoji} ${current.name}`, tripPreferences: preferences }),
       });
       if (!response.ok) { const e = await response.json().catch(() => ({})); throw new Error(e.error || "Failed to edit itinerary"); }
