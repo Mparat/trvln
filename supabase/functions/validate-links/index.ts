@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+import { CostTracker, persistCost } from "../_shared/costs.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -128,6 +129,10 @@ Respond ONLY with a JSON array, no other text. Format:
     }
 
     const data = await response.json();
+    const costs = new CostTracker();
+    costs.addPerplexity("validate_links", "sonar", data.usage);
+    console.log("[cost] summary " + JSON.stringify(costs.summary()));
+    void persistCost(costs, { function_name: "validate-links" });
     const content = data.choices?.[0]?.message?.content || '';
     
     console.log('Perplexity response:', content);
