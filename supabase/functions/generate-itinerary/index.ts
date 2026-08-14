@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { CostTracker, persistCost } from "../_shared/costs.ts";
 // deploy-v3
 
 const corsHeaders = {
@@ -72,7 +73,7 @@ async function searchWithPerplexity(
   query: string,
   apiKey: string,
   label = "search",
-): Promise<{ content: string; citations: string[] }> {
+): Promise<{ content: string; citations: string[]; usage?: Record<string, unknown> }> {
   const maxAttempts = 4;
   let retryAfterMs = 0;
 
@@ -102,7 +103,7 @@ async function runPerplexityQuery(
   apiKey: string,
   label: string,
 ): Promise<
-  | { ok: true; value: { content: string; citations: string[] } }
+  | { ok: true; value: { content: string; citations: string[]; usage?: Record<string, unknown> } }
   | { ok: false; retryable: boolean; retryAfterMs?: number }
 > {
   try {
@@ -150,6 +151,7 @@ async function runPerplexityQuery(
       value: {
         content: data.choices?.[0]?.message?.content || '',
         citations: data.citations || [],
+        usage: data.usage,
       },
     };
   } catch (error) {
@@ -551,6 +553,7 @@ type AnthropicJsonResult = {
   outputTokens: number;
   cacheRead: number;
   cacheWrite: number;
+  usage: Record<string, number>;
 };
 
 // Non-streaming, and the shape is forced with tool_choice rather than asked for
@@ -634,6 +637,7 @@ async function callAnthropicJson(params: {
         outputTokens: usage.output_tokens ?? 0,
         cacheRead: usage.cache_read_input_tokens ?? 0,
         cacheWrite: usage.cache_creation_input_tokens ?? 0,
+        usage,
       };
       console.log(
         `[timing] cache ${label}: read=${result.cacheRead} write=${result.cacheWrite} ` +
@@ -822,6 +826,38 @@ serve(async (req) => {
   // log line per request tells us where the time actually goes.
   const t0 = Date.now();
   const timings: Record<string, number> = {};
+
+  // Dollar accounting for every model call this request makes. Token counts
+  // already existed in scattered log lines; what they never answered is what a
+  // trip costs to produce, which is the number pricing has to be set against.
+  const costs = new CostTracker();
+  const finalizeCosts = (meta: {
+    mode: string;
+    dayCount?: number | null;
+    theme?: string | null;
+    grounded?: boolean | null;
+    batchId?: string | null;
+    jobId?: string | null;
+  }) => {
+    const s = costs.summary();
+    console.log("[cost] summary " + JSON.stringify({
+      ...s,
+      mode: meta.mode,
+      day_count: meta.dayCount ?? null,
+      usd_per_day: meta.dayCount ? Math.round((s.total_usd / meta.dayCount) * 1e6) / 1e6 : null,
+      theme: meta.theme ?? "default",
+    }));
+    // Fire-and-forget: a cost row must never delay or fail the response.
+    void persistCost(costs, {
+      function_name: "generate-itinerary",
+      batch_id: meta.batchId ?? null,
+      job_id: meta.jobId ?? null,
+      theme: meta.theme ?? null,
+      day_count: meta.dayCount ?? null,
+      mode: meta.mode,
+      grounded: meta.grounded ?? null,
+    });
+  };
   const since = (start: number) => Date.now() - start;
   const timePhase = async <T,>(name: string, fn: () => Promise<T>): Promise<T> => {
     const start = Date.now();
@@ -1115,6 +1151,7 @@ No explanation. Just the JSON object.`;
         }
 
         const strategyData = await strategyResponse.json();
+        costs.addAnthropic("request_reading", "claude-haiku-4-5", strategyData.usage);
         const raw = strategyData.content?.[0]?.text?.trim() ?? "";
         const parsed = JSON.parse(raw.replace(/```[a-z]*\n?/gi, "").trim());
 
@@ -1195,6 +1232,7 @@ No explanation. Just the JSON array.`;
 
         if (resolutionResponse.ok) {
           const resolutionData = await resolutionResponse.json();
+          costs.addAnthropic("destination_resolution", "claude-haiku-4-5", resolutionData.usage);
           const resolutionText = resolutionData.content?.[0]?.text?.trim() ?? "";
           // Strip any accidental code fences
           const cleaned = resolutionText.replace(/```[a-z]*\n?/gi, "").trim();
@@ -1374,7 +1412,10 @@ ${additionalNotes || "None provided"}
     const results = await timePhase("perplexity_research", () =>
       Promise.all(searchSpecs.map(async (spec, i) => {
         if (i > 0) await new Promise(r => setTimeout(r, i * 1500));
-        return searchWithPerplexity(spec.query, PERPLEXITY_API_KEY, spec.key);
+        return searchWithPerplexity(spec.query, PERPLEXITY_API_KEY, spec.key).then(r => {
+          if (r.usage) costs.addPerplexity(`research_${spec.key}`, "sonar", r.usage);
+          return r;
+        });
       })));
 
     type ResearchResult = { content: string; citations: string[] };
@@ -1742,6 +1783,10 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
       // serially. Kept because edge functions only deploy from main, so there is
       // no way to try the split path on a branch first — this is both the kill
       // switch and the landing place when the skeleton pass fails.
+      // Streaming splits usage across events: message_start carries the input
+      // side, the final message_delta the cumulative output. Accumulated here
+      // and recorded once the stream ends.
+      let singleCallUsage: Record<string, number> = {};
       const runSingleCall = async () => {
         const response = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
@@ -1793,6 +1838,10 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
                 const u = event.message.usage;
                 console.log(`[timing] cache single_call: read=${u.cache_read_input_tokens ?? 0} ` +
                   `write=${u.cache_creation_input_tokens ?? 0} uncached_input=${u.input_tokens ?? 0}`);
+                singleCallUsage = { ...singleCallUsage, ...u };
+              }
+              if (event.type === "message_delta" && event.usage?.output_tokens) {
+                singleCallUsage.output_tokens = event.usage.output_tokens;
               }
             } catch { /* skip malformed lines */ }
           }
@@ -1818,6 +1867,7 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
           });
           timings.skeleton_generation = Date.now() - skeletonStart;
           skeletonTokens = skeletonResult.outputTokens;
+          costs.addAnthropic("skeleton", MODEL, skeletonResult.usage);
           console.log(`[timing] skeleton_generation: ${timings.skeleton_generation}ms`);
 
           const parsed = skeletonResult.data as Skeleton;
@@ -1857,6 +1907,7 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
 
         if (!skeleton) {
           await runSingleCall();
+          costs.addAnthropic("single_call", MODEL, singleCallUsage);
           await forward("data: [DONE]\n\n");
           timings.model_generation = Date.now() - modelStart;
           timings.total = since(t0);
@@ -1868,6 +1919,7 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
             grounded: hasGroundedResearch,
             client_disconnected: !clientConnected,
           }));
+          finalizeCosts({ mode: "single_call", theme: themeVariant?.id, grounded: hasGroundedResearch, batchId, jobId });
           await persistComplete();
           return;
         }
@@ -1898,6 +1950,7 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
             grounded: hasGroundedResearch,
             client_disconnected: !clientConnected,
           }));
+          finalizeCosts({ mode: "skeleton_complete", dayCount: skeletonDays.length, theme: themeVariant?.id, grounded: hasGroundedResearch, batchId, jobId });
           await persistComplete();
           return;
         }
@@ -1997,6 +2050,7 @@ or
               return [];
             }
             const critiqueData = await critiqueResponse.json();
+            costs.addAnthropic("plan_critique", "claude-haiku-4-5", critiqueData.usage);
             const raw = (critiqueData.content?.[0]?.text ?? "").replace(/```[a-z]*\n?/gi, "").trim();
             const parsed = JSON.parse(raw);
             // A finding that overruns the clamp gets cut at a sentence or word
@@ -2171,6 +2225,7 @@ Put the day(s) in the \`emit_days\` tool call. Do not write them out as text.`;
             maxTokens: 2000 * dayNumbers.length + 1500,
             label,
           });
+          costs.addAnthropic(`day_slice_${label}`, MODEL, result.usage);
           const parsed = result.data as { days?: unknown[] };
           return { days: Array.isArray(parsed.days) ? parsed.days : [], tokens: result.outputTokens };
         }).then(
@@ -2322,10 +2377,15 @@ Put the day(s) in the \`emit_days\` tool call. Do not write them out as text.`;
         console.log(`[quality] dining: unique=${seen.size} duplicated=${duplicates.length} ` +
           (duplicates.length ? JSON.stringify(duplicates.map(([name, n]) => `${name} x${n}`)) : ""));
 
+        finalizeCosts({ mode: "split", dayCount, theme: themeVariant?.id, grounded: hasGroundedResearch, batchId, jobId });
+
         // Persist the finished itinerary for reconnecting clients.
         await persistComplete();
       } catch (streamError) {
         console.error("Generation/persist error:", streamError);
+        // The money is spent whether or not the generation survived — a failed
+        // run's cost matters as much as a successful one's.
+        finalizeCosts({ mode: "error", theme: themeVariant?.id, batchId, jobId });
         if (jobId) {
           await supabaseAdmin.from("itinerary_jobs").update({
             status: "error",
