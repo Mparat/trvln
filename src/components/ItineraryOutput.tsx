@@ -36,6 +36,8 @@ interface ItineraryOutputProps {
     interests?: string[];
     budgetAccommodation?: number;
   };
+  /** Opens the unlock dialog. Present whenever this trip has locked content. */
+  onUnlockRequest?: () => void;
 }
 
 
@@ -44,7 +46,7 @@ const stripEmojis = (text: string): string => {
   return text.replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{1F000}-\u{1FFFF}]/gu, '').replace(/\s+/g, ' ').trim();
 };
 
-export function ItineraryOutput({ itinerary, isLoading, loadingHeadline, isStreaming, isEditing, onRetry, onEdit, themeTitle, structuredData, tripPreferences }: ItineraryOutputProps) {
+export function ItineraryOutput({ itinerary, isLoading, loadingHeadline, isStreaming, isEditing, onRetry, onEdit, themeTitle, structuredData, tripPreferences, onUnlockRequest }: ItineraryOutputProps) {
   const [editMode, setEditMode] = useState(false);
   const [editRequest, setEditRequest] = useState("");
   const [addingNearMiss, setAddingNearMiss] = useState<string | null>(null);
@@ -763,10 +765,14 @@ export function ItineraryOutput({ itinerary, isLoading, loadingHeadline, isStrea
 
   // When structured JSON data is available, render the beautiful UI
   if (structuredData) {
+    // Edits are a full-itinerary regeneration — on a preview trip they're an
+    // unmetered way to regenerate paid content, so the edit control routes to
+    // the unlock dialog instead of the edit panel.
+    const isPreview = !!structuredData.access;
     const editButton = onEdit ? (
       <button
         type="button"
-        onClick={() => setEditMode(v => !v)}
+        onClick={() => (isPreview && onUnlockRequest ? onUnlockRequest() : setEditMode(v => !v))}
         aria-label="Edit the itinerary"
         title="Edit the itinerary"
         className="group flex items-center justify-center h-9 w-9 hover:w-auto px-0 hover:px-3.5 rounded-full border border-border bg-background text-muted-foreground hover:text-primary hover:border-primary transition-all duration-300 overflow-hidden"
@@ -827,7 +833,8 @@ export function ItineraryOutput({ itinerary, isLoading, loadingHeadline, isStrea
           rawItinerary={itinerary}
           tripPreferences={tripPreferences}
           editButton={editButton}
-          editPanel={editPanel}
+          editPanel={isPreview ? undefined : editPanel}
+          onUnlockRequest={onUnlockRequest}
         />
       </div>
     );

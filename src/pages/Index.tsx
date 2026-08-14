@@ -7,6 +7,8 @@ import { ItinerarySwitcher } from "@/components/ItinerarySwitcher";
 import { AuthModal } from "@/components/AuthModal";
 import { SavedTripsList } from "@/components/SavedTripsList";
 import { supabase, functionHeaders } from "@/lib/supabase";
+import { startCheckout, savePendingCheckout, consumePendingCheckout, clearPendingCheckout } from "@/lib/checkout";
+import { UnlockDialog } from "@/components/UnlockDialog";
 import { sendReadyText } from "@/lib/readyText";
 import { toast } from "@/hooks/use-toast";
 import { ItineraryData } from "@/types/itinerary";
@@ -45,6 +47,12 @@ export type ItineraryVariant = {
   tagline?: string;
   content: string;
   structuredData?: ItineraryData;
+  // The generation batch this variant belongs to and the job that produced it.
+  // Stamped when generation starts and serialized everywhere the variant goes
+  // (session snapshot, saved trips), so an unlock can name the right batch
+  // even after a reload or on a reopened saved trip.
+  batchId?: string;
+  jobId?: string;
 };
 
 type IdentifiedDestination = {
@@ -249,13 +257,14 @@ const PENDING_SAVE_KEY = "trvln_pending_save";
 // two intents never fire together.
 const PENDING_SIGNIN_DEST_KEY = "trvln_pending_signin_dest";
 
-// Forget any queued post-sign-in action (save or redirect). Called when the
-// user abandons the flow that queued it.
+// Forget any queued post-sign-in action (save, redirect, or purchase). Called
+// when the user abandons the flow that queued it.
 const clearPendingAuthAction = () => {
   try {
     localStorage.removeItem(PENDING_SAVE_KEY);
     localStorage.removeItem(PENDING_SIGNIN_DEST_KEY);
   } catch { /* ignore */ }
+  clearPendingCheckout();
 };
 
 const Index = () => {
@@ -513,6 +522,21 @@ const Index = () => {
   // Declared after performSave so its dependency array doesn't hit the TDZ.
   useEffect(() => {
     if (!user) return;
+    // A queued purchase goes straight to Stripe — it was the last thing the
+    // user asked for before signing in. Consuming removes the key, so a later
+    // auth event (token refresh, tab focus) can't replay it.
+    const checkout = consumePendingCheckout();
+    if (checkout) {
+      clearPendingAuthAction();
+      void startCheckout(checkout.pack, checkout.unlockBatchId).catch(err => {
+        toast({
+          title: "Couldn't start checkout",
+          description: err instanceof Error ? err.message : "Please try again",
+          variant: "destructive",
+        });
+      });
+      return;
+    }
     let raw: string | null = null;
     let dest: string | null = null;
     try {
@@ -548,6 +572,7 @@ const Index = () => {
       try {
         localStorage.setItem(PENDING_SAVE_KEY, JSON.stringify({ itineraries, preferences }));
         localStorage.removeItem(PENDING_SIGNIN_DEST_KEY);
+        clearPendingCheckout();
       } catch { /* quota — fall back to manual re-tap */ }
       authInitiatedRef.current = false;
       setShowAuthModal(true);
@@ -568,12 +593,45 @@ const Index = () => {
   }, [user]);
 
   // Dismissing the auth modal without starting a sign-in cancels whatever action
-  // (save / view saved) prompted it. A started sign-in (Google redirect begun)
-  // leaves it queued so it can complete after the round-trip.
+  // (save / view saved / purchase) prompted it. A started sign-in (Google
+  // redirect begun) leaves it queued so it can complete after the round-trip.
   const handleAuthModalOpenChange = useCallback((open: boolean) => {
     if (!open && !authInitiatedRef.current) clearPendingAuthAction();
     setShowAuthModal(open);
   }, []);
+
+  // ── Unlock (preview → paid trip) ───────────────────────────────────────────
+  const [showUnlockDialog, setShowUnlockDialog] = useState(false);
+  const [unlockLoading, setUnlockLoading] = useState(false);
+
+  const handleUnlockRequest = useCallback(() => setShowUnlockDialog(true), []);
+
+  // The $5 starter pack unlocks the batch the current trip was generated
+  // under. Signed out: queue the purchase and sign in first — the resume
+  // effect above sends the user straight to Stripe afterwards.
+  const handleUnlockPurchase = useCallback(async () => {
+    const unlockBatchId = itineraries.find(it => it.batchId)?.batchId;
+    if (!user) {
+      clearPendingAuthAction();
+      savePendingCheckout({ pack: 'pack_2', unlockBatchId });
+      setShowUnlockDialog(false);
+      authInitiatedRef.current = false;
+      setShowAuthModal(true);
+      return;
+    }
+    setUnlockLoading(true);
+    try {
+      await startCheckout('pack_2', unlockBatchId);
+      // The browser is navigating to Stripe — leave the spinner up.
+    } catch (err) {
+      setUnlockLoading(false);
+      toast({
+        title: "Couldn't start checkout",
+        description: err instanceof Error ? err.message : "Please try again",
+        variant: "destructive",
+      });
+    }
+  }, [user, itineraries]);
 
   // ── Open a saved trip ──────────────────────────────────────────────────────
   const handleOpenSavedTrip = useCallback((variants: ItineraryVariant[], savedPrefs: TripPreferences | null) => {
@@ -608,6 +666,11 @@ const Index = () => {
     const jobId = ctx.jobIdByTheme[theme.id] ?? crypto.randomUUID();
     ctx.jobIdByTheme[theme.id] = jobId;
     addPendingJob(ctx.batchId, { jobId, themeId: theme.id, name: theme.name, emoji: theme.emoji });
+
+    // Stamp the batch/job identity onto the variant up front — the unlock flow
+    // needs it even if this run later fails or the tab reloads.
+    setItineraries(prev => prev.map(it =>
+      it.id === theme.id ? { ...it, batchId: ctx.batchId, jobId } : it));
 
     const applyFinalContent = (rawContent: string) => {
       const displayContent = stripPlanningSection(rawContent);
@@ -700,6 +763,19 @@ const Index = () => {
     return run;
   }, [runVariant]);
 
+  // A rebuilt context (the ref died with a reload) keeps the trip's original
+  // batch when the variants carry one — minting a fresh batch here would
+  // orphan the batch an unlock has to name, and would make the server treat a
+  // retried variant as a new trip.
+  const rebuildContextFromVariants = useCallback((): GenerationContext => {
+    const batchId = itineraries.find(it => it.batchId)?.batchId ?? crypto.randomUUID();
+    const jobIdByTheme: Record<string, string> = {};
+    for (const it of itineraries) {
+      if (it.jobId) jobIdByTheme[it.id] = it.jobId;
+    }
+    return { preferences, batchId, jobIdByTheme, runId: runIdRef.current };
+  }, [itineraries, preferences]);
+
   // Opening a variant that hasn't been generated yet starts it.
   // A variant whose stream was cut off is otherwise stuck: its partial content
   // passes the "already has content" guard and its id is in startedVariants, so
@@ -712,12 +788,7 @@ const Index = () => {
     setItineraries(prev => prev.map(it =>
       it.id === theme.id ? { ...it, content: "", structuredData: undefined } : it));
 
-    const ctx: GenerationContext = generationContextRef.current ?? {
-      preferences,
-      batchId: crypto.randomUUID(),
-      jobIdByTheme: {},
-      runId: runIdRef.current,
-    };
+    const ctx: GenerationContext = generationContextRef.current ?? rebuildContextFromVariants();
     generationContextRef.current = ctx;
     // A fresh job id: the old one belongs to the run that died.
     delete ctx.jobIdByTheme[theme.id];
@@ -733,7 +804,7 @@ const Index = () => {
         });
       }
     });
-  }, [itineraries, activeVariant, loadingVariants, preferences, enqueueVariant]);
+  }, [itineraries, activeVariant, loadingVariants, enqueueVariant, rebuildContextFromVariants]);
 
   const handleSelectVariant = useCallback((index: number) => {
     setActiveVariant(index);
@@ -742,12 +813,7 @@ const Index = () => {
 
     // After a reload the original context is gone, but a variant only needs the
     // preferences and a fresh job id — so rebuild rather than refusing to run.
-    const ctx: GenerationContext = generationContextRef.current ?? {
-      preferences,
-      batchId: crypto.randomUUID(),
-      jobIdByTheme: {},
-      runId: runIdRef.current,
-    };
+    const ctx: GenerationContext = generationContextRef.current ?? rebuildContextFromVariants();
     generationContextRef.current = ctx;
 
     void enqueueVariant(theme, ctx).then(result => {
@@ -766,7 +832,7 @@ const Index = () => {
         variant: "destructive",
       });
     });
-  }, [itineraries, preferences, enqueueVariant]);
+  }, [itineraries, enqueueVariant, rebuildContextFromVariants]);
 
   // ── Generate ───────────────────────────────────────────────────────────────
   const handleGenerate = useCallback(async (pendingCity?: string) => {
@@ -1031,6 +1097,7 @@ const Index = () => {
                     onEdit={handleEdit}
                     themeTitle={currentItinerary ? `${currentItinerary.emoji} ${currentItinerary.name}` : undefined}
                     tripPreferences={preferences}
+                    onUnlockRequest={handleUnlockRequest}
                   />
                 </div>
               </div>
@@ -1041,6 +1108,12 @@ const Index = () => {
           open={showAuthModal}
           onOpenChange={handleAuthModalOpenChange}
           onSignInStart={() => { authInitiatedRef.current = true; }}
+        />
+        <UnlockDialog
+          open={showUnlockDialog}
+          onOpenChange={setShowUnlockDialog}
+          onUnlock={handleUnlockPurchase}
+          loading={unlockLoading}
         />
       </div>
     );
