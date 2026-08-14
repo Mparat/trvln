@@ -7,8 +7,9 @@ import { ItinerarySwitcher } from "@/components/ItinerarySwitcher";
 import { AuthModal } from "@/components/AuthModal";
 import { SavedTripsList } from "@/components/SavedTripsList";
 import { supabase, functionHeaders } from "@/lib/supabase";
-import { startCheckout, savePendingCheckout, consumePendingCheckout, clearPendingCheckout, waitForPurchase } from "@/lib/checkout";
+import { startCheckout, savePendingCheckout, consumePendingCheckout, clearPendingCheckout, waitForPurchase, type CreditPack } from "@/lib/checkout";
 import { UnlockDialog } from "@/components/UnlockDialog";
+import { PaywallModal } from "@/components/PaywallModal";
 import { useEntitlements } from "@/components/EntitlementsProvider";
 import { sendReadyText } from "@/lib/readyText";
 import { toast } from "@/hooks/use-toast";
@@ -759,6 +760,25 @@ const Index = () => {
   const [showUnlockDialog, setShowUnlockDialog] = useState(false);
   const [unlockLoading, setUnlockLoading] = useState(false);
 
+  // ── Paywall (purchaser out of credits) ─────────────────────────────────────
+  const [showPaywall, setShowPaywall] = useState(false);
+  const [paywallLoadingPack, setPaywallLoadingPack] = useState<CreditPack | null>(null);
+
+  const handlePaywallPurchase = useCallback(async (pack: CreditPack) => {
+    setPaywallLoadingPack(pack);
+    try {
+      await startCheckout(pack);
+      // Navigating to Stripe — leave the spinner up.
+    } catch (err) {
+      setPaywallLoadingPack(null);
+      toast({
+        title: "Couldn't start checkout",
+        description: err instanceof Error ? err.message : "Please try again",
+        variant: "destructive",
+      });
+    }
+  }, []);
+
   // Finish generating every opened variant that still has locked content —
   // the server writes only the missing days per variant. Runs through the
   // same serialized queue as normal generations. A variant whose banked state
@@ -952,6 +972,14 @@ const Index = () => {
       return;
     }
 
+    // Purchasers out of credits are paywalled before anything spins up. This
+    // is presentation only — the server enforces the same rule with a 402,
+    // which the paths below also route to the paywall.
+    if (user && entitlements.hasPurchased && entitlements.balance <= 0) {
+      setShowPaywall(true);
+      return;
+    }
+
     // Supersede any in-flight reconnect from a previous session.
     const runId = ++runIdRef.current;
     const isStale = () => runIdRef.current !== runId;
@@ -1020,6 +1048,10 @@ const Index = () => {
             ? "Tap another theme to build a different version of the trip"
             : "Explore your trip below",
         });
+      } else if (result.error instanceof Error && result.error.message === 'payment_required') {
+        // Stale client state slipped past the pre-check — the server said pay.
+        setView('input');
+        setShowPaywall(true);
       } else {
         toast({
           title: "Couldn't load your itinerary",
@@ -1044,7 +1076,7 @@ const Index = () => {
         setIsAnalyzingMedia(false);
       }
     }
-  }, [preferences, suggestThemes, enqueueVariant, analyzeInspiration]);
+  }, [preferences, user, entitlements, suggestThemes, enqueueVariant, analyzeInspiration]);
 
   const handleEdit = useCallback(async (editRequest: string) => {
     const current = itineraries[activeVariant];
@@ -1220,6 +1252,12 @@ const Index = () => {
           onUnlock={handleUnlockPurchase}
           loading={unlockLoading}
         />
+        <PaywallModal
+          open={showPaywall}
+          onOpenChange={setShowPaywall}
+          onPurchase={handlePaywallPurchase}
+          loadingPack={paywallLoadingPack}
+        />
       </div>
     );
   }
@@ -1304,6 +1342,12 @@ const Index = () => {
         open={showAuthModal}
         onOpenChange={handleAuthModalOpenChange}
         onSignInStart={() => { authInitiatedRef.current = true; }}
+      />
+      <PaywallModal
+        open={showPaywall}
+        onOpenChange={setShowPaywall}
+        onPurchase={handlePaywallPurchase}
+        loadingPack={paywallLoadingPack}
       />
     </div>
   );

@@ -95,13 +95,21 @@ const paywallEnabled = () => (Deno.env.get("PAYWALL") ?? "off").toLowerCase() ==
 // re-registers under a fresh jobId but keeps its theme, so when the earliest
 // row isn't this job, matching themes still count as primary. Derived
 // server-side — the client is not trusted on tier-relevant input.
+//
+// Purchasers don't get preview trips: the first generation of a new batch
+// spends one credit (entitle_batch is idempotent per batch, so retries and
+// later variants never re-charge), and at zero balance the request is
+// paywalled instead of generating. The spend deliberately happens HERE, when
+// a generation is actually accepted — never in a pre-check — so an abandoned
+// click can't burn a credit.
 async function resolveTier(args: {
   batchId: string | null;
   jobId?: string;
   themeId: string | null;
-}): Promise<Tier> {
-  if (!paywallEnabled()) return "full";
-  const { batchId, jobId, themeId } = args;
+  userId: string | null;
+}): Promise<{ tier: Tier; paywalled: boolean }> {
+  if (!paywallEnabled()) return { tier: "full", paywalled: false };
+  const { batchId, jobId, themeId, userId } = args;
 
   if (batchId) {
     const { data: entitlement } = await supabaseAdmin
@@ -109,10 +117,13 @@ async function resolveTier(args: {
       .select("batch_id")
       .eq("batch_id", batchId)
       .maybeSingle();
-    if (entitlement) return "full";
+    if (entitlement) return { tier: "full", paywalled: false };
   }
 
   let primary = true;
+  // Whether this job is the batch's first — i.e. a NEW trip rather than a
+  // later variant (or retry) of one that already began as a preview.
+  let firstJobOfBatch = true;
   if (batchId && jobId) {
     const { data: earliest } = await supabaseAdmin
       .from("itinerary_jobs")
@@ -122,10 +133,33 @@ async function resolveTier(args: {
       .limit(1)
       .maybeSingle();
     if (earliest && earliest.id !== jobId) {
+      firstJobOfBatch = false;
       primary = (earliest.theme_id ?? null) === themeId;
     }
   }
-  return primary ? "preview_primary" : "preview_secondary";
+
+  if (userId && batchId && firstJobOfBatch) {
+    const { data: purchase } = await supabaseAdmin
+      .from("purchases")
+      .select("id")
+      .eq("user_id", userId)
+      .limit(1)
+      .maybeSingle();
+    if (purchase) {
+      const { error } = await supabaseAdmin.rpc("entitle_batch", {
+        p_user: userId,
+        p_batch: batchId,
+      });
+      if (!error) return { tier: "full", paywalled: false };
+      if (String(error.message ?? "").includes("INSUFFICIENT_CREDITS")) {
+        return { tier: "preview_primary", paywalled: true };
+      }
+      // Any other failure falls toward preview, never toward free full access.
+      console.error("entitle_batch failed:", error);
+    }
+  }
+
+  return { tier: primary ? "preview_primary" : "preview_secondary", paywalled: false };
 }
 
 // Split the booking checklist into what a preview may ship and per-priority
@@ -1370,11 +1404,27 @@ serve(async (req) => {
       if (jobError) console.error("Failed to register itinerary job:", jobError);
     }
 
-    const tier = await resolveTier({
+    const { tier, paywalled } = await resolveTier({
       batchId: batchId ?? jobId ?? null,
       jobId,
       themeId: themeVariant?.id ?? null,
+      userId,
     });
+    if (paywalled) {
+      // A purchaser out of credits. Close out the just-registered job so
+      // nothing polls a row that will never complete.
+      if (jobId) {
+        await supabaseAdmin.from("itinerary_jobs").update({
+          status: "error",
+          error: "payment_required",
+          updated_at: new Date().toISOString(),
+        }).eq("id", jobId);
+      }
+      return new Response(
+        JSON.stringify({ error: "payment_required" }),
+        { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
     if (tier !== "full") console.log(`[gate] tier: ${tier}`);
 
     const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
