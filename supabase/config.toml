@@ -26,3 +26,14 @@ verify_jwt = false
 
 [functions.send-ready-text]
 verify_jwt = false
+
+# Auth is manual (getUser on the Authorization header); 401 without a user.
+[functions.create-checkout-session]
+verify_jwt = false
+
+[functions.confirm-checkout]
+verify_jwt = false
+
+# Authenticated by the Stripe webhook signature, never by a user JWT.
+[functions.stripe-webhook]
+verify_jwt = false

@@ -7,8 +7,9 @@ import { ItinerarySwitcher } from "@/components/ItinerarySwitcher";
 import { AuthModal } from "@/components/AuthModal";
 import { SavedTripsList } from "@/components/SavedTripsList";
 import { supabase, functionHeaders } from "@/lib/supabase";
-import { startCheckout, savePendingCheckout, consumePendingCheckout, clearPendingCheckout } from "@/lib/checkout";
+import { startCheckout, savePendingCheckout, consumePendingCheckout, clearPendingCheckout, waitForPurchase } from "@/lib/checkout";
 import { UnlockDialog } from "@/components/UnlockDialog";
+import { useEntitlements } from "@/components/EntitlementsProvider";
 import { sendReadyText } from "@/lib/readyText";
 import { toast } from "@/hooks/use-toast";
 import { ItineraryData } from "@/types/itinerary";
@@ -308,6 +309,8 @@ const Index = () => {
   // (cancel the queued action) from "left to complete sign-in" (keep it).
   const authInitiatedRef = useRef(false);
 
+  const entitlements = useEntitlements();
+
   useEffect(() => {
     destinationRef.current = preferences.cities[0] ?? '';
   }, [preferences.cities]);
@@ -421,10 +424,14 @@ const Index = () => {
     prefs: TripPreferences,
     themeVariant: { id: string; name: string; emoji: string },
     onUpdate: (content: string) => void,
-    jobIds?: { jobId: string; batchId: string }
+    jobIds?: { jobId: string; batchId: string },
+    // Resume-on-unlock sends a different request body but reads the same
+    // stream; everything below the fetch is shared.
+    bodyOverride?: Record<string, unknown>,
   ) => {
     const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-itinerary`, {
-      method: "POST", headers: await getHeaders(), body: JSON.stringify({ preferences: prefs, themeVariant, ...jobIds }),
+      method: "POST", headers: await getHeaders(),
+      body: JSON.stringify(bodyOverride ?? { preferences: prefs, themeVariant, ...jobIds }),
     });
     if (!response.ok) {
       const e = await response.json().catch(() => ({}));
@@ -600,39 +607,6 @@ const Index = () => {
     setShowAuthModal(open);
   }, []);
 
-  // ── Unlock (preview → paid trip) ───────────────────────────────────────────
-  const [showUnlockDialog, setShowUnlockDialog] = useState(false);
-  const [unlockLoading, setUnlockLoading] = useState(false);
-
-  const handleUnlockRequest = useCallback(() => setShowUnlockDialog(true), []);
-
-  // The $5 starter pack unlocks the batch the current trip was generated
-  // under. Signed out: queue the purchase and sign in first — the resume
-  // effect above sends the user straight to Stripe afterwards.
-  const handleUnlockPurchase = useCallback(async () => {
-    const unlockBatchId = itineraries.find(it => it.batchId)?.batchId;
-    if (!user) {
-      clearPendingAuthAction();
-      savePendingCheckout({ pack: 'pack_2', unlockBatchId });
-      setShowUnlockDialog(false);
-      authInitiatedRef.current = false;
-      setShowAuthModal(true);
-      return;
-    }
-    setUnlockLoading(true);
-    try {
-      await startCheckout('pack_2', unlockBatchId);
-      // The browser is navigating to Stripe — leave the spinner up.
-    } catch (err) {
-      setUnlockLoading(false);
-      toast({
-        title: "Couldn't start checkout",
-        description: err instanceof Error ? err.message : "Please try again",
-        variant: "destructive",
-      });
-    }
-  }, [user, itineraries]);
-
   // ── Open a saved trip ──────────────────────────────────────────────────────
   const handleOpenSavedTrip = useCallback((variants: ItineraryVariant[], savedPrefs: TripPreferences | null) => {
     setItineraries(variants);
@@ -659,6 +633,9 @@ const Index = () => {
   const runVariant = useCallback(async (
     theme: { id: string; name: string; emoji: string },
     ctx: GenerationContext,
+    // When set, this run resumes an unlocked preview (writes only the locked
+    // days server-side) instead of generating from scratch.
+    resumeBatchId?: string,
   ): Promise<{ ok: boolean; stillPending: boolean; error?: unknown }> => {
     const isStale = () => runIdRef.current !== ctx.runId;
     startedVariantsRef.current.add(theme.id);
@@ -689,7 +666,8 @@ const Index = () => {
         const displayContent = stripPlanningSection(updatedContent);
         setItineraries(prev => prev.map(it =>
           it.id === theme.id ? { ...it, content: displayContent } : it));
-      }, { jobId, batchId: ctx.batchId });
+      }, { jobId, batchId: ctx.batchId },
+      resumeBatchId ? { completeBatchId: resumeBatchId, jobId } : undefined);
 
       // A stream cut short leaves nothing to show — often literally nothing.
       // Don't call that a success; the server finished and saved the result
@@ -747,6 +725,7 @@ const Index = () => {
   const enqueueVariant = useCallback((
     theme: { id: string; name: string; emoji: string },
     ctx: GenerationContext,
+    resumeBatchId?: string,
   ): Promise<{ ok: boolean; stillPending: boolean; error?: unknown }> => {
     setLoadingVariants(prev => ({ ...prev, [theme.id]: true }));
     const run = generationChainRef.current.then(() => {
@@ -756,7 +735,7 @@ const Index = () => {
         setLoadingVariants(prev => ({ ...prev, [theme.id]: false }));
         return { ok: false, stillPending: false };
       }
-      return runVariant(theme, ctx);
+      return runVariant(theme, ctx, resumeBatchId);
     });
     // Failures propagate to the caller, not down the chain to the next variant.
     generationChainRef.current = run.then(() => undefined, () => undefined);
@@ -775,6 +754,132 @@ const Index = () => {
     }
     return { preferences, batchId, jobIdByTheme, runId: runIdRef.current };
   }, [itineraries, preferences]);
+
+  // ── Unlock (preview → paid trip) ───────────────────────────────────────────
+  const [showUnlockDialog, setShowUnlockDialog] = useState(false);
+  const [unlockLoading, setUnlockLoading] = useState(false);
+
+  // Finish generating every opened variant that still has locked content —
+  // the server writes only the missing days per variant. Runs through the
+  // same serialized queue as normal generations. A variant whose banked state
+  // is gone (409) falls back to a full regeneration, free under the now-
+  // entitled batch.
+  const resumeLockedVariants = useCallback(() => {
+    const ctx = generationContextRef.current ?? rebuildContextFromVariants();
+    generationContextRef.current = ctx;
+    for (const variant of itineraries) {
+      if (!variant.structuredData?.access || !variant.batchId || !variant.jobId) continue;
+      const theme = { id: variant.id, name: variant.name, emoji: variant.emoji };
+      void enqueueVariant(theme, ctx, variant.batchId).then(result => {
+        if (result.ok || runIdRef.current !== ctx.runId) return;
+        const message = result.error instanceof Error ? result.error.message : "";
+        if (message === "resume_unavailable") {
+          startedVariantsRef.current.delete(variant.id);
+          setItineraries(prev => prev.map(it =>
+            it.id === variant.id ? { ...it, content: "", structuredData: undefined } : it));
+          delete ctx.jobIdByTheme[variant.id];
+          void enqueueVariant(theme, ctx);
+          return;
+        }
+        toast({
+          title: `Couldn't finish ${variant.name}`,
+          description: "Your trip is unlocked — use the retry button to fill in the rest.",
+          variant: "destructive",
+        });
+      });
+    }
+  }, [itineraries, enqueueVariant, rebuildContextFromVariants]);
+
+  // A locked-content tap on an already-unlocked trip (e.g. the resume failed
+  // or the purchase landed on another tab) re-runs the resume instead of
+  // asking for money again.
+  const handleUnlockRequest = useCallback(() => {
+    const batchId = itineraries.find(it => it.batchId)?.batchId;
+    if (batchId && entitlements.entitledBatches.has(batchId)) {
+      toast({ title: "Finishing your trip...", description: "Filling in the locked days now." });
+      resumeLockedVariants();
+      return;
+    }
+    setShowUnlockDialog(true);
+  }, [itineraries, entitlements.entitledBatches, resumeLockedVariants]);
+
+  // The $5 starter pack unlocks the batch the current trip was generated
+  // under. Signed out: queue the purchase and sign in first — the resume
+  // effect above sends the user straight to Stripe afterwards.
+  const handleUnlockPurchase = useCallback(async () => {
+    const unlockBatchId = itineraries.find(it => it.batchId)?.batchId;
+    if (!user) {
+      clearPendingAuthAction();
+      savePendingCheckout({ pack: 'pack_2', unlockBatchId });
+      setShowUnlockDialog(false);
+      authInitiatedRef.current = false;
+      setShowAuthModal(true);
+      return;
+    }
+    setUnlockLoading(true);
+    try {
+      await startCheckout('pack_2', unlockBatchId);
+      // The browser is navigating to Stripe — leave the spinner up.
+    } catch (err) {
+      setUnlockLoading(false);
+      toast({
+        title: "Couldn't start checkout",
+        description: err instanceof Error ? err.message : "Please try again",
+        variant: "destructive",
+      });
+    }
+  }, [user, itineraries]);
+
+  // ── Checkout return ────────────────────────────────────────────────────────
+  // Capture ?checkout=…&session_id=… once and strip it from the URL so a
+  // reload can't replay the confirmation.
+  const checkoutReturnRef = useRef<{ status: string; sessionId: string | null } | null>(null);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get('checkout');
+    if (!status) return;
+    checkoutReturnRef.current = { status, sessionId: params.get('session_id') };
+    params.delete('checkout');
+    params.delete('session_id');
+    const rest = params.toString();
+    window.history.replaceState({}, '', window.location.pathname + (rest ? `?${rest}` : ''));
+    if (status === 'cancelled') {
+      checkoutReturnRef.current = null;
+      toast({ title: "No charge", description: "Your trip is right where you left it." });
+    }
+  }, []);
+
+  // Confirm the purchase once the auth session has restored (the redirect
+  // lands before Supabase has rehydrated the user). waitForPurchase polls for
+  // the webhook and falls back to confirming with Stripe directly.
+  useEffect(() => {
+    const pending = checkoutReturnRef.current;
+    if (!pending || pending.status !== 'success' || !pending.sessionId || !user) return;
+    checkoutReturnRef.current = null;
+    const sessionId = pending.sessionId;
+    (async () => {
+      setShowUnlockDialog(false);
+      toast({ title: "Confirming your purchase..." });
+      const applied = await waitForPurchase(sessionId);
+      if (!applied) {
+        toast({
+          title: "Payment is still processing",
+          description: "Your card was charged only if Stripe shows the payment as complete. Reload in a moment — your credits will be here.",
+          variant: "destructive",
+        });
+        return;
+      }
+      await entitlements.refresh();
+      const hasLocked = itineraries.some(it => it.structuredData?.access);
+      toast({
+        title: hasLocked ? "Trip unlocked!" : "Purchase complete!",
+        description: hasLocked
+          ? "Filling in the rest of your trip now — plus 1 more full trip on your account."
+          : "Your trip credits are ready.",
+      });
+      if (hasLocked) resumeLockedVariants();
+    })();
+  }, [user, entitlements, itineraries, resumeLockedVariants]);
 
   // Opening a variant that hasn't been generated yet starts it.
   // A variant whose stream was cut off is otherwise stuck: its partial content

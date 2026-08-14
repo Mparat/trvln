@@ -1,6 +1,35 @@
-import { functionHeaders } from '@/lib/supabase';
+import { supabase, functionHeaders } from '@/lib/supabase';
 
 export type CreditPack = 'pack_2' | 'pack_10';
+
+// After the Stripe redirect lands back here, the webhook has usually already
+// credited the purchase — poll our own purchases row (RLS-scoped) briefly,
+// then fall back to confirming with Stripe directly via confirm-checkout.
+// Both paths are idempotent server-side, so racing the webhook is harmless.
+export async function waitForPurchase(sessionId: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const { data } = await supabase
+      .from('purchases')
+      .select('id')
+      .eq('stripe_session_id', sessionId)
+      .maybeSingle();
+    if (data) return true;
+    await new Promise(resolve => setTimeout(resolve, 1500));
+  }
+  try {
+    const headers = await functionHeaders();
+    const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/confirm-checkout`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ sessionId }),
+    });
+    if (!response.ok) return false;
+    const data = await response.json();
+    return !!data.applied;
+  } catch {
+    return false;
+  }
+}
 
 // A purchase intent that survives the Google sign-in redirect, so a signed-out
 // user who taps "Unlock" lands in Stripe right after coming back signed in.
