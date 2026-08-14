@@ -155,11 +155,12 @@ create table trip_entitlements (
   created_at timestamptz not null default now()
 );
 
--- Unredacted generation output. Deny-all RLS; service role only.
--- Public itinerary_jobs.content holds the redacted version.
+-- Resume state for gated generations. Deny-all RLS; service role only.
+-- Public itinerary_jobs.content holds only the redacted emitted stream.
 create table itinerary_jobs_private (
   job_id uuid primary key,
-  content text not null,
+  content text not null,        -- unredacted emitted JSON (skeleton + written days)
+  resume_state jsonb,           -- {research, planFindings, preferences, themeVariant}
   updated_at timestamptz not null default now()
 );
 ```
@@ -196,11 +197,16 @@ A malicious client lying about `variantRole` can at most get the *more* restrict
 
 Emitted JSON gains a top-level `access` block: `{tier, lockedDayCount, lockedBookingCounts}` — the client renders lock UI purely from the response shape (no separate client feature flag; a server env var `PAYWALL=on|off` is the single kill switch, following the existing `ITINERARY_SPLIT_GENERATION` pattern).
 
-**Persistence split:** the redacted stream goes to `itinerary_jobs.content` (public, unchanged recovery polling) and the *unredacted* known content — full skeleton including the complete booking checklist, plus whatever days were written — goes to `itinerary_jobs_private`. `finalizeCosts` records `mode: 'split_preview_primary' | 'split_preview_secondary'` so free-tier spend is visible in `generation_costs` immediately.
+**Persistence split:** the redacted stream goes to `itinerary_jobs.content` (public, unchanged recovery polling); `itinerary_jobs_private` gets the *unredacted* known content (full skeleton including the complete booking checklist, plus whatever days were written) **and the resume state**. The resume state matters because pass 2 doesn't run off the plan alone: every day-slice call feeds the raw research blocks into the prompt (`index.ts:2219-2222`). So a preview run must persist `{research blocks, plan-review findings, preferences, themeVariant}` alongside the skeleton — otherwise unlocking would have to re-run research (~30s + real cost) to write the remaining days. `finalizeCosts` records `mode: 'split_preview_primary' | 'split_preview_secondary'` so free-tier spend is visible in `generation_costs` immediately.
 
 ### 4.4 Resume-on-unlock
 
-New request shape on the same function: `{completeBatchId, jobId}`. Server verifies the JWT **and** `trip_entitlements` for the batch, loads `itinerary_jobs_private` for that job, extracts the roster and shared plan from the stored skeleton, and runs day slices for **only the locked days** — no research, no re-planning. It streams the completed JSON exactly like a normal generation (same SSE + polling recovery), updates both jobs tables, and records `mode: 'resume_unlock'`.
+This is the one place the generation sequence itself changes shape. Today the pipeline is strictly one-shot: request reading → research → plan skeleton → critique → day slices → assemble, all in one invocation's memory, nothing intermediate persisted. Resume requires a **second entry point** that re-enters at the day-writing pass, which means two structural changes to `generate-itinerary`:
+
+1. **Extract pass 2 into a callable unit.** The day-slice + assembly block (`index.ts:2119-2339`) becomes a function taking `{roster, skeleton, researchBlocks, planFindings, systemBlocks, daysToWrite, daysAlreadyWritten}` — invoked by the normal path with in-memory values, and by the resume path with values rehydrated from `itinerary_jobs_private.resume_state`. The system prompt is rebuilt deterministically from the stored preferences/themeVariant (it's a pure function of them today).
+2. **Persist the intermediate state on preview runs** (§4.3) — skeleton, written days, research blocks, findings, preferences. This is new: nothing like it exists, and without it "generate the rest later" is impossible without paying for research twice.
+
+The resume request itself: `{completeBatchId, jobId}` on the same function. Server verifies the JWT **and** `trip_entitlements` for the batch, loads the private row, runs day slices for **only the locked days**, merges them with the already-written days in trip order, and streams the completed JSON through the exact same SSE + `[DONE]` + `itinerary_jobs` polling contract as a normal generation — so the client's streaming, recovery, and parsing machinery is reused untouched. Both job rows are updated (public redacted → now full; private superseded) and costs record `mode: 'resume_unlock'`. Wall-clock is comfortable: resume skips research (~32s) and planning (~77s), running only day slices.
 
 Fallback: if the private row is missing (legacy trip, purge), fall back to a full regeneration for that variant. Client-side, resume slots into the existing per-variant queue (`enqueueVariant`) so it serializes with any in-flight generation, and runs automatically for every already-opened variant after checkout success.
 
