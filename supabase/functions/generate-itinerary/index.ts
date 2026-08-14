@@ -419,6 +419,7 @@ Use this exact schema. Every field shown is required unless marked optional. All
 STRICT RULES:
 - Output ONLY the JSON object — nothing before or after it
 - No markdown code fences in the actual output — the above \`\`\` are just for illustration
+- Hard caps on every trip-level list — these bound how long the plan takes to write, and the whole generation runs against a fixed wall clock: at most 3 flights.options, at most 2 accommodation options per location, at most 6 bookingChecklist items (the ones with real lead times or consequences), at most 2 alternatives. Fewer is always acceptable; choosing the best two beats listing four.
 - Every day must have exactly 3 periods: Morning, Afternoon, Evening
 - Give each period the number of activities the day actually warrants: 1 to 3. Two is common, but a period built around a single real thing — a long walk, a day trip, a lunch that runs into the afternoon — takes exactly one, and padding it to two is the clearest tell that an itinerary was generated rather than planned. A day that is genuinely one big thing may run one activity per period throughout.
 - Deliberate open time is a legitimate entry and often the most human thing on the page: an unstructured hour in a named neighborhood, a slow morning after a late arrival, an afternoon left free because the day before was long. Name it as an activity and say what it is for. This is not a way to fill space you could not research — that is a different thing and it reads differently.
