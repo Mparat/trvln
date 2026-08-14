@@ -111,11 +111,15 @@ async function resolveTier(args: {
   if (!paywallEnabled()) return { tier: "full", paywalled: false };
   const { batchId, jobId, themeId, userId } = args;
 
-  if (batchId) {
+  // An entitlement grants full tier only to the user who owns it — batch ids
+  // leak through the readable jobs table, so an unscoped check here would let
+  // anyone generate for free under someone else's paid batch.
+  if (batchId && userId) {
     const { data: entitlement } = await supabaseAdmin
       .from("trip_entitlements")
-      .select("batch_id")
+      .select("user_id")
       .eq("batch_id", batchId)
+      .eq("user_id", userId)
       .maybeSingle();
     if (entitlement) return { tier: "full", paywalled: false };
   }
@@ -1063,6 +1067,18 @@ async function handleResume(args: {
     .maybeSingle();
   if (!entitlement) return jsonRes({ error: "This trip is not unlocked" }, 402);
   if (entitlement.user_id !== userId) return jsonRes({ error: "Not your trip" }, 403);
+
+  // The job must belong to the entitled batch — without this, an entitled
+  // caller could name any other user's jobId and have its private content
+  // generated, streamed, and published under the victim's public job row.
+  const { data: jobRow } = await supabaseAdmin
+    .from("itinerary_jobs")
+    .select("batch_id")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (!jobRow || jobRow.batch_id !== completeBatchId) {
+    return jsonRes({ error: "Not your trip" }, 403);
+  }
 
   const { data: priv } = await supabaseAdmin
     .from("itinerary_jobs_private")

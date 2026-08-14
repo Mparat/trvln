@@ -302,13 +302,13 @@ All lock rendering is driven by the response shape (`locked: true` days, stubbed
 
 ### 6.3 `handleGenerate` changes
 
-One synchronous check against the entitlements context before theme suggestion: purchaser at 0 credits → `PaywallModal`, no generation. Everyone else proceeds as today; the server resolves tier and performs any credit spend itself (§4.5). A 402 from `generate-itinerary` also renders the paywall (stale-state safety net).
+No client-side paywall pre-check (revised during implementation: the client can't see the server's `PAYWALL` switch, and a pre-check would block paying users while the kill switch is off). The server resolves tier and performs any credit spend itself (§4.5); a 402 from `generate-itinerary` routes to the `PaywallModal`, costing one cheap themes call for an out-of-credits purchaser.
 
 ---
 
 ## 7. Hardening & follow-ons (in scope, phased)
 
-- **`itinerary_jobs` scoping**: with `user_id` now stamped, replace the "Anyone can read" policy with owner-or-null reads once anonymous flows are accounted for. Until then the exposure is only ever *redacted* content behind an unguessable UUID — same as today, minus the paid content that used to be there.
+- **`itinerary_jobs` scoping**: done in the foundation migration (pulled forward from this phase during implementation review — paid content lands in this table, so world-readability was an active bypass vector, not deferred hardening). Reads are owner-scoped; anonymous rows (always redacted preview content) stay open so signed-out recovery polling works. Entitlement checks in `generate-itinerary` are additionally caller-scoped, and `entitle_batch` refuses cross-user idempotency.
 - **Abuse limits on free previews**: previews still cost real money (research + skeleton ≈ $0.15–0.35 per opened variant). Add a coarse per-IP/day cap on `generate-itinerary` preview-tier requests (mirroring `send-ready-text`'s in-memory limiter note) before any marketing push.
 - **`edit-itinerary` metering**: it gains auth + entitlement check in Phase 1 (gate), and cost tracking (it currently records nothing).
 - **Stripe Tax**: off for v1 (US-only, low volume). Revisit before real volume; enabling `automatic_tax` later is additive.

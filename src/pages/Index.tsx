@@ -310,6 +310,10 @@ const Index = () => {
   // (cancel the queued action) from "left to complete sign-in" (keep it).
   const authInitiatedRef = useRef(false);
 
+  // The saved_trips row backing the trip on screen, when there is one — set on
+  // save and on opening a saved trip, so re-saves update in place.
+  const savedTripIdRef = useRef<string | null>(null);
+
   const entitlements = useEntitlements();
 
   useEffect(() => {
@@ -505,14 +509,26 @@ const Index = () => {
 
       const title = dateStr ? `${destination} · ${dateStr}` : destination;
 
-      const { error } = await supabase.from("saved_trips").insert({
-        user_id: currentUser.id,
-        title,
-        // Stored as jsonb — cast our typed objects to the Json column type.
-        variants: currentItineraries as unknown as Json,
-        preferences: currentPrefs as unknown as Json,
-      });
-      if (error) throw error;
+      // Re-saving a trip that already has a row (e.g. after an unlock filled
+      // its content in) updates in place rather than duplicating it.
+      if (savedTripIdRef.current) {
+        const { error } = await supabase.from("saved_trips").update({
+          title,
+          variants: currentItineraries as unknown as Json,
+          preferences: currentPrefs as unknown as Json,
+        }).eq("id", savedTripIdRef.current);
+        if (error) throw error;
+      } else {
+        const { data, error } = await supabase.from("saved_trips").insert({
+          user_id: currentUser.id,
+          title,
+          // Stored as jsonb — cast our typed objects to the Json column type.
+          variants: currentItineraries as unknown as Json,
+          preferences: currentPrefs as unknown as Json,
+        }).select("id").single();
+        if (error) throw error;
+        savedTripIdRef.current = data?.id ?? null;
+      }
       setIsSaved(true);
       toast({ title: "Trip saved!", description: "Find it in Saved trips" });
     } catch {
@@ -609,7 +625,18 @@ const Index = () => {
   }, []);
 
   // ── Open a saved trip ──────────────────────────────────────────────────────
-  const handleOpenSavedTrip = useCallback((variants: ItineraryVariant[], savedPrefs: TripPreferences | null) => {
+  const handleOpenSavedTrip = useCallback((variants: ItineraryVariant[], savedPrefs: TripPreferences | null, tripId?: string) => {
+    // This trip replaces whatever was on screen: supersede any in-flight
+    // generation and drop the old trip's context so a later rebuild (retry,
+    // variant click, unlock resume) derives from THESE variants — reusing the
+    // previous trip's batch here would regenerate the wrong trip.
+    runIdRef.current += 1;
+    generationContextRef.current = null;
+    startedVariantsRef.current = new Set();
+    setLoadingVariants({});
+    setIsGenerating(false);
+    setIsReconnecting(false);
+    savedTripIdRef.current = tripId ?? null;
     setItineraries(variants);
     setActiveVariant(0);
     if (savedPrefs) setPreferences(savedPrefs);
@@ -623,6 +650,7 @@ const Index = () => {
     setActiveVariant(0);
     setLoadingVariants({});
     setIsSaved(false);
+    savedTripIdRef.current = null;
     setView('input');
     // The itinerary that a pending save referred to is gone — drop the queued save.
     clearPendingAuthAction();
@@ -810,6 +838,22 @@ const Index = () => {
     }
   }, [itineraries, enqueueVariant, rebuildContextFromVariants]);
 
+  // Once an unlock has filled every variant in (no access markers remain),
+  // refresh the trip's saved row so Saved trips reopens the content the user
+  // paid for, not the redacted preview it stored before the purchase.
+  const hadLockedContentRef = useRef(false);
+  useEffect(() => {
+    const hasLocked = itineraries.some(it => it.structuredData?.access);
+    if (hasLocked) { hadLockedContentRef.current = true; return; }
+    if (!hadLockedContentRef.current) return;
+    hadLockedContentRef.current = false;
+    if (!savedTripIdRef.current || !user || itineraries.every(it => !it.content)) return;
+    void supabase.from('saved_trips').update({
+      variants: itineraries as unknown as Json,
+      preferences: preferences as unknown as Json,
+    }).eq('id', savedTripIdRef.current);
+  }, [itineraries, user, preferences]);
+
   // A locked-content tap on an already-unlocked trip (e.g. the resume failed
   // or the purchase landed on another tab) re-runs the resume instead of
   // asking for money again.
@@ -972,13 +1016,10 @@ const Index = () => {
       return;
     }
 
-    // Purchasers out of credits are paywalled before anything spins up. This
-    // is presentation only — the server enforces the same rule with a 402,
-    // which the paths below also route to the paywall.
-    if (user && entitlements.hasPurchased && entitlements.balance <= 0) {
-      setShowPaywall(true);
-      return;
-    }
+    // No client-side paywall pre-check here on purpose: only the server knows
+    // whether the paywall is switched on, and a purchaser must generate
+    // normally with PAYWALL=off. An out-of-credits purchaser costs one cheap
+    // themes call before the server's 402 routes them to the paywall below.
 
     // Supersede any in-flight reconnect from a previous session.
     const runId = ++runIdRef.current;
@@ -989,6 +1030,7 @@ const Index = () => {
     setItineraries([]);
     setActiveVariant(0);
     setIsSaved(false);
+    savedTripIdRef.current = null; // a fresh trip gets a fresh saved_trips row
     setView('results');
 
     try {
@@ -1076,7 +1118,7 @@ const Index = () => {
         setIsAnalyzingMedia(false);
       }
     }
-  }, [preferences, user, entitlements, suggestThemes, enqueueVariant, analyzeInspiration]);
+  }, [preferences, suggestThemes, enqueueVariant, analyzeInspiration]);
 
   const handleEdit = useCallback(async (editRequest: string) => {
     const current = itineraries[activeVariant];

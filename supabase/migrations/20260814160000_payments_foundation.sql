@@ -92,6 +92,16 @@ create view public.credit_balances
 alter table public.itinerary_jobs add column user_id uuid;
 alter table public.generation_costs add column user_id uuid;
 
+-- itinerary_jobs was world-readable ("Anyone can read itinerary jobs"), which
+-- was tolerable when every row held free content behind an unguessable UUID.
+-- Paid trips now land their full content here, so reads are scoped: rows made
+-- by a signed-in user are theirs alone; anonymous rows (always preview-tier,
+-- redacted) stay open so signed-out recovery polling keeps working.
+drop policy "Anyone can read itinerary jobs" on public.itinerary_jobs;
+create policy "Jobs are readable by their owner (anonymous jobs by anyone)"
+  on public.itinerary_jobs for select
+  using (user_id is null or user_id = auth.uid());
+
 -- ── saved_trips: allow re-saving an unlocked trip in place ───────────────────
 create policy "Users can update their own trips"
   on public.saved_trips for update
@@ -118,8 +128,14 @@ begin
   select coalesce(sum(delta), 0) into v_balance
   from credit_ledger where user_id = p_user;
 
-  if exists (select 1 from trip_entitlements where batch_id = p_batch) then
+  -- Idempotent only for the SAME user: someone else's entitlement on this
+  -- batch must never read as "already spent" for the caller.
+  if exists (select 1 from trip_entitlements
+             where batch_id = p_batch and user_id = p_user) then
     return v_balance;
+  end if;
+  if exists (select 1 from trip_entitlements where batch_id = p_batch) then
+    raise exception 'BATCH_ALREADY_ENTITLED';
   end if;
 
   if v_balance < 1 then
