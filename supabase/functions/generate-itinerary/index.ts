@@ -76,6 +76,78 @@ const RequestSchema = z.object({
   batchId: z.string().uuid().optional(),
 });
 
+// ── Preview gating ───────────────────────────────────────────────────────────
+// Free (un-entitled) generations are truncated server-side: the primary
+// variant writes only the first FREE_PRIMARY_DAYS days, secondary variants
+// write none. Locked days ship as title-only placeholders and the real
+// content is never generated — the paid remainder is produced later by
+// resume-on-unlock. See docs/payments-spec.md §4.3.
+type Tier = "full" | "preview_primary" | "preview_secondary";
+const FREE_PRIMARY_DAYS = 3;
+const paywallEnabled = () => (Deno.env.get("PAYWALL") ?? "off").toLowerCase() === "on";
+
+// The batch's earliest-registered job is the primary variant. A retry
+// re-registers under a fresh jobId but keeps its theme, so when the earliest
+// row isn't this job, matching themes still count as primary. Derived
+// server-side — the client is not trusted on tier-relevant input.
+async function resolveTier(args: {
+  batchId: string | null;
+  jobId?: string;
+  themeId: string | null;
+}): Promise<Tier> {
+  if (!paywallEnabled()) return "full";
+  const { batchId, jobId, themeId } = args;
+
+  if (batchId) {
+    const { data: entitlement } = await supabaseAdmin
+      .from("trip_entitlements")
+      .select("batch_id")
+      .eq("batch_id", batchId)
+      .maybeSingle();
+    if (entitlement) return "full";
+  }
+
+  let primary = true;
+  if (batchId && jobId) {
+    const { data: earliest } = await supabaseAdmin
+      .from("itinerary_jobs")
+      .select("id, theme_id")
+      .eq("batch_id", batchId)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (earliest && earliest.id !== jobId) {
+      primary = (earliest.theme_id ?? null) === themeId;
+    }
+  }
+  return primary ? "preview_primary" : "preview_secondary";
+}
+
+// Split the booking checklist into what a preview may ship and per-priority
+// counts of what it may not. Locked items are counted, never sent — the client
+// renders sized placeholder rows from the counts alone.
+function redactChecklist(items: unknown, tier: Tier): {
+  visible: unknown[];
+  lockedCounts: Record<string, number>;
+} {
+  const list = Array.isArray(items) ? items : [];
+  const priorityOf = (it: unknown): "high" | "medium" | "low" => {
+    const p = (it as { priority?: string })?.priority;
+    return p === "high" ? "high" : p === "medium" ? "medium" : "low";
+  };
+  const visible: unknown[] = [];
+  const lockedCounts: Record<string, number> = { high: 0, medium: 0, low: 0 };
+  for (const item of list) {
+    const priority = priorityOf(item);
+    if (tier === "preview_primary" && priority === "high") {
+      visible.push(item);
+    } else {
+      lockedCounts[priority]++;
+    }
+  }
+  return { visible, lockedCounts };
+}
+
 
 // Helper function to call Perplexity for grounded web search.
 //
@@ -938,6 +1010,13 @@ serve(async (req) => {
       });
       if (jobError) console.error("Failed to register itinerary job:", jobError);
     }
+
+    const tier = await resolveTier({
+      batchId: batchId ?? jobId ?? null,
+      jobId,
+      themeId: themeVariant?.id ?? null,
+    });
+    if (tier !== "full") console.log(`[gate] tier: ${tier}`);
 
     const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
     if (!ANTHROPIC_API_KEY) {
@@ -1934,6 +2013,14 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
         let skeleton = splitGenerationEnabled ? await trySkeleton() : null;
 
         if (!skeleton) {
+          if (tier !== "full") {
+            // The single-call fallback streams the whole itinerary in one
+            // unredacted pass — a preview must never take it. Fail the job
+            // instead; the client's retry path handles the rest. (This also
+            // means ITINERARY_SPLIT_GENERATION=off and PAYWALL=on cannot be
+            // combined for free users.)
+            throw new Error("Generation failed before day planning — please retry");
+          }
           await runSingleCall();
           costs.addAnthropic("single_call", MODEL, singleCallUsage);
           await forward("data: [DONE]\n\n");
@@ -1957,13 +2044,54 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
         // call instead of the two the fallback used to spend.
         const skeletonDays = Array.isArray(skeleton.days) ? skeleton.days : [];
         if ((skeleton.dayPlan?.length ?? 0) === 0 && skeletonDays.length > 0) {
-          const tail: Record<string, unknown> = {};
+          const fullTail: Record<string, unknown> = {};
           for (const key of ["summary", "budget", "flights", "accommodation", "bookingChecklist", "alternatives"]) {
-            if (skeleton[key] !== undefined) tail[key] = skeleton[key];
+            if (skeleton[key] !== undefined) fullTail[key] = skeleton[key];
           }
-          if (researchSources.length) tail.sources = researchSources;
+          if (researchSources.length) fullTail.sources = researchSources;
+
+          // Preview tiers: days past the free limit exist here in full, so the
+          // real content is persisted privately and only title-level
+          // placeholders are emitted. Resume simply replays the private copy.
+          const freeLimit = tier === "full" ? skeletonDays.length
+            : tier === "preview_primary" ? Math.min(FREE_PRIMARY_DAYS, skeletonDays.length)
+            : 0;
+          const emittedDays = skeletonDays.map((raw, i) => {
+            const day = (raw ?? {}) as Record<string, unknown>;
+            const dayNumber = typeof day.dayNumber === "number" ? day.dayNumber : i + 1;
+            if (i < freeLimit) return { ...day, dayNumber };
+            return {
+              dayNumber,
+              title: typeof day.title === "string" ? day.title : `Day ${dayNumber}`,
+              location: typeof day.location === "string" ? day.location : "",
+              ...(typeof day.transitNote === "string" ? { transitNote: day.transitNote } : {}),
+              periods: [],
+              locked: true,
+            };
+          });
+
+          const tail: Record<string, unknown> = { ...fullTail };
+          if (tier !== "full") {
+            const { visible, lockedCounts } = redactChecklist(fullTail.bookingChecklist, tier);
+            if (fullTail.bookingChecklist !== undefined) tail.bookingChecklist = visible;
+            tail.access = {
+              tier,
+              lockedDayCount: emittedDays.length - freeLimit,
+              lockedBookingCounts: lockedCounts,
+            };
+            if (jobId) {
+              const { error: privError } = await supabaseAdmin.from("itinerary_jobs_private").upsert({
+                job_id: jobId,
+                content: JSON.stringify({ days: skeletonDays, ...fullTail }),
+                resume_state: null,
+                updated_at: new Date().toISOString(),
+              });
+              if (privError) console.error("Failed to persist private job state:", privError);
+            }
+          }
+
           const tailJson = JSON.stringify(tail);
-          await emit('{"days":' + JSON.stringify(skeletonDays));
+          await emit('{"days":' + JSON.stringify(emittedDays));
           await emit(tailJson.length > 2 ? "," + tailJson.slice(1) : "}");
           await forward("data: [DONE]\n\n");
           timings.model_generation = Date.now() - modelStart;
@@ -1978,7 +2106,7 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
             grounded: hasGroundedResearch,
             client_disconnected: !clientConnected,
           }));
-          finalizeCosts({ mode: "skeleton_complete", dayCount: skeletonDays.length, theme: themeVariant?.id, grounded: hasGroundedResearch, batchId, jobId });
+          finalizeCosts({ mode: tier === "full" ? "skeleton_complete" : `skeleton_complete_${tier}`, dayCount: skeletonDays.length, theme: themeVariant?.id, grounded: hasGroundedResearch, batchId, jobId });
           await persistComplete();
           return;
         }
@@ -2144,9 +2272,19 @@ or
             JSON.stringify(droppedDuplicates));
         }
 
-        const slices = planDaySlices(roster.length);
+        // Preview tiers write only the free prefix of the roster. Locked days
+        // are emitted as title-only placeholders after the loop below, and
+        // their prose is generated by resume-on-unlock — never here, never
+        // speculatively.
+        const freeDayLimit = tier === "full" ? roster.length
+          : tier === "preview_primary" ? Math.min(FREE_PRIMARY_DAYS, roster.length)
+          : 0;
+        const lockedDayNumbers = roster.slice(freeDayLimit).map(d => d.dayNumber);
+
+        const slices = planDaySlices(freeDayLimit);
         sliceCount = slices.length;
-        console.log(`[timing] day slices: ${roster.length} days across ${slices.length} call(s)`);
+        console.log(`[timing] day slices: ${freeDayLimit}/${roster.length} days across ${slices.length} call(s)` +
+          (lockedDayNumbers.length ? ` (${lockedDayNumbers.length} locked)` : ""));
 
         // The assigned names, before any day call has run. If these are already
         // generic ("Trattoria in Varenna village") the skeleton could not find
@@ -2340,26 +2478,56 @@ Put the day(s) in the \`emit_days\` tool call. Do not write them out as text.`;
           }
         }
 
+        // Locked days keep their roster identity — title, location, transit —
+        // so the preview can tease them, but their periods were never
+        // generated and there is nothing here to leak.
+        for (const dayNumber of lockedDayNumbers) {
+          const entry = roster[dayNumber - 1];
+          const day = {
+            dayNumber,
+            title: entry?.title ?? `Day ${dayNumber}`,
+            location: entry?.location ?? "",
+            ...(entry?.transitNote ? { transitNote: entry.transitNote } : {}),
+            periods: [],
+            locked: true,
+          };
+          assembledDays.push(day);
+          await emit(`${assembledDays.length > 1 ? "," : ""}${JSON.stringify(day)}`);
+        }
+
         // Everything the skeleton produced, written after the days so the
         // failure note below can go into summary.assumptions directly.
-        const tail: Record<string, unknown> = {};
+        // fullTail is the unredacted version, persisted privately for resume;
+        // tail is what actually ships.
+        const fullTail: Record<string, unknown> = {};
         for (const key of ["summary", "budget", "flights", "accommodation", "bookingChecklist", "alternatives"]) {
-          if (skeleton[key] !== undefined) tail[key] = skeleton[key];
+          if (skeleton[key] !== undefined) fullTail[key] = skeleton[key];
         }
-        if (researchSources.length) tail.sources = researchSources;
+        if (researchSources.length) fullTail.sources = researchSources;
 
         // Name the gap where the traveler will actually read it, rather than
         // shipping a blank day with no explanation.
         if (failedDays.length > 0) {
-          const summary = (tail.summary ?? {}) as Record<string, unknown>;
+          const summary = (fullTail.summary ?? {}) as Record<string, unknown>;
           const existing = Array.isArray(summary.assumptions) ? summary.assumptions : [];
           const plural = failedDays.length > 1;
-          tail.summary = {
+          fullTail.summary = {
             ...summary,
             assumptions: [
               ...existing,
               `Day${plural ? "s" : ""} ${failedDays.join(", ")} could not be generated — regenerate the itinerary to fill ${plural ? "them" : "it"} in.`,
             ],
+          };
+        }
+
+        const tail: Record<string, unknown> = { ...fullTail };
+        if (tier !== "full") {
+          const { visible, lockedCounts } = redactChecklist(fullTail.bookingChecklist, tier);
+          if (fullTail.bookingChecklist !== undefined) tail.bookingChecklist = visible;
+          tail.access = {
+            tier,
+            lockedDayCount: lockedDayNumbers.length,
+            lockedBookingCounts: lockedCounts,
           };
         }
 
@@ -2405,10 +2573,36 @@ Put the day(s) in the \`emit_days\` tool call. Do not write them out as text.`;
         console.log(`[quality] dining: unique=${seen.size} duplicated=${duplicates.length} ` +
           (duplicates.length ? JSON.stringify(duplicates.map(([name, n]) => `${name} x${n}`)) : ""));
 
-        finalizeCosts({ mode: "split", dayCount, theme: themeVariant?.id, grounded: hasGroundedResearch, batchId, jobId });
+        finalizeCosts({ mode: tier === "full" ? "split" : `split_${tier}`, dayCount, theme: themeVariant?.id, grounded: hasGroundedResearch, batchId, jobId });
 
         // Persist the finished itinerary for reconnecting clients.
         await persistComplete();
+
+        // Preview runs bank everything a resume-on-unlock needs: the
+        // unredacted content so far, and the exact inputs the day-slice calls
+        // were made with — the slices consume the research verbatim, so
+        // without it an unlock would have to pay for research twice.
+        if (tier !== "full" && jobId) {
+          const writtenDays = assembledDays.filter(d => !(d as { locked?: boolean }).locked);
+          const { error: privError } = await supabaseAdmin.from("itinerary_jobs_private").upsert({
+            job_id: jobId,
+            content: JSON.stringify({ days: writtenDays, ...fullTail }),
+            resume_state: {
+              batchId: batchId ?? jobId,
+              themeVariant: themeVariant ?? null,
+              roster,
+              lockedDayNumbers,
+              takenList,
+              planFindings,
+              sharedPlanJson,
+              userPrompt,
+              systemBlocks,
+              researchBlocks,
+            },
+            updated_at: new Date().toISOString(),
+          });
+          if (privError) console.error("Failed to persist private job state:", privError);
+        }
       } catch (streamError) {
         console.error("Generation/persist error:", streamError);
         // The money is spent whether or not the generation survived — a failed
