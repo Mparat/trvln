@@ -18,7 +18,9 @@ export async function waitForPurchase(sessionId: string): Promise<boolean> {
   }
   try {
     const headers = await functionHeaders();
-    const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/confirm-checkout`, {
+    // Payment endpoints are served as sub-routes of generate-itinerary — the
+    // one function CI deploys. See supabase/functions/_shared/stripeHttp.ts.
+    const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-itinerary/confirm-checkout`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ sessionId }),
@@ -60,7 +62,8 @@ export const clearPendingCheckout = () => {
 export async function startCheckout(pack: CreditPack, unlockBatchId?: string): Promise<void> {
   const headers = await functionHeaders();
   if (!headers.Authorization) throw new Error('Sign in to purchase');
-  const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-checkout-session`, {
+  // Served as a sub-route of generate-itinerary — the one function CI deploys.
+  const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-itinerary/create-checkout-session`, {
     method: 'POST',
     headers,
     body: JSON.stringify({ pack, unlockBatchId }),

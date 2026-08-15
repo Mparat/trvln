@@ -258,7 +258,7 @@ Creates a Checkout Session: `mode: 'payment'`, the pack's Price ID, `customer_em
 - **`checkout.session.async_payment_succeeded` / `async_payment_failed`** → same handler / no-op. (Card-only checkout makes these rare, but handling them is cheap insurance.)
 - **`charge.refunded`** → log + insert a compensating negative ledger row (`reason: 'refund'`) capped at the purchase's unspent credits; entitlements already consumed are not clawed back. Refunds themselves are issued manually in the Stripe dashboard for v1.
 
-Everything else: 200 and ignore. Configure the endpoint in the Stripe dashboard pointing at `/functions/v1/stripe-webhook`.
+Everything else: 200 and ignore. Configure the endpoint in the Stripe dashboard pointing at `/functions/v1/generate-itinerary/stripe-webhook` (see deploy note in §5.5).
 
 ### 5.4 Checkout return flow (client)
 
@@ -276,7 +276,7 @@ The pre-checkout app state survives the redirect via the existing `trvln:session
 
 - New env (Supabase function secrets): `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_PACK_2`, `STRIPE_PRICE_PACK_10`, `CHECKOUT_ORIGIN_ALLOWLIST`, `PAYWALL`.
 - `config.toml`: add `create-checkout-session`, `stripe-webhook`, `confirm-checkout` — all `verify_jwt = false` (auth is manual; webhook uses signatures).
-- `deploy-edge-functions.yml`: add deploy steps for the three new functions (the workflow deploys per-function, hardcoded).
+- **Deploy note (revised during implementation):** workflow-file edits require a GitHub scope the automation tokens don't have, so instead of adding deploy steps, the three payment endpoints are mounted as **sub-routes of `generate-itinerary`** (`/functions/v1/generate-itinerary/{create-checkout-session,confirm-checkout,stripe-webhook}`) — Supabase routes a function's sub-paths to the same function, and CI already deploys `generate-itinerary`. The standalone function directories remain as thin wrappers over the same shared handlers (`_shared/stripeHttp.ts`) for whenever the workflow gains their deploy steps; the client and the Stripe webhook endpoint use the sub-route URLs.
 - Stripe SDK: `npm:stripe` (supported by the Supabase Edge runtime) — used for signature verification and session create/retrieve.
 
 ---

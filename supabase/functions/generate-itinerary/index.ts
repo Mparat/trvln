@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { CostTracker, persistCost } from "../_shared/costs.ts";
+import { handleCreateCheckoutSession, handleConfirmCheckout, handleStripeWebhook } from "../_shared/stripeHttp.ts";
 // deploy-v3
 
 const corsHeaders = {
@@ -1297,6 +1298,18 @@ async function handleResume(args: {
 }
 
 serve(async (req) => {
+  // The payment endpoints ride along as sub-routes of this function because
+  // the deploy workflow only ships generate-itinerary, and workflow-file
+  // edits need a GitHub scope the automation tokens don't have. The
+  // standalone functions (create-checkout-session, confirm-checkout,
+  // stripe-webhook) are thin wrappers over these same handlers for whenever
+  // they get deployed in their own right. Ordinary generation requests hit
+  // /generate-itinerary with no sub-path and fall through untouched.
+  const subRoute = new URL(req.url).pathname.split("/").filter(Boolean).pop();
+  if (subRoute === "create-checkout-session") return handleCreateCheckoutSession(req);
+  if (subRoute === "confirm-checkout") return handleConfirmCheckout(req);
+  if (subRoute === "stripe-webhook") return handleStripeWebhook(req);
+
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
