@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { CostTracker, persistCost } from "../_shared/costs.ts";
+import { handleCreateCheckoutSession, handleConfirmCheckout, handleStripeWebhook } from "../_shared/stripeHttp.ts";
 // deploy-v3
 
 const corsHeaders = {
@@ -15,6 +16,22 @@ const supabaseAdmin = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
 );
+
+// Resolve the caller from the Authorization header when it carries a user
+// access token. verify_jwt stays off for this function (signed-out previews
+// are allowed), so an absent, anon-key, or invalid token yields null rather
+// than an error.
+async function resolveUserId(req: Request): Promise<string | null> {
+  const auth = req.headers.get("Authorization");
+  if (!auth?.startsWith("Bearer ")) return null;
+  try {
+    const { data, error } = await supabaseAdmin.auth.getUser(auth.slice(7));
+    if (error) return null;
+    return data.user?.id ?? null;
+  } catch {
+    return null;
+  }
+}
 
 // Input validation schemas
 const PreferencesSchema = z.object({
@@ -52,13 +69,128 @@ const ThemeVariantSchema = z.object({
 }).optional();
 
 const RequestSchema = z.object({
-  preferences: PreferencesSchema,
+  // Optional only for resume requests (completeBatchId) — a normal generation
+  // without preferences is rejected in the handler.
+  preferences: PreferencesSchema.optional(),
   themeVariant: ThemeVariantSchema,
   // Optional: when provided, the finished itinerary is persisted so a
   // backgrounded/reloaded tab can reconnect and fetch the completed result.
   jobId: z.string().uuid().optional(),
   batchId: z.string().uuid().optional(),
+  // Resume-on-unlock: finish the locked days of an already-entitled batch's
+  // job. Mutually exclusive with a normal generation.
+  completeBatchId: z.string().uuid().optional(),
 });
+
+// ── Preview gating ───────────────────────────────────────────────────────────
+// Free (un-entitled) generations are truncated server-side: the primary
+// variant writes only the first FREE_PRIMARY_DAYS days, secondary variants
+// write none. Locked days ship as title-only placeholders and the real
+// content is never generated — the paid remainder is produced later by
+// resume-on-unlock. See docs/payments-spec.md §4.3.
+type Tier = "full" | "preview_primary" | "preview_secondary";
+const FREE_PRIMARY_DAYS = 3;
+const paywallEnabled = () => (Deno.env.get("PAYWALL") ?? "off").toLowerCase() === "on";
+
+// The batch's earliest-registered job is the primary variant. A retry
+// re-registers under a fresh jobId but keeps its theme, so when the earliest
+// row isn't this job, matching themes still count as primary. Derived
+// server-side — the client is not trusted on tier-relevant input.
+//
+// Purchasers don't get preview trips: the first generation of a new batch
+// spends one credit (entitle_batch is idempotent per batch, so retries and
+// later variants never re-charge), and at zero balance the request is
+// paywalled instead of generating. The spend deliberately happens HERE, when
+// a generation is actually accepted — never in a pre-check — so an abandoned
+// click can't burn a credit.
+async function resolveTier(args: {
+  batchId: string | null;
+  jobId?: string;
+  themeId: string | null;
+  userId: string | null;
+}): Promise<{ tier: Tier; paywalled: boolean }> {
+  if (!paywallEnabled()) return { tier: "full", paywalled: false };
+  const { batchId, jobId, themeId, userId } = args;
+
+  // An entitlement grants full tier only to the user who owns it — batch ids
+  // leak through the readable jobs table, so an unscoped check here would let
+  // anyone generate for free under someone else's paid batch.
+  if (batchId && userId) {
+    const { data: entitlement } = await supabaseAdmin
+      .from("trip_entitlements")
+      .select("user_id")
+      .eq("batch_id", batchId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (entitlement) return { tier: "full", paywalled: false };
+  }
+
+  let primary = true;
+  // Whether this job is the batch's first — i.e. a NEW trip rather than a
+  // later variant (or retry) of one that already began as a preview.
+  let firstJobOfBatch = true;
+  if (batchId && jobId) {
+    const { data: earliest } = await supabaseAdmin
+      .from("itinerary_jobs")
+      .select("id, theme_id")
+      .eq("batch_id", batchId)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (earliest && earliest.id !== jobId) {
+      firstJobOfBatch = false;
+      primary = (earliest.theme_id ?? null) === themeId;
+    }
+  }
+
+  if (userId && batchId && firstJobOfBatch) {
+    const { data: purchase } = await supabaseAdmin
+      .from("purchases")
+      .select("id")
+      .eq("user_id", userId)
+      .limit(1)
+      .maybeSingle();
+    if (purchase) {
+      const { error } = await supabaseAdmin.rpc("entitle_batch", {
+        p_user: userId,
+        p_batch: batchId,
+      });
+      if (!error) return { tier: "full", paywalled: false };
+      if (String(error.message ?? "").includes("INSUFFICIENT_CREDITS")) {
+        return { tier: "preview_primary", paywalled: true };
+      }
+      // Any other failure falls toward preview, never toward free full access.
+      console.error("entitle_batch failed:", error);
+    }
+  }
+
+  return { tier: primary ? "preview_primary" : "preview_secondary", paywalled: false };
+}
+
+// Split the booking checklist into what a preview may ship and per-priority
+// counts of what it may not. Locked items are counted, never sent — the client
+// renders sized placeholder rows from the counts alone.
+function redactChecklist(items: unknown, tier: Tier): {
+  visible: unknown[];
+  lockedCounts: Record<string, number>;
+} {
+  const list = Array.isArray(items) ? items : [];
+  const priorityOf = (it: unknown): "high" | "medium" | "low" => {
+    const p = (it as { priority?: string })?.priority;
+    return p === "high" ? "high" : p === "medium" ? "medium" : "low";
+  };
+  const visible: unknown[] = [];
+  const lockedCounts: Record<string, number> = { high: 0, medium: 0, low: 0 };
+  for (const item of list) {
+    const priority = priorityOf(item);
+    if (tier === "preview_primary" && priority === "high") {
+      visible.push(item);
+    } else {
+      lockedCounts[priority]++;
+    }
+  }
+  return { visible, lockedCounts };
+}
 
 
 // Helper function to call Perplexity for grounded web search.
@@ -782,6 +914,88 @@ function planDaySlices(dayCount: number): number[][] {
   return slices;
 }
 
+// Group an arbitrary set of day numbers (resume writes only the days that were
+// locked) using the same per-call sizing rule as planDaySlices.
+function chunkDayNumbers(dayNumbers: number[], totalDays: number): number[][] {
+  const perSlice = totalDays <= 10 ? 1 : totalDays <= 20 ? 2 : 3;
+  const slices: number[][] = [];
+  for (let i = 0; i < dayNumbers.length; i += perSlice) {
+    slices.push(dayNumbers.slice(i, i + perSlice));
+  }
+  return slices;
+}
+
+// Each finding names the day it is about, so it reaches only the writer who
+// can act on it. A finding that names no day is trip-wide and goes to every
+// slice — rarer, since the review is asked to name one, and cheaper to repeat
+// than to drop.
+function findingsForDays(findings: string[], dayNumbers: number[]): string[] {
+  return findings.filter(f => {
+    const mentioned = [...f.matchAll(/\bday\s*(\d+)/gi)].map(m => Number(m[1]));
+    return mentioned.length === 0 || mentioned.some(n => dayNumbers.includes(n));
+  });
+}
+
+// The pass-2 day-writing instruction, shared verbatim by the normal split path
+// and by resume-on-unlock, so an unlocked day is written under exactly the
+// rules its free siblings were.
+function buildSliceInstruction(args: {
+  userPrompt: string;
+  sharedPlanJson: string;
+  rosterJson: string;
+  dayNumbers: number[];
+  takenList: string[];
+  findings: string[];
+}): string {
+  const { userPrompt, sharedPlanJson, rosterJson, dayNumbers, takenList, findings } = args;
+  const only = dayNumbers.length === 1
+    ? `day ${dayNumbers[0]}`
+    : `days ${dayNumbers.join(" and ")}`;
+  return `${userPrompt}
+
+## THIS CALL: WRITE ${only.toUpperCase()} ONLY — PASS 2
+
+Pass 1 already planned this trip. That plan is FIXED: do not re-plan it, do not change it, and do not write any day other than ${only}.
+
+<trip_plan>
+${sharedPlanJson}
+</trip_plan>
+
+<day_roster>
+${rosterJson}
+</day_roster>
+
+Call the \`emit_days\` tool with exactly ${dayNumbers.length} element(s) in its "days" array — ${only}:
+
+{"days": [ ${dayNumbers.map(n => `<the full days[] element for day ${n}>`).join(", ")} ]}
+
+Each element follows the days[] schema in the system prompt exactly.
+
+**Rules for this pass:**
+- dayNumber, title, location and transitNote come from the day_roster entry for your day. Keep them as written.
+- Exactly 3 periods — Morning, Afternoon, Evening — and exactly 2 activities in each.
+- **THE DINING IS ALREADY ASSIGNED.** Use exactly the names in your day's roster entry, in the order given: the first is "isPrimary": true, a second is "isPrimary": false. Do not substitute a name, do not add one, do not drop one. Your job is to write each one's description, priceRange and url from the research.
+- **IF A PERIOD HAS NO ASSIGNED NAME**, you may name one real establishment from the research for it — but ONLY a place that appears nowhere in <names_taken> below, and only if the research actually names one near where the traveler is at that hour. The place the traveler is staying that night also counts. Otherwise give that period an empty dining array. Never fill an empty period with a category description like "Trattoria in the village" or "a lakeside ristorante": a search box dressed up as a recommendation is worse than showing nothing.
+
+<names_taken>
+${takenList.join(", ") || "(none)"}
+</names_taken>
+- **EVERY OTHER DAY'S RESTAURANTS ARE LISTED IN THE ROSTER AND BELONG TO THOSE DAYS.** Never use one of them, even if it would fit yours better.
+- The other days' titles and locations tell you what the rest of the trip covers. Choose activities that do not duplicate them — the traveler should not do the same thing twice.
+${findings.length
+    ? `
+**A REVIEW OF THE PLAN FLAGGED THIS DAY.** The plan itself is fixed, but how full this day is and what goes in it are yours:
+
+${findings.map(f => `- ${f}`).join("\n")}
+
+Write the day so this is no longer true. If it says the day is too packed, give a period one activity instead of three, or make one of them open time with a reason — a lighter day that answers the note beats a full one that ignores it.
+`
+    : ""}
+- Everything else follows the strict rules in the system prompt.
+
+Put the day(s) in the \`emit_days\` tool call. Do not write them out as text.`;
+}
+
 // Bounds how many slice calls are in flight at once. All the promises are
 // created up front so the caller can await them in order, but the work itself
 // is gated here.
@@ -812,7 +1026,290 @@ function formatDateForBooking(dateStr: string | undefined): string {
   }
 }
 
+// ── Resume-on-unlock ─────────────────────────────────────────────────────────
+// The second entry point into generation: a preview run banked its unredacted
+// content and the exact day-slice inputs in itinerary_jobs_private; once the
+// batch is entitled, this writes ONLY the locked days — no research, no
+// re-planning — merges them with the already-written days, and streams the
+// completed itinerary through the same SSE + job-polling contract as a normal
+// generation, so the client's streaming and recovery machinery is reused
+// untouched.
+
+type ResumeState = {
+  roster?: { dayNumber: number; title?: string; location?: string; transitNote?: string; dining?: Record<string, string[]> }[];
+  lockedDayNumbers?: number[];
+  takenList?: string[];
+  planFindings?: string[];
+  sharedPlanJson?: string;
+  userPrompt?: string;
+  systemBlocks?: unknown[];
+  researchBlocks?: unknown[];
+};
+
+async function handleResume(args: {
+  jobId?: string;
+  completeBatchId: string;
+  userId: string | null;
+}): Promise<Response> {
+  const { jobId, completeBatchId, userId } = args;
+  const jsonRes = (body: unknown, status: number) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+
+  if (!jobId) return jsonRes({ error: "jobId is required to resume" }, 400);
+  if (!userId) return jsonRes({ error: "Sign in required" }, 401);
+
+  const { data: entitlement } = await supabaseAdmin
+    .from("trip_entitlements")
+    .select("user_id")
+    .eq("batch_id", completeBatchId)
+    .maybeSingle();
+  if (!entitlement) return jsonRes({ error: "This trip is not unlocked" }, 402);
+  if (entitlement.user_id !== userId) return jsonRes({ error: "Not your trip" }, 403);
+
+  // The job must belong to the entitled batch — without this, an entitled
+  // caller could name any other user's jobId and have its private content
+  // generated, streamed, and published under the victim's public job row.
+  const { data: jobRow } = await supabaseAdmin
+    .from("itinerary_jobs")
+    .select("batch_id")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (!jobRow || jobRow.batch_id !== completeBatchId) {
+    return jsonRes({ error: "Not your trip" }, 403);
+  }
+
+  const { data: priv } = await supabaseAdmin
+    .from("itinerary_jobs_private")
+    .select("content, resume_state")
+    .eq("job_id", jobId)
+    .maybeSingle();
+  if (!priv?.content) return jsonRes({ error: "resume_unavailable" }, 409);
+
+  let known: Record<string, unknown>;
+  try {
+    known = JSON.parse(priv.content) as Record<string, unknown>;
+  } catch {
+    return jsonRes({ error: "resume_unavailable" }, 409);
+  }
+  const knownDays = Array.isArray(known.days) ? known.days as Record<string, unknown>[] : [];
+  const { days: _days, ...fullTail } = known;
+
+  const rs = (priv.resume_state ?? null) as ResumeState | null;
+  const roster = rs?.roster ?? [];
+  const writtenNumbers = new Set(knownDays
+    .filter(d => Array.isArray((d as { periods?: unknown }).periods) && ((d as { periods: unknown[] }).periods).length > 0)
+    .map(d => (d as { dayNumber?: unknown }).dayNumber)
+    .filter((n): n is number => typeof n === "number"));
+  const missing = (rs?.lockedDayNumbers ?? []).filter(n => !writtenNumbers.has(n));
+
+  const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
+  const canWrite = !!ANTHROPIC_API_KEY && !!rs?.userPrompt && !!rs?.sharedPlanJson &&
+    Array.isArray(rs?.systemBlocks) && roster.length > 0;
+  if (missing.length > 0 && !canWrite) return jsonRes({ error: "resume_unavailable" }, 409);
+
+  // Mark the job pending for polling recovery; the redacted content stays in
+  // place until the full copy replaces it.
+  await supabaseAdmin.from("itinerary_jobs").update({
+    status: "pending",
+    error: null,
+    updated_at: new Date().toISOString(),
+  }).eq("id", jobId);
+
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
+  const costs = new CostTracker();
+  const t0 = Date.now();
+
+  const pump = (async () => {
+    let clientConnected = true;
+    let emitted = "";
+    const forward = async (chunk: string) => {
+      if (!clientConnected) return;
+      try { await writer.write(encoder.encode(chunk)); } catch { clientConnected = false; }
+    };
+    const emit = async (text: string) => {
+      if (!text) return;
+      emitted += text;
+      await forward(`data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`);
+    };
+
+    try {
+      await forward(": resuming\n\n");
+
+      const byNumber = new Map<number, Record<string, unknown>>();
+      for (const d of knownDays) {
+        const n = (d as { dayNumber?: unknown }).dayNumber;
+        if (typeof n === "number") byNumber.set(n, d);
+      }
+
+      const failedDays: number[] = [];
+      if (missing.length > 0) {
+        const rosterJson = JSON.stringify(roster);
+        const takenList = rs?.takenList ?? [];
+        const planFindings = rs?.planFindings ?? [];
+        const limit = makeLimiter(8);
+        const slices = chunkDayNumbers(missing, roster.length);
+        console.log(`[resume] writing ${missing.length} day(s) across ${slices.length} call(s) for job ${jobId}`);
+
+        const results = await Promise.all(slices.map(dayNumbers =>
+          limit(async () => {
+            const label = `resume_day${dayNumbers.join("+")}`;
+            const result = await callAnthropicJson({
+              apiKey: ANTHROPIC_API_KEY!,
+              system: rs!.systemBlocks as unknown[],
+              userContent: [
+                ...(Array.isArray(rs!.researchBlocks) ? rs!.researchBlocks as unknown[] : []),
+                {
+                  type: "text",
+                  text: buildSliceInstruction({
+                    userPrompt: rs!.userPrompt!,
+                    sharedPlanJson: rs!.sharedPlanJson!,
+                    rosterJson,
+                    dayNumbers,
+                    takenList,
+                    findings: findingsForDays(planFindings, dayNumbers),
+                  }),
+                },
+              ],
+              toolName: DAYS_TOOL.name,
+              maxTokens: 2000 * dayNumbers.length + 1500,
+              label,
+            });
+            costs.addAnthropic(`day_slice_${label}`, MODEL, result.usage);
+            const parsed = result.data as { days?: unknown[] };
+            return { dayNumbers, days: Array.isArray(parsed.days) ? parsed.days as Record<string, unknown>[] : [] };
+          }).catch((err: unknown) => {
+            console.error(`[resume] slice ${dayNumbers.join("+")} failed:`, err);
+            return { dayNumbers, days: [] as Record<string, unknown>[] };
+          })
+        ));
+
+        for (const r of results) {
+          const produced = new Map<number, Record<string, unknown>>();
+          r.days.forEach((d, idx) => {
+            const claimed = (d as { dayNumber?: unknown }).dayNumber;
+            const key = typeof claimed === "number" ? claimed : r.dayNumbers[idx];
+            if (typeof key === "number" && !produced.has(key)) produced.set(key, d);
+          });
+          for (const n of r.dayNumbers) {
+            const raw = produced.get(n);
+            const entry = roster[n - 1];
+            if (raw && Array.isArray((raw as { periods?: unknown }).periods)) {
+              byNumber.set(n, {
+                ...raw,
+                dayNumber: n,
+                title: (raw as { title?: string }).title || entry?.title || `Day ${n}`,
+                location: (raw as { location?: string }).location || entry?.location || "",
+              });
+            } else {
+              failedDays.push(n);
+              byNumber.set(n, {
+                dayNumber: n,
+                title: entry?.title ?? `Day ${n}`,
+                location: entry?.location ?? "",
+                ...(entry?.transitNote ? { transitNote: entry.transitNote } : {}),
+                periods: [],
+                generationFailed: true,
+              });
+            }
+          }
+        }
+      }
+
+      const allDays = [...byNumber.values()]
+        .sort((a, b) => ((a.dayNumber as number) ?? 0) - ((b.dayNumber as number) ?? 0));
+
+      const tail = { ...fullTail } as Record<string, unknown>;
+      if (failedDays.length > 0) {
+        const summary = (tail.summary ?? {}) as Record<string, unknown>;
+        const existing = Array.isArray(summary.assumptions) ? summary.assumptions : [];
+        const plural = failedDays.length > 1;
+        tail.summary = {
+          ...summary,
+          assumptions: [
+            ...existing,
+            `Day${plural ? "s" : ""} ${failedDays.join(", ")} could not be generated — regenerate the itinerary to fill ${plural ? "them" : "it"} in.`,
+          ],
+        };
+      }
+
+      await emit('{"days":' + JSON.stringify(allDays));
+      const tailJson = JSON.stringify(tail);
+      await emit(tailJson.length > 2 ? "," + tailJson.slice(1) : "}");
+      await forward("data: [DONE]\n\n");
+
+      await supabaseAdmin.from("itinerary_jobs").update({
+        status: "complete",
+        content: emitted,
+        updated_at: new Date().toISOString(),
+      }).eq("id", jobId);
+
+      // Keep the private copy current. resume_state stays only while days are
+      // still missing, so a retry can finish the job.
+      await supabaseAdmin.from("itinerary_jobs_private").upsert({
+        job_id: jobId,
+        content: JSON.stringify({ days: allDays, ...fullTail }),
+        resume_state: failedDays.length > 0 ? priv.resume_state : null,
+        updated_at: new Date().toISOString(),
+      });
+
+      void persistCost(costs, {
+        function_name: "generate-itinerary",
+        batch_id: completeBatchId,
+        job_id: jobId,
+        mode: "resume_unlock",
+        day_count: roster.length || allDays.length,
+        user_id: userId,
+      });
+      console.log(`[resume] done in ${Date.now() - t0}ms: wrote ${missing.length - failedDays.length}/${missing.length} day(s)` +
+        (failedDays.length ? `, failed: ${failedDays.join(",")}` : "") +
+        (clientConnected ? "" : " (client disconnected)"));
+    } catch (err) {
+      console.error("[resume] error:", err);
+      void persistCost(costs, {
+        function_name: "generate-itinerary",
+        batch_id: completeBatchId,
+        job_id: jobId,
+        mode: "resume_error",
+        user_id: userId,
+      });
+      await supabaseAdmin.from("itinerary_jobs").update({
+        status: "error",
+        error: String(err).slice(0, 2000),
+        updated_at: new Date().toISOString(),
+      }).eq("id", jobId);
+    } finally {
+      try { await writer.close(); } catch { /* already closed */ }
+    }
+  })();
+
+  try {
+    (globalThis as { EdgeRuntime?: { waitUntil: (p: Promise<unknown>) => void } })
+      .EdgeRuntime?.waitUntil(pump);
+  } catch { /* not available — pump runs inline */ }
+
+  return new Response(readable, {
+    headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
+  });
+}
+
 serve(async (req) => {
+  // The payment endpoints ride along as sub-routes of this function because
+  // the deploy workflow only ships generate-itinerary, and workflow-file
+  // edits need a GitHub scope the automation tokens don't have. The
+  // standalone functions (create-checkout-session, confirm-checkout,
+  // stripe-webhook) are thin wrappers over these same handlers for whenever
+  // they get deployed in their own right. Ordinary generation requests hit
+  // /generate-itinerary with no sub-path and fall through untouched.
+  const subRoute = new URL(req.url).pathname.split("/").filter(Boolean).pop();
+  if (subRoute === "create-checkout-session") return handleCreateCheckoutSession(req);
+  if (subRoute === "confirm-checkout") return handleConfirmCheckout(req);
+  if (subRoute === "stripe-webhook") return handleStripeWebhook(req);
+
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -820,6 +1317,10 @@ serve(async (req) => {
   // Tracked outside the try so the catch below can mark a registered job failed
   // rather than leaving it pending for reconnecting clients to poll.
   let registeredJobId: string | undefined;
+
+  // Set once the caller is resolved; read by finalizeCosts, which is defined
+  // before resolution happens.
+  let callerUserId: string | null = null;
 
   // Phase timings. Generation is slow and we have been guessing at which stage
   // owns the wall clock; every phase below reports its own duration so a single
@@ -856,6 +1357,7 @@ serve(async (req) => {
       day_count: meta.dayCount ?? null,
       mode: meta.mode,
       grounded: meta.grounded ?? null,
+      user_id: callerUserId,
     });
   };
   const since = (start: number) => Date.now() - start;
@@ -889,11 +1391,30 @@ serve(async (req) => {
       );
     }
 
-    const { preferences, themeVariant, jobId, batchId } = validationResult.data;
+    const { preferences, themeVariant, jobId, batchId, completeBatchId } = validationResult.data;
     registeredJobId = jobId;
+
+    // Which signed-in user (if any) this request belongs to. Attribution for
+    // normal generations; hard requirement for resume.
+    const userId = await resolveUserId(req);
+    callerUserId = userId;
+
+    // Resume-on-unlock takes its own path: no research, no planning, no job
+    // registration — just the locked days of an existing job.
+    if (completeBatchId) {
+      return await handleResume({ jobId, completeBatchId, userId });
+    }
+
+    if (!preferences) {
+      return new Response(
+        JSON.stringify({ error: "Invalid input", details: [{ field: "preferences", message: "Required" }] }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     console.log("Received preferences:", JSON.stringify(preferences, null, 2));
     console.log("Theme variant:", themeVariant || "default");
+    if (userId) console.log("Caller user_id:", userId);
 
     // Register the job as pending so a reconnecting client can poll its status.
     if (jobId) {
@@ -906,10 +1427,34 @@ serve(async (req) => {
         status: "pending",
         content: null,
         error: null,
+        user_id: userId,
         updated_at: new Date().toISOString(),
       });
       if (jobError) console.error("Failed to register itinerary job:", jobError);
     }
+
+    const { tier, paywalled } = await resolveTier({
+      batchId: batchId ?? jobId ?? null,
+      jobId,
+      themeId: themeVariant?.id ?? null,
+      userId,
+    });
+    if (paywalled) {
+      // A purchaser out of credits. Close out the just-registered job so
+      // nothing polls a row that will never complete.
+      if (jobId) {
+        await supabaseAdmin.from("itinerary_jobs").update({
+          status: "error",
+          error: "payment_required",
+          updated_at: new Date().toISOString(),
+        }).eq("id", jobId);
+      }
+      return new Response(
+        JSON.stringify({ error: "payment_required" }),
+        { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+    if (tier !== "full") console.log(`[gate] tier: ${tier}`);
 
     const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
     if (!ANTHROPIC_API_KEY) {
@@ -1906,6 +2451,14 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
         let skeleton = splitGenerationEnabled ? await trySkeleton() : null;
 
         if (!skeleton) {
+          if (tier !== "full") {
+            // The single-call fallback streams the whole itinerary in one
+            // unredacted pass — a preview must never take it. Fail the job
+            // instead; the client's retry path handles the rest. (This also
+            // means ITINERARY_SPLIT_GENERATION=off and PAYWALL=on cannot be
+            // combined for free users.)
+            throw new Error("Generation failed before day planning — please retry");
+          }
           await runSingleCall();
           costs.addAnthropic("single_call", MODEL, singleCallUsage);
           await forward("data: [DONE]\n\n");
@@ -1929,13 +2482,54 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
         // call instead of the two the fallback used to spend.
         const skeletonDays = Array.isArray(skeleton.days) ? skeleton.days : [];
         if ((skeleton.dayPlan?.length ?? 0) === 0 && skeletonDays.length > 0) {
-          const tail: Record<string, unknown> = {};
+          const fullTail: Record<string, unknown> = {};
           for (const key of ["summary", "budget", "flights", "accommodation", "bookingChecklist", "alternatives"]) {
-            if (skeleton[key] !== undefined) tail[key] = skeleton[key];
+            if (skeleton[key] !== undefined) fullTail[key] = skeleton[key];
           }
-          if (researchSources.length) tail.sources = researchSources;
+          if (researchSources.length) fullTail.sources = researchSources;
+
+          // Preview tiers: days past the free limit exist here in full, so the
+          // real content is persisted privately and only title-level
+          // placeholders are emitted. Resume simply replays the private copy.
+          const freeLimit = tier === "full" ? skeletonDays.length
+            : tier === "preview_primary" ? Math.min(FREE_PRIMARY_DAYS, skeletonDays.length)
+            : 0;
+          const emittedDays = skeletonDays.map((raw, i) => {
+            const day = (raw ?? {}) as Record<string, unknown>;
+            const dayNumber = typeof day.dayNumber === "number" ? day.dayNumber : i + 1;
+            if (i < freeLimit) return { ...day, dayNumber };
+            return {
+              dayNumber,
+              title: typeof day.title === "string" ? day.title : `Day ${dayNumber}`,
+              location: typeof day.location === "string" ? day.location : "",
+              ...(typeof day.transitNote === "string" ? { transitNote: day.transitNote } : {}),
+              periods: [],
+              locked: true,
+            };
+          });
+
+          const tail: Record<string, unknown> = { ...fullTail };
+          if (tier !== "full") {
+            const { visible, lockedCounts } = redactChecklist(fullTail.bookingChecklist, tier);
+            if (fullTail.bookingChecklist !== undefined) tail.bookingChecklist = visible;
+            tail.access = {
+              tier,
+              lockedDayCount: emittedDays.length - freeLimit,
+              lockedBookingCounts: lockedCounts,
+            };
+            if (jobId) {
+              const { error: privError } = await supabaseAdmin.from("itinerary_jobs_private").upsert({
+                job_id: jobId,
+                content: JSON.stringify({ days: skeletonDays, ...fullTail }),
+                resume_state: null,
+                updated_at: new Date().toISOString(),
+              });
+              if (privError) console.error("Failed to persist private job state:", privError);
+            }
+          }
+
           const tailJson = JSON.stringify(tail);
-          await emit('{"days":' + JSON.stringify(skeletonDays));
+          await emit('{"days":' + JSON.stringify(emittedDays));
           await emit(tailJson.length > 2 ? "," + tailJson.slice(1) : "}");
           await forward("data: [DONE]\n\n");
           timings.model_generation = Date.now() - modelStart;
@@ -1950,7 +2544,7 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
             grounded: hasGroundedResearch,
             client_disconnected: !clientConnected,
           }));
-          finalizeCosts({ mode: "skeleton_complete", dayCount: skeletonDays.length, theme: themeVariant?.id, grounded: hasGroundedResearch, batchId, jobId });
+          finalizeCosts({ mode: tier === "full" ? "skeleton_complete" : `skeleton_complete_${tier}`, dayCount: skeletonDays.length, theme: themeVariant?.id, grounded: hasGroundedResearch, batchId, jobId });
           await persistComplete();
           return;
         }
@@ -2116,9 +2710,19 @@ or
             JSON.stringify(droppedDuplicates));
         }
 
-        const slices = planDaySlices(roster.length);
+        // Preview tiers write only the free prefix of the roster. Locked days
+        // are emitted as title-only placeholders after the loop below, and
+        // their prose is generated by resume-on-unlock — never here, never
+        // speculatively.
+        const freeDayLimit = tier === "full" ? roster.length
+          : tier === "preview_primary" ? Math.min(FREE_PRIMARY_DAYS, roster.length)
+          : 0;
+        const lockedDayNumbers = roster.slice(freeDayLimit).map(d => d.dayNumber);
+
+        const slices = planDaySlices(freeDayLimit);
         sliceCount = slices.length;
-        console.log(`[timing] day slices: ${roster.length} days across ${slices.length} call(s)`);
+        console.log(`[timing] day slices: ${freeDayLimit}/${roster.length} days across ${slices.length} call(s)` +
+          (lockedDayNumbers.length ? ` (${lockedDayNumbers.length} locked)` : ""));
 
         // The assigned names, before any day call has run. If these are already
         // generic ("Trattoria in Varenna village") the skeleton could not find
@@ -2148,71 +2752,19 @@ or
           accommodation: skeleton.accommodation,
         });
 
-        // Each finding names the day it is about, so it reaches only the writer
-        // who can act on it. A finding that names no day is trip-wide and goes
-        // to every slice — rarer, since the review is asked to name one, and
-        // cheaper to repeat than to drop.
-        const findingsForSlice = (dayNumbers: number[]): string[] =>
-          planFindings.filter(f => {
-            const mentioned = [...f.matchAll(/\bday\s*(\d+)/gi)].map(m => Number(m[1]));
-            return mentioned.length === 0 || mentioned.some(n => dayNumbers.includes(n));
-          });
-
         // ── Pass 2: the days, in parallel ─────────────────────────────────
         const limit = makeLimiter(8);
         const slicesStart = Date.now();
         const slicePromises = slices.map(dayNumbers => limit(async () => {
           const label = `day${dayNumbers.join("+")}`;
-          const only = dayNumbers.length === 1
-            ? `day ${dayNumbers[0]}`
-            : `days ${dayNumbers.join(" and ")}`;
-
-          const sliceInstruction = `${userPrompt}
-
-## THIS CALL: WRITE ${only.toUpperCase()} ONLY — PASS 2
-
-Pass 1 already planned this trip. That plan is FIXED: do not re-plan it, do not change it, and do not write any day other than ${only}.
-
-<trip_plan>
-${sharedPlanJson}
-</trip_plan>
-
-<day_roster>
-${rosterJson}
-</day_roster>
-
-Call the \`emit_days\` tool with exactly ${dayNumbers.length} element(s) in its "days" array — ${only}:
-
-{"days": [ ${dayNumbers.map(n => `<the full days[] element for day ${n}>`).join(", ")} ]}
-
-Each element follows the days[] schema in the system prompt exactly.
-
-**Rules for this pass:**
-- dayNumber, title, location and transitNote come from the day_roster entry for your day. Keep them as written.
-- Exactly 3 periods — Morning, Afternoon, Evening — and exactly 2 activities in each.
-- **THE DINING IS ALREADY ASSIGNED.** Use exactly the names in your day's roster entry, in the order given: the first is "isPrimary": true, a second is "isPrimary": false. Do not substitute a name, do not add one, do not drop one. Your job is to write each one's description, priceRange and url from the research.
-- **IF A PERIOD HAS NO ASSIGNED NAME**, you may name one real establishment from the research for it — but ONLY a place that appears nowhere in <names_taken> below, and only if the research actually names one near where the traveler is at that hour. The place the traveler is staying that night also counts. Otherwise give that period an empty dining array. Never fill an empty period with a category description like "Trattoria in the village" or "a lakeside ristorante": a search box dressed up as a recommendation is worse than showing nothing.
-
-<names_taken>
-${takenList.join(", ") || "(none)"}
-</names_taken>
-- **EVERY OTHER DAY'S RESTAURANTS ARE LISTED IN THE ROSTER AND BELONG TO THOSE DAYS.** Never use one of them, even if it would fit yours better.
-- The other days' titles and locations tell you what the rest of the trip covers. Choose activities that do not duplicate them — the traveler should not do the same thing twice.
-${(() => {
-  const mine = findingsForSlice(dayNumbers);
-  return mine.length
-    ? `
-**A REVIEW OF THE PLAN FLAGGED THIS DAY.** The plan itself is fixed, but how full this day is and what goes in it are yours:
-
-${mine.map(f => `- ${f}`).join("\n")}
-
-Write the day so this is no longer true. If it says the day is too packed, give a period one activity instead of three, or make one of them open time with a reason — a lighter day that answers the note beats a full one that ignores it.
-`
-    : "";
-})()}
-- Everything else follows the strict rules in the system prompt.
-
-Put the day(s) in the \`emit_days\` tool call. Do not write them out as text.`;
+          const sliceInstruction = buildSliceInstruction({
+            userPrompt,
+            sharedPlanJson,
+            rosterJson,
+            dayNumbers,
+            takenList,
+            findings: findingsForDays(planFindings, dayNumbers),
+          });
 
           const result = await callAnthropicJson({
             apiKey: ANTHROPIC_API_KEY,
@@ -2312,26 +2864,56 @@ Put the day(s) in the \`emit_days\` tool call. Do not write them out as text.`;
           }
         }
 
+        // Locked days keep their roster identity — title, location, transit —
+        // so the preview can tease them, but their periods were never
+        // generated and there is nothing here to leak.
+        for (const dayNumber of lockedDayNumbers) {
+          const entry = roster[dayNumber - 1];
+          const day = {
+            dayNumber,
+            title: entry?.title ?? `Day ${dayNumber}`,
+            location: entry?.location ?? "",
+            ...(entry?.transitNote ? { transitNote: entry.transitNote } : {}),
+            periods: [],
+            locked: true,
+          };
+          assembledDays.push(day);
+          await emit(`${assembledDays.length > 1 ? "," : ""}${JSON.stringify(day)}`);
+        }
+
         // Everything the skeleton produced, written after the days so the
         // failure note below can go into summary.assumptions directly.
-        const tail: Record<string, unknown> = {};
+        // fullTail is the unredacted version, persisted privately for resume;
+        // tail is what actually ships.
+        const fullTail: Record<string, unknown> = {};
         for (const key of ["summary", "budget", "flights", "accommodation", "bookingChecklist", "alternatives"]) {
-          if (skeleton[key] !== undefined) tail[key] = skeleton[key];
+          if (skeleton[key] !== undefined) fullTail[key] = skeleton[key];
         }
-        if (researchSources.length) tail.sources = researchSources;
+        if (researchSources.length) fullTail.sources = researchSources;
 
         // Name the gap where the traveler will actually read it, rather than
         // shipping a blank day with no explanation.
         if (failedDays.length > 0) {
-          const summary = (tail.summary ?? {}) as Record<string, unknown>;
+          const summary = (fullTail.summary ?? {}) as Record<string, unknown>;
           const existing = Array.isArray(summary.assumptions) ? summary.assumptions : [];
           const plural = failedDays.length > 1;
-          tail.summary = {
+          fullTail.summary = {
             ...summary,
             assumptions: [
               ...existing,
               `Day${plural ? "s" : ""} ${failedDays.join(", ")} could not be generated — regenerate the itinerary to fill ${plural ? "them" : "it"} in.`,
             ],
+          };
+        }
+
+        const tail: Record<string, unknown> = { ...fullTail };
+        if (tier !== "full") {
+          const { visible, lockedCounts } = redactChecklist(fullTail.bookingChecklist, tier);
+          if (fullTail.bookingChecklist !== undefined) tail.bookingChecklist = visible;
+          tail.access = {
+            tier,
+            lockedDayCount: lockedDayNumbers.length,
+            lockedBookingCounts: lockedCounts,
           };
         }
 
@@ -2377,10 +2959,36 @@ Put the day(s) in the \`emit_days\` tool call. Do not write them out as text.`;
         console.log(`[quality] dining: unique=${seen.size} duplicated=${duplicates.length} ` +
           (duplicates.length ? JSON.stringify(duplicates.map(([name, n]) => `${name} x${n}`)) : ""));
 
-        finalizeCosts({ mode: "split", dayCount, theme: themeVariant?.id, grounded: hasGroundedResearch, batchId, jobId });
+        finalizeCosts({ mode: tier === "full" ? "split" : `split_${tier}`, dayCount, theme: themeVariant?.id, grounded: hasGroundedResearch, batchId, jobId });
 
         // Persist the finished itinerary for reconnecting clients.
         await persistComplete();
+
+        // Preview runs bank everything a resume-on-unlock needs: the
+        // unredacted content so far, and the exact inputs the day-slice calls
+        // were made with — the slices consume the research verbatim, so
+        // without it an unlock would have to pay for research twice.
+        if (tier !== "full" && jobId) {
+          const writtenDays = assembledDays.filter(d => !(d as { locked?: boolean }).locked);
+          const { error: privError } = await supabaseAdmin.from("itinerary_jobs_private").upsert({
+            job_id: jobId,
+            content: JSON.stringify({ days: writtenDays, ...fullTail }),
+            resume_state: {
+              batchId: batchId ?? jobId,
+              themeVariant: themeVariant ?? null,
+              roster,
+              lockedDayNumbers,
+              takenList,
+              planFindings,
+              sharedPlanJson,
+              userPrompt,
+              systemBlocks,
+              researchBlocks,
+            },
+            updated_at: new Date().toISOString(),
+          });
+          if (privError) console.error("Failed to persist private job state:", privError);
+        }
       } catch (streamError) {
         console.error("Generation/persist error:", streamError);
         // The money is spent whether or not the generation survived — a failed

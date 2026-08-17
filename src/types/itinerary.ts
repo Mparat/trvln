@@ -32,6 +32,10 @@ export interface ItineraryDay {
   // with its planned title and location but no periods, and flagged here so the
   // gap is explained rather than rendering as a blank day.
   generationFailed?: boolean;
+  // Preview-tier generations never produce this day's prose: the server ships
+  // only its planned title/location and this flag, and the UI renders a locked
+  // placeholder. Cleared when the trip is unlocked and the day is generated.
+  locked?: boolean;
 }
 
 export interface AccommodationOption {
@@ -99,6 +103,16 @@ export interface ItineraryData {
   // Absent on itineraries generated before sources were returned, and on the
   // single-call fallback path, so every consumer must treat it as optional.
   sources?: ResearchSourceGroup[];
+  // Present only on preview-tier (un-entitled) generations. Locked booking
+  // items are counted here, never shipped — the UI sizes its placeholder rows
+  // from the counts.
+  access?: ItineraryAccess;
+}
+
+export interface ItineraryAccess {
+  tier: 'preview_primary' | 'preview_secondary';
+  lockedDayCount: number;
+  lockedBookingCounts: { high: number; medium: number; low: number };
 }
 
 export interface ResearchSourceGroup {

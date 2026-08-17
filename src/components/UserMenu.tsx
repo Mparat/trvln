@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from './AuthProvider';
+import { useEntitlements } from './EntitlementsProvider';
 import { AuthModal } from './AuthModal';
-import { LogOut, User } from 'lucide-react';
+import { LogOut, User, Ticket } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,6 +13,7 @@ import {
 
 export function UserMenu() {
   const { user, signOut, loading } = useAuth();
+  const { hasPurchased, balance } = useEntitlements();
   const [authModalOpen, setAuthModalOpen] = useState(false);
 
   if (loading) {
@@ -48,6 +50,12 @@ export function UserMenu() {
         <div className="px-2 py-1.5 text-sm text-muted-foreground truncate">
           {user.email}
         </div>
+        {hasPurchased && (
+          <div className="px-2 py-1.5 text-sm flex items-center gap-2 text-foreground">
+            <Ticket className="w-4 h-4 text-primary" />
+            {balance === 1 ? '1 trip left' : `${balance} trips left`}
+          </div>
+        )}
         <DropdownMenuItem onClick={signOut} className="text-destructive cursor-pointer">
           <LogOut className="w-4 h-4 mr-2" />
           Sign out

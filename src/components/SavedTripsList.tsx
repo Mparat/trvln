@@ -15,7 +15,7 @@ interface SavedTrip {
 
 interface SavedTripsListProps {
   onBack: () => void;
-  onOpen: (variants: ItineraryVariant[], preferences: TripPreferences | null) => void;
+  onOpen: (variants: ItineraryVariant[], preferences: TripPreferences | null, tripId?: string) => void;
 }
 
 export function SavedTripsList({ onBack, onOpen }: SavedTripsListProps) {
@@ -90,7 +90,7 @@ export function SavedTripsList({ onBack, onOpen }: SavedTripsListProps) {
                 return (
                   <button
                     key={trip.id}
-                    onClick={() => onOpen(trip.variants, trip.preferences)}
+                    onClick={() => onOpen(trip.variants, trip.preferences, trip.id)}
                     className="w-full text-left bg-card rounded-2xl border border-border/60 p-5 hover:bg-muted/10 transition-colors group relative"
                   >
                     <div className="pr-10">

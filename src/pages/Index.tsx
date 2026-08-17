@@ -5,8 +5,13 @@ import { ItineraryOutput } from "@/components/ItineraryOutput";
 import { TripSummaryCard } from "@/components/TripSummaryCard";
 import { ItinerarySwitcher } from "@/components/ItinerarySwitcher";
 import { AuthModal } from "@/components/AuthModal";
+import { UserMenu } from "@/components/UserMenu";
 import { SavedTripsList } from "@/components/SavedTripsList";
-import { supabase } from "@/lib/supabase";
+import { supabase, functionHeaders } from "@/lib/supabase";
+import { startCheckout, savePendingCheckout, consumePendingCheckout, clearPendingCheckout, waitForPurchase, type CreditPack } from "@/lib/checkout";
+import { UnlockDialog } from "@/components/UnlockDialog";
+import { PaywallModal } from "@/components/PaywallModal";
+import { useEntitlements } from "@/components/EntitlementsProvider";
 import { sendReadyText } from "@/lib/readyText";
 import { toast } from "@/hooks/use-toast";
 import { ItineraryData } from "@/types/itinerary";
@@ -45,6 +50,12 @@ export type ItineraryVariant = {
   tagline?: string;
   content: string;
   structuredData?: ItineraryData;
+  // The generation batch this variant belongs to and the job that produced it.
+  // Stamped when generation starts and serialized everywhere the variant goes
+  // (session snapshot, saved trips), so an unlock can name the right batch
+  // even after a reload or on a reopened saved trip.
+  batchId?: string;
+  jobId?: string;
 };
 
 type IdentifiedDestination = {
@@ -241,7 +252,7 @@ const notifyVariantReady = (
 };
 
 // Stores a trip the user tried to save while logged out, so we can finish the
-// save once the sign-in redirect (Google / magic link) brings them back.
+// save once the Google sign-in redirect brings them back.
 const PENDING_SAVE_KEY = "trvln_pending_save";
 // Records where a sign-in should land the user when they reach the auth modal
 // from a flow that isn't "save" (e.g. tapping "Saved trips" while logged out).
@@ -249,13 +260,14 @@ const PENDING_SAVE_KEY = "trvln_pending_save";
 // two intents never fire together.
 const PENDING_SIGNIN_DEST_KEY = "trvln_pending_signin_dest";
 
-// Forget any queued post-sign-in action (save or redirect). Called when the
-// user abandons the flow that queued it.
+// Forget any queued post-sign-in action (save, redirect, or purchase). Called
+// when the user abandons the flow that queued it.
 const clearPendingAuthAction = () => {
   try {
     localStorage.removeItem(PENDING_SAVE_KEY);
     localStorage.removeItem(PENDING_SIGNIN_DEST_KEY);
   } catch { /* ignore */ }
+  clearPendingCheckout();
 };
 
 const Index = () => {
@@ -295,9 +307,15 @@ const Index = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   // True once the user actually kicks off a sign-in from the auth modal (Google
-  // redirect or magic link sent). Lets us tell "dismissed without signing in"
+  // redirect begun). Lets us tell "dismissed without signing in"
   // (cancel the queued action) from "left to complete sign-in" (keep it).
   const authInitiatedRef = useRef(false);
+
+  // The saved_trips row backing the trip on screen, when there is one — set on
+  // save and on opening a saved trip, so re-saves update in place.
+  const savedTripIdRef = useRef<string | null>(null);
+
+  const entitlements = useEntitlements();
 
   useEffect(() => {
     destinationRef.current = preferences.cities[0] ?? '';
@@ -386,16 +404,13 @@ const Index = () => {
     return () => { unmounted = true; };
   }, []);
 
-  const getHeaders = useCallback(() => ({
-    "Content-Type": "application/json",
-    "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-  }), []);
+  const getHeaders = useCallback(() => functionHeaders(), []);
 
   const analyzeInspiration = useCallback(async (mediaUrls: string[]): Promise<IdentifiedDestination[]> => {
     if (mediaUrls.length === 0) return [];
     const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-inspiration`, {
       // The edge function accepts at most 20 images per call
-      method: "POST", headers: getHeaders(), body: JSON.stringify({ mediaUrls: mediaUrls.slice(0, 20) }),
+      method: "POST", headers: await getHeaders(), body: JSON.stringify({ mediaUrls: mediaUrls.slice(0, 20) }),
     });
     if (!response.ok) return [];
     const data = await response.json();
@@ -404,7 +419,7 @@ const Index = () => {
 
   const suggestThemes = useCallback(async (prefs: TripPreferences) => {
     const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/suggest-themes`, {
-      method: "POST", headers: getHeaders(), body: JSON.stringify({ preferences: prefs }),
+      method: "POST", headers: await getHeaders(), body: JSON.stringify({ preferences: prefs }),
     });
     if (!response.ok) { const e = await response.json().catch(() => ({})); throw new Error(e.error || "Failed to suggest themes"); }
     const data = await response.json();
@@ -415,10 +430,14 @@ const Index = () => {
     prefs: TripPreferences,
     themeVariant: { id: string; name: string; emoji: string },
     onUpdate: (content: string) => void,
-    jobIds?: { jobId: string; batchId: string }
+    jobIds?: { jobId: string; batchId: string },
+    // Resume-on-unlock sends a different request body but reads the same
+    // stream; everything below the fetch is shared.
+    bodyOverride?: Record<string, unknown>,
   ) => {
     const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-itinerary`, {
-      method: "POST", headers: getHeaders(), body: JSON.stringify({ preferences: prefs, themeVariant, ...jobIds }),
+      method: "POST", headers: await getHeaders(),
+      body: JSON.stringify(bodyOverride ?? { preferences: prefs, themeVariant, ...jobIds }),
     });
     if (!response.ok) {
       const e = await response.json().catch(() => ({}));
@@ -491,14 +510,26 @@ const Index = () => {
 
       const title = dateStr ? `${destination} · ${dateStr}` : destination;
 
-      const { error } = await supabase.from("saved_trips").insert({
-        user_id: currentUser.id,
-        title,
-        // Stored as jsonb — cast our typed objects to the Json column type.
-        variants: currentItineraries as unknown as Json,
-        preferences: currentPrefs as unknown as Json,
-      });
-      if (error) throw error;
+      // Re-saving a trip that already has a row (e.g. after an unlock filled
+      // its content in) updates in place rather than duplicating it.
+      if (savedTripIdRef.current) {
+        const { error } = await supabase.from("saved_trips").update({
+          title,
+          variants: currentItineraries as unknown as Json,
+          preferences: currentPrefs as unknown as Json,
+        }).eq("id", savedTripIdRef.current);
+        if (error) throw error;
+      } else {
+        const { data, error } = await supabase.from("saved_trips").insert({
+          user_id: currentUser.id,
+          title,
+          // Stored as jsonb — cast our typed objects to the Json column type.
+          variants: currentItineraries as unknown as Json,
+          preferences: currentPrefs as unknown as Json,
+        }).select("id").single();
+        if (error) throw error;
+        savedTripIdRef.current = data?.id ?? null;
+      }
       setIsSaved(true);
       toast({ title: "Trip saved!", description: "Find it in Saved trips" });
     } catch {
@@ -508,14 +539,29 @@ const Index = () => {
     }
   }, []);
 
-  // Resume whatever the user set out to do before the sign-in redirect (Google /
-  // magic link) sent them away. Exactly one action is queued at a time: either a
+  // Resume whatever the user set out to do before the Google sign-in redirect
+  // sent them away. Exactly one action is queued at a time: either a
   // pending save (from the "Save trip" flow) or a redirect (from "Saved trips").
   // Consuming a save must NOT also honor a redirect, and vice versa — signing in
   // from "Saved trips" should never resurrect a save the user abandoned earlier.
   // Declared after performSave so its dependency array doesn't hit the TDZ.
   useEffect(() => {
     if (!user) return;
+    // A queued purchase goes straight to Stripe — it was the last thing the
+    // user asked for before signing in. Consuming removes the key, so a later
+    // auth event (token refresh, tab focus) can't replay it.
+    const checkout = consumePendingCheckout();
+    if (checkout) {
+      clearPendingAuthAction();
+      void startCheckout(checkout.pack, checkout.unlockBatchId).catch(err => {
+        toast({
+          title: "Couldn't start checkout",
+          description: err instanceof Error ? err.message : "Please try again",
+          variant: "destructive",
+        });
+      });
+      return;
+    }
     let raw: string | null = null;
     let dest: string | null = null;
     try {
@@ -551,6 +597,7 @@ const Index = () => {
       try {
         localStorage.setItem(PENDING_SAVE_KEY, JSON.stringify({ itineraries, preferences }));
         localStorage.removeItem(PENDING_SIGNIN_DEST_KEY);
+        clearPendingCheckout();
       } catch { /* quota — fall back to manual re-tap */ }
       authInitiatedRef.current = false;
       setShowAuthModal(true);
@@ -571,15 +618,26 @@ const Index = () => {
   }, [user]);
 
   // Dismissing the auth modal without starting a sign-in cancels whatever action
-  // (save / view saved) prompted it. A started sign-in (Google redirect or magic
-  // link sent) leaves it queued so it can complete after the round-trip.
+  // (save / view saved / purchase) prompted it. A started sign-in (Google
+  // redirect begun) leaves it queued so it can complete after the round-trip.
   const handleAuthModalOpenChange = useCallback((open: boolean) => {
     if (!open && !authInitiatedRef.current) clearPendingAuthAction();
     setShowAuthModal(open);
   }, []);
 
   // ── Open a saved trip ──────────────────────────────────────────────────────
-  const handleOpenSavedTrip = useCallback((variants: ItineraryVariant[], savedPrefs: TripPreferences | null) => {
+  const handleOpenSavedTrip = useCallback((variants: ItineraryVariant[], savedPrefs: TripPreferences | null, tripId?: string) => {
+    // This trip replaces whatever was on screen: supersede any in-flight
+    // generation and drop the old trip's context so a later rebuild (retry,
+    // variant click, unlock resume) derives from THESE variants — reusing the
+    // previous trip's batch here would regenerate the wrong trip.
+    runIdRef.current += 1;
+    generationContextRef.current = null;
+    startedVariantsRef.current = new Set();
+    setLoadingVariants({});
+    setIsGenerating(false);
+    setIsReconnecting(false);
+    savedTripIdRef.current = tripId ?? null;
     setItineraries(variants);
     setActiveVariant(0);
     if (savedPrefs) setPreferences(savedPrefs);
@@ -593,6 +651,7 @@ const Index = () => {
     setActiveVariant(0);
     setLoadingVariants({});
     setIsSaved(false);
+    savedTripIdRef.current = null;
     setView('input');
     // The itinerary that a pending save referred to is gone — drop the queued save.
     clearPendingAuthAction();
@@ -604,6 +663,9 @@ const Index = () => {
   const runVariant = useCallback(async (
     theme: { id: string; name: string; emoji: string },
     ctx: GenerationContext,
+    // When set, this run resumes an unlocked preview (writes only the locked
+    // days server-side) instead of generating from scratch.
+    resumeBatchId?: string,
   ): Promise<{ ok: boolean; stillPending: boolean; error?: unknown }> => {
     const isStale = () => runIdRef.current !== ctx.runId;
     startedVariantsRef.current.add(theme.id);
@@ -611,6 +673,11 @@ const Index = () => {
     const jobId = ctx.jobIdByTheme[theme.id] ?? crypto.randomUUID();
     ctx.jobIdByTheme[theme.id] = jobId;
     addPendingJob(ctx.batchId, { jobId, themeId: theme.id, name: theme.name, emoji: theme.emoji });
+
+    // Stamp the batch/job identity onto the variant up front — the unlock flow
+    // needs it even if this run later fails or the tab reloads.
+    setItineraries(prev => prev.map(it =>
+      it.id === theme.id ? { ...it, batchId: ctx.batchId, jobId } : it));
 
     const applyFinalContent = (rawContent: string) => {
       const displayContent = stripPlanningSection(rawContent);
@@ -629,7 +696,8 @@ const Index = () => {
         const displayContent = stripPlanningSection(updatedContent);
         setItineraries(prev => prev.map(it =>
           it.id === theme.id ? { ...it, content: displayContent } : it));
-      }, { jobId, batchId: ctx.batchId });
+      }, { jobId, batchId: ctx.batchId },
+      resumeBatchId ? { completeBatchId: resumeBatchId, jobId } : undefined);
 
       // A stream cut short leaves nothing to show — often literally nothing.
       // Don't call that a success; the server finished and saved the result
@@ -687,6 +755,7 @@ const Index = () => {
   const enqueueVariant = useCallback((
     theme: { id: string; name: string; emoji: string },
     ctx: GenerationContext,
+    resumeBatchId?: string,
   ): Promise<{ ok: boolean; stillPending: boolean; error?: unknown }> => {
     setLoadingVariants(prev => ({ ...prev, [theme.id]: true }));
     const run = generationChainRef.current.then(() => {
@@ -696,12 +765,186 @@ const Index = () => {
         setLoadingVariants(prev => ({ ...prev, [theme.id]: false }));
         return { ok: false, stillPending: false };
       }
-      return runVariant(theme, ctx);
+      return runVariant(theme, ctx, resumeBatchId);
     });
     // Failures propagate to the caller, not down the chain to the next variant.
     generationChainRef.current = run.then(() => undefined, () => undefined);
     return run;
   }, [runVariant]);
+
+  // A rebuilt context (the ref died with a reload) keeps the trip's original
+  // batch when the variants carry one — minting a fresh batch here would
+  // orphan the batch an unlock has to name, and would make the server treat a
+  // retried variant as a new trip.
+  const rebuildContextFromVariants = useCallback((): GenerationContext => {
+    const batchId = itineraries.find(it => it.batchId)?.batchId ?? crypto.randomUUID();
+    const jobIdByTheme: Record<string, string> = {};
+    for (const it of itineraries) {
+      if (it.jobId) jobIdByTheme[it.id] = it.jobId;
+    }
+    return { preferences, batchId, jobIdByTheme, runId: runIdRef.current };
+  }, [itineraries, preferences]);
+
+  // ── Unlock (preview → paid trip) ───────────────────────────────────────────
+  const [showUnlockDialog, setShowUnlockDialog] = useState(false);
+  const [unlockLoading, setUnlockLoading] = useState(false);
+
+  // ── Paywall (purchaser out of credits) ─────────────────────────────────────
+  const [showPaywall, setShowPaywall] = useState(false);
+  const [paywallLoadingPack, setPaywallLoadingPack] = useState<CreditPack | null>(null);
+
+  const handlePaywallPurchase = useCallback(async (pack: CreditPack) => {
+    setPaywallLoadingPack(pack);
+    try {
+      await startCheckout(pack);
+      // Navigating to Stripe — leave the spinner up.
+    } catch (err) {
+      setPaywallLoadingPack(null);
+      toast({
+        title: "Couldn't start checkout",
+        description: err instanceof Error ? err.message : "Please try again",
+        variant: "destructive",
+      });
+    }
+  }, []);
+
+  // Finish generating every opened variant that still has locked content —
+  // the server writes only the missing days per variant. Runs through the
+  // same serialized queue as normal generations. A variant whose banked state
+  // is gone (409) falls back to a full regeneration, free under the now-
+  // entitled batch.
+  const resumeLockedVariants = useCallback(() => {
+    const ctx = generationContextRef.current ?? rebuildContextFromVariants();
+    generationContextRef.current = ctx;
+    for (const variant of itineraries) {
+      if (!variant.structuredData?.access || !variant.batchId || !variant.jobId) continue;
+      const theme = { id: variant.id, name: variant.name, emoji: variant.emoji };
+      void enqueueVariant(theme, ctx, variant.batchId).then(result => {
+        if (result.ok || runIdRef.current !== ctx.runId) return;
+        const message = result.error instanceof Error ? result.error.message : "";
+        if (message === "resume_unavailable") {
+          startedVariantsRef.current.delete(variant.id);
+          setItineraries(prev => prev.map(it =>
+            it.id === variant.id ? { ...it, content: "", structuredData: undefined } : it));
+          delete ctx.jobIdByTheme[variant.id];
+          void enqueueVariant(theme, ctx);
+          return;
+        }
+        toast({
+          title: `Couldn't finish ${variant.name}`,
+          description: "Your trip is unlocked — use the retry button to fill in the rest.",
+          variant: "destructive",
+        });
+      });
+    }
+  }, [itineraries, enqueueVariant, rebuildContextFromVariants]);
+
+  // Once an unlock has filled every variant in (no access markers remain),
+  // refresh the trip's saved row so Saved trips reopens the content the user
+  // paid for, not the redacted preview it stored before the purchase.
+  const hadLockedContentRef = useRef(false);
+  useEffect(() => {
+    const hasLocked = itineraries.some(it => it.structuredData?.access);
+    if (hasLocked) { hadLockedContentRef.current = true; return; }
+    if (!hadLockedContentRef.current) return;
+    hadLockedContentRef.current = false;
+    if (!savedTripIdRef.current || !user || itineraries.every(it => !it.content)) return;
+    void supabase.from('saved_trips').update({
+      variants: itineraries as unknown as Json,
+      preferences: preferences as unknown as Json,
+    }).eq('id', savedTripIdRef.current);
+  }, [itineraries, user, preferences]);
+
+  // A locked-content tap on an already-unlocked trip (e.g. the resume failed
+  // or the purchase landed on another tab) re-runs the resume instead of
+  // asking for money again.
+  const handleUnlockRequest = useCallback(() => {
+    const batchId = itineraries.find(it => it.batchId)?.batchId;
+    if (batchId && entitlements.entitledBatches.has(batchId)) {
+      toast({ title: "Finishing your trip...", description: "Filling in the locked days now." });
+      resumeLockedVariants();
+      return;
+    }
+    setShowUnlockDialog(true);
+  }, [itineraries, entitlements.entitledBatches, resumeLockedVariants]);
+
+  // The $5 starter pack unlocks the batch the current trip was generated
+  // under. Signed out: queue the purchase and sign in first — the resume
+  // effect above sends the user straight to Stripe afterwards.
+  const handleUnlockPurchase = useCallback(async () => {
+    const unlockBatchId = itineraries.find(it => it.batchId)?.batchId;
+    if (!user) {
+      clearPendingAuthAction();
+      savePendingCheckout({ pack: 'pack_2', unlockBatchId });
+      setShowUnlockDialog(false);
+      authInitiatedRef.current = false;
+      setShowAuthModal(true);
+      return;
+    }
+    setUnlockLoading(true);
+    try {
+      await startCheckout('pack_2', unlockBatchId);
+      // The browser is navigating to Stripe — leave the spinner up.
+    } catch (err) {
+      setUnlockLoading(false);
+      toast({
+        title: "Couldn't start checkout",
+        description: err instanceof Error ? err.message : "Please try again",
+        variant: "destructive",
+      });
+    }
+  }, [user, itineraries]);
+
+  // ── Checkout return ────────────────────────────────────────────────────────
+  // Capture ?checkout=…&session_id=… once and strip it from the URL so a
+  // reload can't replay the confirmation.
+  const checkoutReturnRef = useRef<{ status: string; sessionId: string | null } | null>(null);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get('checkout');
+    if (!status) return;
+    checkoutReturnRef.current = { status, sessionId: params.get('session_id') };
+    params.delete('checkout');
+    params.delete('session_id');
+    const rest = params.toString();
+    window.history.replaceState({}, '', window.location.pathname + (rest ? `?${rest}` : ''));
+    if (status === 'cancelled') {
+      checkoutReturnRef.current = null;
+      toast({ title: "No charge", description: "Your trip is right where you left it." });
+    }
+  }, []);
+
+  // Confirm the purchase once the auth session has restored (the redirect
+  // lands before Supabase has rehydrated the user). waitForPurchase polls for
+  // the webhook and falls back to confirming with Stripe directly.
+  useEffect(() => {
+    const pending = checkoutReturnRef.current;
+    if (!pending || pending.status !== 'success' || !pending.sessionId || !user) return;
+    checkoutReturnRef.current = null;
+    const sessionId = pending.sessionId;
+    (async () => {
+      setShowUnlockDialog(false);
+      toast({ title: "Confirming your purchase..." });
+      const applied = await waitForPurchase(sessionId);
+      if (!applied) {
+        toast({
+          title: "Payment is still processing",
+          description: "Your card was charged only if Stripe shows the payment as complete. Reload in a moment — your credits will be here.",
+          variant: "destructive",
+        });
+        return;
+      }
+      await entitlements.refresh();
+      const hasLocked = itineraries.some(it => it.structuredData?.access);
+      toast({
+        title: hasLocked ? "Trip unlocked!" : "Purchase complete!",
+        description: hasLocked
+          ? "Filling in the rest of your trip now — plus 1 more full trip on your account."
+          : "Your trip credits are ready.",
+      });
+      if (hasLocked) resumeLockedVariants();
+    })();
+  }, [user, entitlements, itineraries, resumeLockedVariants]);
 
   // Opening a variant that hasn't been generated yet starts it.
   // A variant whose stream was cut off is otherwise stuck: its partial content
@@ -715,12 +958,7 @@ const Index = () => {
     setItineraries(prev => prev.map(it =>
       it.id === theme.id ? { ...it, content: "", structuredData: undefined } : it));
 
-    const ctx: GenerationContext = generationContextRef.current ?? {
-      preferences,
-      batchId: crypto.randomUUID(),
-      jobIdByTheme: {},
-      runId: runIdRef.current,
-    };
+    const ctx: GenerationContext = generationContextRef.current ?? rebuildContextFromVariants();
     generationContextRef.current = ctx;
     // A fresh job id: the old one belongs to the run that died.
     delete ctx.jobIdByTheme[theme.id];
@@ -736,7 +974,7 @@ const Index = () => {
         });
       }
     });
-  }, [itineraries, activeVariant, loadingVariants, preferences, enqueueVariant]);
+  }, [itineraries, activeVariant, loadingVariants, enqueueVariant, rebuildContextFromVariants]);
 
   const handleSelectVariant = useCallback((index: number) => {
     setActiveVariant(index);
@@ -745,12 +983,7 @@ const Index = () => {
 
     // After a reload the original context is gone, but a variant only needs the
     // preferences and a fresh job id — so rebuild rather than refusing to run.
-    const ctx: GenerationContext = generationContextRef.current ?? {
-      preferences,
-      batchId: crypto.randomUUID(),
-      jobIdByTheme: {},
-      runId: runIdRef.current,
-    };
+    const ctx: GenerationContext = generationContextRef.current ?? rebuildContextFromVariants();
     generationContextRef.current = ctx;
 
     void enqueueVariant(theme, ctx).then(result => {
@@ -769,7 +1002,7 @@ const Index = () => {
         variant: "destructive",
       });
     });
-  }, [itineraries, preferences, enqueueVariant]);
+  }, [itineraries, enqueueVariant, rebuildContextFromVariants]);
 
   // ── Generate ───────────────────────────────────────────────────────────────
   const handleGenerate = useCallback(async (pendingCity?: string) => {
@@ -784,6 +1017,11 @@ const Index = () => {
       return;
     }
 
+    // No client-side paywall pre-check here on purpose: only the server knows
+    // whether the paywall is switched on, and a purchaser must generate
+    // normally with PAYWALL=off. An out-of-credits purchaser costs one cheap
+    // themes call before the server's 402 routes them to the paywall below.
+
     // Supersede any in-flight reconnect from a previous session.
     const runId = ++runIdRef.current;
     const isStale = () => runIdRef.current !== runId;
@@ -793,6 +1031,7 @@ const Index = () => {
     setItineraries([]);
     setActiveVariant(0);
     setIsSaved(false);
+    savedTripIdRef.current = null; // a fresh trip gets a fresh saved_trips row
     setView('results');
 
     try {
@@ -852,6 +1091,10 @@ const Index = () => {
             ? "Tap another theme to build a different version of the trip"
             : "Explore your trip below",
         });
+      } else if (result.error instanceof Error && result.error.message === 'payment_required') {
+        // Stale client state slipped past the pre-check — the server said pay.
+        setView('input');
+        setShowPaywall(true);
       } else {
         toast({
           title: "Couldn't load your itinerary",
@@ -885,7 +1128,7 @@ const Index = () => {
     setLoadingVariants(prev => ({ ...prev, [current.id]: true }));
     try {
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/edit-itinerary`, {
-        method: "POST", headers: getHeaders(),
+        method: "POST", headers: await getHeaders(),
         body: JSON.stringify({ editRequest, currentItinerary: current.content, themeTitle: `${current.emoji} ${current.name}`, tripPreferences: preferences }),
       });
       if (!response.ok) { const e = await response.json().catch(() => ({})); throw new Error(e.error || "Failed to edit itinerary"); }
@@ -930,13 +1173,16 @@ const Index = () => {
           <img src="/favicon.svg" alt="Travellin'" className="w-5 h-5" />
           <span className="font-display text-sm text-primary">Travellin'</span>
         </div>
-        <button
-          onClick={handleNewSearch}
-          className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          <span className="hidden sm:inline">New Search</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleNewSearch}
+            className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            <span className="hidden sm:inline">New Search</span>
+          </button>
+          <UserMenu />
+        </div>
       </div>
     </div>
   );
@@ -1034,6 +1280,7 @@ const Index = () => {
                     onEdit={handleEdit}
                     themeTitle={currentItinerary ? `${currentItinerary.emoji} ${currentItinerary.name}` : undefined}
                     tripPreferences={preferences}
+                    onUnlockRequest={handleUnlockRequest}
                   />
                 </div>
               </div>
@@ -1044,6 +1291,18 @@ const Index = () => {
           open={showAuthModal}
           onOpenChange={handleAuthModalOpenChange}
           onSignInStart={() => { authInitiatedRef.current = true; }}
+        />
+        <UnlockDialog
+          open={showUnlockDialog}
+          onOpenChange={setShowUnlockDialog}
+          onUnlock={handleUnlockPurchase}
+          loading={unlockLoading}
+        />
+        <PaywallModal
+          open={showPaywall}
+          onOpenChange={setShowPaywall}
+          onPurchase={handlePaywallPurchase}
+          loadingPack={paywallLoadingPack}
         />
       </div>
     );
@@ -1056,6 +1315,9 @@ const Index = () => {
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
           <div className="absolute top-20 left-10 w-72 h-72 bg-primary/5 rounded-full blur-3xl animate-float" />
           <div className="absolute bottom-10 right-20 w-96 h-96 bg-olive/5 rounded-full blur-3xl animate-float" style={{ animationDelay: '-3s' }} />
+        </div>
+        <div className="absolute top-4 right-4 z-10">
+          <UserMenu />
         </div>
         <div className="container relative pt-12 pb-8 md:pt-20 md:pb-12">
           <div className="flex items-center justify-center gap-2 mb-6">
@@ -1129,6 +1391,12 @@ const Index = () => {
         open={showAuthModal}
         onOpenChange={handleAuthModalOpenChange}
         onSignInStart={() => { authInitiatedRef.current = true; }}
+      />
+      <PaywallModal
+        open={showPaywall}
+        onOpenChange={setShowPaywall}
+        onPurchase={handlePaywallPurchase}
+        loadingPack={paywallLoadingPack}
       />
     </div>
   );

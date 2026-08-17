@@ -3,11 +3,13 @@ import { ItineraryData } from "@/types/itinerary";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { functionHeaders } from "@/lib/supabase";
 import { toast } from "@/hooks/use-toast";
+import { LockedPanel } from "./LockedPanel";
 import {
   ExternalLink, Plane, Hotel, MapPin, Clock, DollarSign,
   Sunrise, Sun, Moon, Utensils, Calendar, ChevronRight, Info,
-  ThumbsUp, ThumbsDown, MessageSquare, Loader2, Send, X, AlertCircle
+  ThumbsUp, ThumbsDown, MessageSquare, Loader2, Send, X, AlertCircle, Lock
 } from "lucide-react";
 
 type Tab = 'overview' | 'days' | 'bookings';
@@ -70,9 +72,11 @@ interface Props {
   };
   editButton?: React.ReactNode;
   editPanel?: React.ReactNode;
+  /** Opens the unlock dialog. Present whenever this trip has locked content. */
+  onUnlockRequest?: () => void;
 }
 
-export function StructuredItinerary({ data, rawItinerary, tripPreferences, editButton, editPanel }: Props) {
+export function StructuredItinerary({ data, rawItinerary, tripPreferences, editButton, editPanel, onUnlockRequest }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [activeDayIdx, setActiveDayIdx] = useState(0);
   const [activePeriodIdx, setActivePeriodIdx] = useState(0);
@@ -118,10 +122,7 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-itinerary-item`,
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
+          headers: await functionHeaders(),
           body: JSON.stringify({
             itemContent,
             itemContext,
@@ -534,7 +535,10 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
                 )}
               >
                 <span className="text-[9px] uppercase tracking-wider opacity-70 mb-0.5">Day</span>
-                <span className="text-base font-bold leading-none">{day.dayNumber}</span>
+                <span className="flex items-center gap-1 text-base font-bold leading-none">
+                  {day.dayNumber}
+                  {day.locked && <Lock className="w-3 h-3 opacity-70" />}
+                </span>
               </button>
             ))}
           </div>
@@ -559,10 +563,17 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
             </div>
           )}
 
+          {/* Locked day: the header card above already teases title/location;
+              the plan itself was never generated, so a blurred placeholder
+              stands in for the period selector and activities. */}
+          {activeDay?.locked && onUnlockRequest && (
+            <LockedPanel onUnlock={onUnlockRequest} rows={2} />
+          )}
+
           {/* This day's generation call failed — say so rather than showing an
               empty day the traveler can't explain. The rest of the trip is
               unaffected and still worth reading. */}
-          {activeDay && activeDay.periods.length === 0 && (
+          {activeDay && !activeDay.locked && activeDay.periods.length === 0 && (
             <div className="flex items-start gap-3 rounded-2xl border border-border/60 bg-muted/20 p-4">
               <AlertCircle className="w-5 h-5 text-muted-foreground shrink-0 mt-0.5" />
               <div>
@@ -919,7 +930,7 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
       {/* ── Bookings ── */}
       {activeTab === 'bookings' && (
         <div className="space-y-6">
-          {data.bookingChecklist.length === 0 && (
+          {data.bookingChecklist.length === 0 && !data.access && (
             <p className="text-sm text-muted-foreground text-center py-6">No booking items generated.</p>
           )}
           {([
@@ -928,7 +939,10 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
             { key: 'low', label: 'Book anytime', emoji: '🟢' },
           ] as const).map(({ key, label, emoji }) => {
             const items = data.bookingChecklist.filter(b => b.priority === key);
-            if (items.length === 0) return null;
+            // Locked items were counted server-side but never shipped; render
+            // sized placeholders under the group header instead.
+            const lockedCount = data.access?.lockedBookingCounts?.[key] ?? 0;
+            if (items.length === 0 && lockedCount === 0) return null;
             return (
               <div key={key}>
                 <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 px-1 flex items-center gap-1.5">
@@ -966,6 +980,9 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
                       )}
                     </div>
                   ))}
+                  {lockedCount > 0 && onUnlockRequest && (
+                    <LockedPanel onUnlock={onUnlockRequest} rows={lockedCount} compact />
+                  )}
                 </div>
               </div>
             );

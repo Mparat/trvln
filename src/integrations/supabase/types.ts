@@ -51,6 +51,7 @@ export type Database = {
           status: string
           content: string | null
           error: string | null
+          user_id: string | null
           created_at: string
           updated_at: string
         }
@@ -63,6 +64,7 @@ export type Database = {
           status?: string
           content?: string | null
           error?: string | null
+          user_id?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -75,14 +77,105 @@ export type Database = {
           status?: string
           content?: string | null
           error?: string | null
+          user_id?: string | null
           created_at?: string
           updated_at?: string
         }
         Relationships: []
       }
+      purchases: {
+        Row: {
+          id: string
+          user_id: string
+          stripe_session_id: string
+          stripe_payment_intent: string | null
+          product_key: string
+          amount_cents: number
+          credits: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          stripe_session_id: string
+          stripe_payment_intent?: string | null
+          product_key: string
+          amount_cents: number
+          credits: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          stripe_session_id?: string
+          stripe_payment_intent?: string | null
+          product_key?: string
+          amount_cents?: number
+          credits?: number
+          created_at?: string
+        }
+        Relationships: []
+      }
+      credit_ledger: {
+        Row: {
+          id: string
+          user_id: string
+          delta: number
+          reason: string
+          purchase_id: string | null
+          batch_id: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          delta: number
+          reason: string
+          purchase_id?: string | null
+          batch_id?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          delta?: number
+          reason?: string
+          purchase_id?: string | null
+          batch_id?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+      trip_entitlements: {
+        Row: {
+          batch_id: string
+          user_id: string
+          ledger_id: string
+          created_at: string
+        }
+        Insert: {
+          batch_id: string
+          user_id: string
+          ledger_id: string
+          created_at?: string
+        }
+        Update: {
+          batch_id?: string
+          user_id?: string
+          ledger_id?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
-      [_ in never]: never
+      credit_balances: {
+        Row: {
+          user_id: string
+          balance: number
+        }
+        Relationships: []
+      }
     }
     Functions: {
       [_ in never]: never
