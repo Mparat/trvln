@@ -1167,15 +1167,38 @@ const Index = () => {
     toast({ title: "Processing your changes...", description: "Updating the itinerary based on your request" });
     setLoadingVariants(prev => ({ ...prev, [current.id]: true }));
     try {
+      // Send the structured itinerary without sources/access — the model has no
+      // business rewriting citations or entitlement state, and we re-attach the
+      // sources to whatever comes back. Legacy markdown trips (saved before the
+      // JSON migration) fall back to sending raw content.
+      let outboundItinerary = current.content;
+      if (current.structuredData) {
+        const { sources: _sources, access: _access, ...editable } = current.structuredData;
+        outboundItinerary = JSON.stringify(editable);
+      }
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/edit-itinerary`, {
         method: "POST", headers: await getHeaders(),
-        body: JSON.stringify({ editRequest, currentItinerary: current.content, themeTitle: `${current.emoji} ${current.name}`, tripPreferences: preferences }),
+        body: JSON.stringify({ editRequest, currentItinerary: outboundItinerary, themeTitle: `${current.emoji} ${current.name}`, tripPreferences: preferences }),
       });
       if (!response.ok) { const e = await response.json().catch(() => ({})); throw new Error(e.error || "Failed to edit itinerary"); }
       const data = await response.json();
-      setItineraries(prev => prev.map((it, idx) =>
-        idx === activeVariant ? { ...it, content: stripPlanningSection(data.updatedItinerary), structuredData: undefined } : it
-      ));
+      const displayContent = stripPlanningSection(data.updatedItinerary);
+      if (current.structuredData) {
+        // A structured trip must stay structured — dropping structuredData here
+        // would silently fall back to the legacy markdown renderer.
+        const parsed = parseStructuredItinerary(displayContent);
+        if (!parsed?.days?.length || !parsed.summary) {
+          throw new Error("The updated itinerary came back in an unexpected format. Please try again.");
+        }
+        const merged: ItineraryData = { ...parsed, sources: current.structuredData.sources };
+        setItineraries(prev => prev.map((it, idx) =>
+          idx === activeVariant ? { ...it, content: JSON.stringify(merged), structuredData: merged } : it
+        ));
+      } else {
+        setItineraries(prev => prev.map((it, idx) =>
+          idx === activeVariant ? { ...it, content: displayContent, structuredData: undefined } : it
+        ));
+      }
       setIsSaved(false); // Mark as unsaved after edit
       toast({ title: "Changes applied!", description: "Your itinerary has been updated" });
     } catch (error) {

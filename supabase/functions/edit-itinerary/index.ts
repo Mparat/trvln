@@ -35,7 +35,7 @@ const TripPreferencesSchema = z.object({
 
 const RequestSchema = z.object({
   editRequest: z.string().min(1).max(2000),
-  currentItinerary: z.string().min(1).max(100000),
+  currentItinerary: z.string().min(1).max(200000),
   themeTitle: z.string().max(200),
   tripPreferences: TripPreferencesSchema,
 });
@@ -163,6 +163,73 @@ ${flightContext}
 ${tripPreferences.additionalNotes || 'None provided'}
 `;
 
+    // Current itineraries are structured JSON (the ItineraryData schema the app
+    // renders); itineraries saved before that migration are markdown. The output
+    // must come back in the same format it arrived in, or the app falls back to
+    // the legacy markdown renderer and the redesigned layout is lost.
+    const isStructured = currentItinerary.trimStart().startsWith('{');
+
+    const structuredFormatRules = `## Output Format (CRITICAL - JSON ONLY)
+
+The itinerary you receive is a single JSON object. Your output MUST be the complete updated itinerary as a single valid JSON object in EXACTLY the same schema — same field names, same nesting, same value formats. No markdown, no prose, no code fences: after your </edit_planning> section, output raw JSON starting with { and ending with }.
+
+The schema, for reference (every field you receive must survive the edit unless the edit changes it):
+- "summary": { destination, duration, recommendedDates, totalBudget, highlights[], assumptions[]?, bestTimeNote?, vibeSummary? }
+- "budget": { items: [{ category, range, description? }], total }
+- "flights": { skip?, context?, options: [{ description, price, url, airlineCode?, route?, viaCity?, airline?, stops?, duration?, departureTime?, badge? }] }
+- "accommodation": [{ location, nights, options: [{ name, type?, pricePerNight, why?, url, isPrimary }] }]
+- "bookingChecklist": [{ item, leadTime, estimatedCost, url, priority: "high"|"medium"|"low" }]
+- "days": [{ dayNumber, title, location, transitNote?, periods: [{ label: "Morning"|"Afternoon"|"Evening", activities: [{ name, description, duration?, cost?, tags?[] }], dining?: [{ name, description, priceRange?, url?, isPrimary? }] }] }]
+- "alternatives"?: [{ title, description, url? }]
+
+Rules for the JSON output:
+- Every day keeps exactly 3 periods: Morning, Afternoon, Evening
+- All string values are plain text — no markdown asterisks, no HTML
+- New places need real URLs: Google Maps search links for restaurants and attractions (https://www.google.com/maps/search/?api=1&query=NAME+CITY), booking.com search links for hotels, getyourguide.com search links for tours
+- Never invent a restaurant or hotel to fill a slot — only add places you are confident exist
+- If the edit changes costs, keep "budget" and "summary.totalBudget" consistent with the new plan
+- Preserve every field of every unaffected item byte-for-byte — do not rewrite, reorder, or reformat content the edit does not touch
+- Do not add fields that are not in the schema, and do not drop optional fields that were present in the input`;
+
+    const markdownFormatRules = `## Formatting Rules (CRITICAL - FOLLOW EXACTLY)
+
+### Header Hierarchy:
+- **## SECTION TITLE** - Main sections (EXECUTIVE SUMMARY, KEY BOOKINGS, etc.) - ALL CAPS
+- **## Day X: Location - Theme** - Day headers
+- **### Sub-section Title** - Sub-sections (Flights, Accommodation, Budget Breakdown)
+- **#### Time Period** - Time-of-day headers (Morning, Afternoon, Evening)
+
+### Bullet Point Rules (MANDATORY):
+- ALL content under headers MUST be bullet points using "-" (hyphen)
+- Top-level bullets: "- Content here" (no leading spaces)
+- Nested bullets level 1: "  - Content here" (exactly 2 spaces before hyphen)
+- Nested bullets level 2: "    - Content here" (exactly 4 spaces before hyphen)
+- NEVER use "*" for bullets - ONLY use "-"
+- NEVER write loose paragraph text - ALWAYS use bullets
+
+### URL Formatting:
+EVERY place, restaurant, tour, or hotel MUST have a clickable URL using these patterns:
+
+**For restaurants/cafes/bars** - Use specific names:
+- https://www.google.com/maps/search/?api=1&query=RESTAURANT+NAME+CITY
+
+**For places/attractions**:
+- https://www.google.com/maps/search/?api=1&query=PLACE+NAME+CITY
+
+**For tours**:
+- https://www.getyourguide.com/s/?q=TOUR+DESCRIPTION+CITY
+
+**For hotels**:
+- https://www.booking.com/searchresults.html?ss=HOTEL+NAME+CITY
+
+### Emoji Usage:
+- ✈️ for flights, 🏨 for accommodation, 🍽️ for dining, 🚌 for transport, 💰 for budget
+- Activity emojis (🏯🎨🌳) at start of activity names only
+
+### Bold Text:
+- **Bold** important names, prices, time slots
+- Do NOT bold entire sentences`;
+
     const systemPrompt = `You are an expert travel itinerary editor. You will receive an existing itinerary and an edit request from the user.
 
 ## Your Task
@@ -206,44 +273,7 @@ Before writing your output, work through your thinking in <edit_planning> tags:
 
 After </edit_planning>, output the COMPLETE updated itinerary.
 
-## Formatting Rules (CRITICAL - FOLLOW EXACTLY)
-
-### Header Hierarchy:
-- **## SECTION TITLE** - Main sections (EXECUTIVE SUMMARY, KEY BOOKINGS, etc.) - ALL CAPS
-- **## Day X: Location - Theme** - Day headers
-- **### Sub-section Title** - Sub-sections (Flights, Accommodation, Budget Breakdown)
-- **#### Time Period** - Time-of-day headers (Morning, Afternoon, Evening)
-
-### Bullet Point Rules (MANDATORY):
-- ALL content under headers MUST be bullet points using "-" (hyphen)
-- Top-level bullets: "- Content here" (no leading spaces)
-- Nested bullets level 1: "  - Content here" (exactly 2 spaces before hyphen)
-- Nested bullets level 2: "    - Content here" (exactly 4 spaces before hyphen)
-- NEVER use "*" for bullets - ONLY use "-"
-- NEVER write loose paragraph text - ALWAYS use bullets
-
-### URL Formatting:
-EVERY place, restaurant, tour, or hotel MUST have a clickable URL using these patterns:
-
-**For restaurants/cafes/bars** - Use specific names:
-- https://www.google.com/maps/search/?api=1&query=RESTAURANT+NAME+CITY
-
-**For places/attractions**:
-- https://www.google.com/maps/search/?api=1&query=PLACE+NAME+CITY
-
-**For tours**:
-- https://www.getyourguide.com/s/?q=TOUR+DESCRIPTION+CITY
-
-**For hotels**:
-- https://www.booking.com/searchresults.html?ss=HOTEL+NAME+CITY
-
-### Emoji Usage:
-- ✈️ for flights, 🏨 for accommodation, 🍽️ for dining, 🚌 for transport, 💰 for budget
-- Activity emojis (🏯🎨🌳) at start of activity names only
-
-### Bold Text:
-- **Bold** important names, prices, time slots
-- Do NOT bold entire sentences
+${isStructured ? structuredFormatRules : markdownFormatRules}
 
 ## Important Guidelines
 
@@ -256,7 +286,7 @@ EVERY place, restaurant, tour, or hotel MUST have a clickable URL using these pa
 
 ## Output
 
-After your </edit_planning> section, output the COMPLETE updated itinerary with all sections, even those that weren't changed. The user needs the full itinerary back, not just the edited portions.`;
+After your </edit_planning> section, output the COMPLETE updated itinerary with all sections, even those that weren't changed. The user needs the full itinerary back, not just the edited portions.${isStructured ? ' Output it as raw JSON — the app parses it directly, so anything that is not the JSON object breaks the itinerary.' : ''}`;
 
     const userPrompt = `## Theme: ${themeTitle}
 
@@ -289,7 +319,7 @@ Apply the edit request above to the itinerary. First plan your changes in <edit_
         messages: [
           { role: 'user', content: userPrompt }
         ],
-        max_tokens: 16000,
+        max_tokens: 32000,
         temperature: 0.7,
       }),
     });
@@ -321,8 +351,10 @@ Apply the edit request above to the itinerary. First plan your changes in <edit_
       throw new Error('No content returned from AI');
     }
 
-    // Strip the <edit_planning> section from the output
+    // Strip the <edit_planning> section from the output, plus any code fence the
+    // model wrapped the JSON in despite instructions.
     updatedItinerary = updatedItinerary.replace(/<edit_planning>[\s\S]*?<\/edit_planning>/g, '').trim();
+    updatedItinerary = updatedItinerary.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
 
     console.log('Itinerary edit complete, length:', updatedItinerary.length);
 
