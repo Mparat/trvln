@@ -36,13 +36,17 @@ async function loadStripe(): Promise<any> {
 
 // Success/cancel URLs are built from an allowlist, never from request input —
 // a forged Origin header must not be able to bounce a paid session to an
-// attacker's page.
-function resolveOrigin(req: Request): string {
+// attacker's page. A real origin that ISN'T allowlisted is refused loudly
+// rather than silently falling back: the fallback once stranded a paying
+// tester on a different domain than the one they bought from.
+function resolveOrigin(req: Request): { origin: string; unauthorized?: string } {
   const allowed = (Deno.env.get("CHECKOUT_ORIGIN_ALLOWLIST") ?? "")
     .split(",").map(s => s.trim()).filter(Boolean);
-  const origin = req.headers.get("origin");
-  if (origin && allowed.includes(origin)) return origin;
-  return allowed[0] ?? "";
+  const requestOrigin = req.headers.get("origin");
+  if (requestOrigin && allowed.includes(requestOrigin)) return { origin: requestOrigin };
+  if (requestOrigin) return { origin: "", unauthorized: requestOrigin };
+  // No Origin header at all (rare non-browser caller): first allowlist entry.
+  return { origin: allowed[0] ?? "" };
 }
 
 async function requireUser(req: Request): Promise<{ id: string; email?: string } | null> {
@@ -85,7 +89,11 @@ export async function handleCreateCheckoutSession(req: Request): Promise<Respons
       return json({ error: "Payments aren't available right now" }, 503);
     }
 
-    const origin = resolveOrigin(req);
+    const { origin, unauthorized } = resolveOrigin(req);
+    if (unauthorized) {
+      console.error(`Checkout refused: origin ${unauthorized} is not in CHECKOUT_ORIGIN_ALLOWLIST`);
+      return json({ error: "This site isn't authorized for purchases — add its URL to CHECKOUT_ORIGIN_ALLOWLIST" }, 403);
+    }
     if (!origin) {
       console.error("CHECKOUT_ORIGIN_ALLOWLIST is not configured");
       return json({ error: "Payments aren't available right now" }, 503);
