@@ -24,6 +24,11 @@ const PRICE: Record<string, TokenPrice> = {
 // requests at the default "low" search context tier.
 const PERPLEXITY_REQUEST_FEE_USD = 0.005;
 
+// Google Places API (New) Text Search at the Pro field tier (display name,
+// rating, review count, price level): $35 per 1,000 requests. No tokens —
+// the whole cost is the per-request fee.
+const PLACES_TEXT_SEARCH_FEE_USD = 0.035;
+
 // Dated model ids ("claude-haiku-4-5-20251001") price as their base model.
 function priceFor(model: string): TokenPrice | null {
   if (PRICE[model]) return PRICE[model];
@@ -102,6 +107,17 @@ export class CostTracker {
       outputTokens: u.completion_tokens ?? 0,
       cacheWriteTokens: 0, cacheReadTokens: 0, requests: 1,
     }, PERPLEXITY_REQUEST_FEE_USD);
+  }
+
+  // Google Places Text Search: flat per-request pricing, no usage object.
+  addGooglePlaces(phase: string, requests: number) {
+    if (!requests) return;
+    this.entries.push({
+      phase, vendor: "google", model: "places-text-search",
+      inputTokens: 0, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0,
+      requests,
+      usd: round6(requests * PLACES_TEXT_SEARCH_FEE_USD),
+    });
   }
 
   // Gemini generateContent usageMetadata. Thinking tokens bill as output.
