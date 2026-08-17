@@ -813,11 +813,18 @@ const Index = () => {
   // same serialized queue as normal generations. A variant whose banked state
   // is gone (409) falls back to a full regeneration, free under the now-
   // entitled batch.
-  const resumeLockedVariants = useCallback(() => {
+  //
+  // Each job gets ONE automatic attempt (the ref below) so a failing resume
+  // can't loop; an explicit tap on a locked panel passes force to try again.
+  const autoResumeAttemptedRef = useRef<Set<string>>(new Set());
+  const resumeLockedVariants = useCallback((opts?: { force?: boolean }) => {
     const ctx = generationContextRef.current ?? rebuildContextFromVariants();
     generationContextRef.current = ctx;
     for (const variant of itineraries) {
       if (!variant.structuredData?.access || !variant.batchId || !variant.jobId) continue;
+      if (loadingVariants[variant.id]) continue;
+      if (!opts?.force && autoResumeAttemptedRef.current.has(variant.jobId)) continue;
+      autoResumeAttemptedRef.current.add(variant.jobId);
       const theme = { id: variant.id, name: variant.name, emoji: variant.emoji };
       void enqueueVariant(theme, ctx, variant.batchId).then(result => {
         if (result.ok || runIdRef.current !== ctx.runId) return;
@@ -832,12 +839,26 @@ const Index = () => {
         }
         toast({
           title: `Couldn't finish ${variant.name}`,
-          description: "Your trip is unlocked — use the retry button to fill in the rest.",
+          description: "Your trip is unlocked — tap the locked section to try again.",
           variant: "destructive",
         });
       });
     }
-  }, [itineraries, enqueueVariant, rebuildContextFromVariants]);
+  }, [itineraries, loadingVariants, enqueueVariant, rebuildContextFromVariants]);
+
+  // Self-heal: a variant can surface locked content for a batch that is
+  // already unlocked — e.g. it was still generating when checkout began, so
+  // the post-payment resume pass ran before its redacted content arrived via
+  // the reconnect poll. Whenever that state appears, finish the variant
+  // automatically (the once-per-job guard above keeps failures from looping).
+  useEffect(() => {
+    const needsResume = itineraries.some(it =>
+      it.structuredData?.access && it.batchId && it.jobId &&
+      entitlements.entitledBatches.has(it.batchId) &&
+      !loadingVariants[it.id] &&
+      !autoResumeAttemptedRef.current.has(it.jobId));
+    if (needsResume) resumeLockedVariants();
+  }, [itineraries, loadingVariants, entitlements.entitledBatches, resumeLockedVariants]);
 
   // Once an unlock has filled every variant in (no access markers remain),
   // refresh the trip's saved row so Saved trips reopens the content the user
@@ -862,7 +883,7 @@ const Index = () => {
     const batchId = itineraries.find(it => it.batchId)?.batchId;
     if (batchId && entitlements.entitledBatches.has(batchId)) {
       toast({ title: "Finishing your trip...", description: "Filling in the locked days now." });
-      resumeLockedVariants();
+      resumeLockedVariants({ force: true });
       return;
     }
     setShowUnlockDialog(true);
