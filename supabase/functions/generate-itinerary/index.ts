@@ -293,6 +293,197 @@ async function runPerplexityQuery(
 }
 
 // ============================================================================
+// GOOGLE PLACES DINING BACKBONE
+//
+// Web research reads editorial coverage, and editorial food coverage is
+// dinner-shaped: "where to eat in X" articles rarely name a breakfast café,
+// so for destinations whose blogs cover only dinner (Whistler, most resort
+// towns) the morning and midday slots went out empty — the roster rules
+// correctly refuse to invent names, but the research never supplied any.
+// Google Maps has no such bias: it lists every operating café with its live
+// rating and review history. So dining names are grounded on Places data
+// first, and the web research supplies texture (what to order, whether to
+// book, what the room is like) on top.
+//
+// Fail-soft throughout: a missing key or a failed request returns nothing and
+// generation proceeds on web research alone, exactly as before.
+// ============================================================================
+
+type DiningPlace = {
+  name: string;
+  rating: number;
+  ratingCount: number;
+  price: string; // "$".."$$$$", or "" when Maps has no price level
+  address: string;
+  mapsUrl: string;
+  wellKnown?: boolean; // set at selection: heavily-trafficked pick vs quieter find
+};
+type CityDining = { city: string; meals: Record<string, DiningPlace[]> };
+
+// The form's food & drink ids, as words a Maps text search understands. An id
+// with no mapping passes through as-is so free-form values still steer.
+const FOOD_PREF_PHRASE: Record<string, string> = {
+  local: "serving regional specialties",
+  casual: "casual",
+  romantic: "romantic",
+  family: "family-friendly",
+  party: "lively",
+};
+
+// One search per meal period plus one that hunts what the traveler could not
+// pull up themselves: Maps text relevance matches review language, so asking
+// for "underrated" and "hidden gem" surfaces the places reviewers describe
+// that way — loved rather than famous. The traveler's food preferences steer
+// the dinner search, where they express a kind of evening; breakfast and
+// lunch stay broad because a café is a café whatever the trip's vibe.
+const MEAL_GROUPS = ["Breakfast", "Lunch", "Dinner", "Local favorites"] as const;
+
+function buildMealSearches(foodPrefs: string[]): { meal: string; query: (city: string) => string }[] {
+  const prefWords = foodPrefs
+    .map(p => FOOD_PREF_PHRASE[p.trim().toLowerCase()] ?? p.trim())
+    .filter(Boolean)
+    .slice(0, 2); // two qualifiers keep the query a phrase, not a word salad
+  const dinnerQualifier = prefWords.length ? `${prefWords.join(" and ")} ` : "";
+  return [
+    { meal: "Breakfast", query: c => `best breakfast cafes and bakeries in ${c}` },
+    { meal: "Lunch", query: c => `best casual lunch restaurants in ${c}` },
+    { meal: "Dinner", query: c => `best ${dinnerQualifier}dinner restaurants in ${c}` },
+    { meal: "Local favorites", query: c => `underrated hidden gem restaurants local favorites in ${c}` },
+  ];
+}
+
+const PRICE_LEVEL_LABEL: Record<string, string> = {
+  PRICE_LEVEL_INEXPENSIVE: "$",
+  PRICE_LEVEL_MODERATE: "$$",
+  PRICE_LEVEL_EXPENSIVE: "$$$",
+  PRICE_LEVEL_VERY_EXPENSIVE: "$$$$",
+};
+
+async function placesTextSearch(textQuery: string, apiKey: string): Promise<DiningPlace[]> {
+  try {
+    const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": apiKey,
+        "X-Goog-FieldMask":
+          "places.displayName,places.rating,places.userRatingCount,places.priceLevel,places.businessStatus,places.shortFormattedAddress,places.googleMapsUri",
+      },
+      // The API's maximum page: the quieter-find pool selects from below the
+      // top of the ranking, so the deeper the page, the more there is to find.
+      body: JSON.stringify({ textQuery, pageSize: 20 }),
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      console.error(`[places] ${response.status} for "${textQuery}": ${body.slice(0, 300)}`);
+      return [];
+    }
+    const data = await response.json();
+    type RawPlace = {
+      displayName?: { text?: unknown };
+      rating?: unknown;
+      userRatingCount?: unknown;
+      priceLevel?: unknown;
+      businessStatus?: unknown;
+      shortFormattedAddress?: unknown;
+      googleMapsUri?: unknown;
+    };
+    const places: RawPlace[] = Array.isArray(data.places) ? data.places : [];
+    return places
+      .filter(p => (p.businessStatus ?? "OPERATIONAL") === "OPERATIONAL")
+      .map(p => ({
+        name: typeof p.displayName?.text === "string" ? p.displayName.text : "",
+        rating: typeof p.rating === "number" ? p.rating : 0,
+        ratingCount: typeof p.userRatingCount === "number" ? p.userRatingCount : 0,
+        price: PRICE_LEVEL_LABEL[String(p.priceLevel ?? "")] ?? "",
+        address: typeof p.shortFormattedAddress === "string" ? p.shortFormattedAddress : "",
+        mapsUrl: typeof p.googleMapsUri === "string" ? p.googleMapsUri : "",
+      }))
+      .filter(p => p.name);
+  } catch (error) {
+    console.error(`[places] search failed for "${textQuery}":`, error);
+    return [];
+  }
+}
+
+// The floor keeps out places nobody has vouched for — a 5.0★ with 12 reviews
+// is unverified, and a mountain town's real café clears 25 reviews easily.
+const MIN_PLACE_RATING = 4.0;
+const MIN_PLACE_REVIEWS = 25;
+
+// Selection deliberately does NOT rank by popularity alone. Review volume
+// measures how trafficked a place is, not how good it is, and a list sorted
+// by it is exactly the result the traveler gets from a two-second Maps
+// search — the opposite of a recommendation. Each meal gets two pools: a few
+// heavily-trafficked picks as the reliable floor, and as many equally-rated
+// quieter finds — the highest-rated places the crowd hasn't got to, least
+// reviewed first among equals. The labels travel into the prompt so the model
+// can choose the quieter one on purpose when it fits the traveler better.
+const WELL_KNOWN_PER_MEAL = 4;
+const QUIETER_PER_MEAL = 4;
+const QUIETER_MIN_RATING = 4.4;
+
+function pickMealOptions(candidates: DiningPlace[]): DiningPlace[] {
+  const eligible = candidates.filter(
+    p => p.rating >= MIN_PLACE_RATING && p.ratingCount >= MIN_PLACE_REVIEWS,
+  );
+  const traffic = (p: DiningPlace) => p.rating * Math.log10(p.ratingCount + 1);
+  const wellKnown = [...eligible]
+    .sort((a, b) => traffic(b) - traffic(a))
+    .slice(0, WELL_KNOWN_PER_MEAL)
+    .map(p => ({ ...p, wellKnown: true }));
+  const taken = new Set(wellKnown.map(p => p.name));
+  const quieter = eligible
+    .filter(p => !taken.has(p.name) && p.rating >= QUIETER_MIN_RATING)
+    .sort((a, b) => b.rating - a.rating || a.ratingCount - b.ratingCount)
+    .slice(0, QUIETER_PER_MEAL)
+    .map(p => ({ ...p, wellKnown: false }));
+  return [...wellKnown, ...quieter];
+}
+
+// Four requests per city; the cap bounds cost on multi-stop trips. Cities
+// come ordered as the trip visits them, so the ones cut are the tail stops.
+const MAX_PLACES_CITIES = 4;
+
+async function fetchDiningPlaces(
+  cities: string[],
+  apiKey: string | undefined,
+  foodPrefs: string[],
+): Promise<{ dining: CityDining[]; requests: number }> {
+  if (!apiKey) {
+    console.warn("[places] GOOGLE_PLACES_API_KEY not configured — dining grounds on web research only");
+    return { dining: [], requests: 0 };
+  }
+  if (cities.length === 0) return { dining: [], requests: 0 };
+
+  const searches = buildMealSearches(foodPrefs);
+  let requests = 0;
+  const dining = await Promise.all(cities.slice(0, MAX_PLACES_CITIES).map(async city => {
+    const found: Record<string, DiningPlace[]> = {};
+    await Promise.all(searches.map(async ({ meal, query }) => {
+      requests++;
+      found[meal] = await placesTextSearch(query(city), apiKey);
+    }));
+    // Groups are selected in MEAL_GROUPS order and a name keeps its first
+    // slot: "Local favorites" overlaps the meal searches, and a place listed
+    // twice would read as two options where the traveler has one.
+    const meals: Record<string, DiningPlace[]> = {};
+    const seen = new Set<string>();
+    for (const meal of MEAL_GROUPS) {
+      const picked = pickMealOptions((found[meal] ?? []).filter(p => !seen.has(p.name)));
+      for (const p of picked) seen.add(p.name);
+      meals[meal] = picked;
+    }
+    return { city, meals };
+  }));
+
+  return {
+    dining: dining.filter(d => Object.values(d.meals).some(m => m.length > 0)),
+    requests,
+  };
+}
+
+// ============================================================================
 // STABLE SYSTEM PROMPT CORE
 //
 // Anthropic's prompt cache is prefix-matched: the cache covers everything up to
@@ -1472,6 +1663,10 @@ serve(async (req) => {
       throw new Error("PERPLEXITY_API_KEY is not configured");
     }
 
+    // Optional, unlike the two keys above: without it, dining grounds on web
+    // research alone (the pre-Places behavior) — see fetchDiningPlaces.
+    const GOOGLE_PLACES_API_KEY = Deno.env.get("GOOGLE_PLACES_API_KEY")?.trim();
+
     const {
       media,
       cities,
@@ -1903,7 +2098,7 @@ ${additionalNotes || "None provided"}
       // Restaurants and food scene — emphasise currently operating
       {
         key: 'restaurants',
-        query: `Where should someone actually eat in ${destinationStr} for ${foodStr}, confirmed still open and trading as of ${currentYear}? Exclude anything closed, temporarily closed, or of uncertain operating status. For each: the name, the neighborhood, what to order there, what a meal costs, what the room and the crowd are like and which kind of evening it suits, and whether it needs booking and how far ahead. Cover the whole range a traveler on this trip would really use across a week — the everyday place that is good every time and the one worth dressing up for — not a ranked list of the same destination restaurants. ${budgetInfo.label} budget.${tripNotes ? ` The traveler describes the trip as: "${tripNotes}" — if this trip spends nights somewhere without restaurants nearby (a mountain hut, a lodge, a remote village, a boat), say so and name where meals are actually eaten there instead.` : ''}${interpretationClause}${sourceClause('restaurants')}`,
+        query: `Where should someone actually eat in ${destinationStr} for ${foodStr}, confirmed still open and trading as of ${currentYear}? Exclude anything closed, temporarily closed, or of uncertain operating status. For each: the name, the neighborhood, what to order there, what a meal costs, what the room and the crowd are like and which kind of evening it suits, and whether it needs booking and how far ahead. Cover the whole range a traveler on this trip would really use across a week — the everyday place that is good every time and the one worth dressing up for — not a ranked list of the same destination restaurants. Cover ALL THREE MEALS, not only dinner: name the breakfast and coffee places — cafés, bakeries, brunch spots — and the casual lunch stops, as well as the dinner rooms. An itinerary needs somewhere real to eat every morning and midday, and dinner-only coverage cannot fill those slots. ${budgetInfo.label} budget.${tripNotes ? ` The traveler describes the trip as: "${tripNotes}" — if this trip spends nights somewhere without restaurants nearby (a mountain hut, a lodge, a remote village, a boat), say so and name where meals are actually eaten there instead.` : ''}${interpretationClause}${sourceClause('restaurants')}`,
       },
 
       // Where to sleep, in whatever form this trip actually needs
@@ -1954,6 +2149,11 @@ ${additionalNotes || "None provided"}
     // than simply not tripping it, so the ramp is wider than feels necessary.
     // Watch for `[research] ... retrying` in the logs: none means this is right.
     console.log(`Executing ${searchSpecs.length} Perplexity research queries...`);
+    // Places runs alongside the web research: it answers from a different
+    // corpus (the live Maps database) and shares no rate limit with
+    // Perplexity, so the two phases overlap instead of stacking.
+    const placesPromise = timePhase("places_dining", () =>
+      fetchDiningPlaces(resolvedCities, GOOGLE_PLACES_API_KEY, foodDrink ?? []));
     const results = await timePhase("perplexity_research", () =>
       Promise.all(searchSpecs.map(async (spec, i) => {
         if (i > 0) await new Promise(r => setTimeout(r, i * 1500));
@@ -1962,6 +2162,13 @@ ${additionalNotes || "None provided"}
           return r;
         });
       })));
+    const { dining: placesDining, requests: placesRequests } = await placesPromise;
+    costs.addGooglePlaces("places_dining", placesRequests);
+    console.log("[research] places dining: " + JSON.stringify(
+      placesDining.map(d => ({
+        city: d.city,
+        ...Object.fromEntries(Object.entries(d.meals).map(([meal, ps]) => [meal, ps.length])),
+      }))));
 
     type ResearchResult = { content: string; citations: string[] };
     const research: Record<string, ResearchResult | undefined> = {};
@@ -1973,7 +2180,12 @@ ${additionalNotes || "None provided"}
     // the research" alongside no research at all — contradictory instructions
     // that it can only resolve by inventing establishments and URLs, which is
     // the exact failure the rules were written to prevent.
-    const hasGroundedResearch = results.some(r => r.content.trim().length > 0);
+    const hasWebResearch = results.some(r => r.content.trim().length > 0);
+    const hasPlacesDining = placesDining.length > 0;
+    // Places data is grounding too: even with every web search empty, a dining
+    // list straight from the Maps database is real research to hold the model
+    // to, so the strict "only from the research" regime stays on.
+    const hasGroundedResearch = hasWebResearch || hasPlacesDining;
     // Per-query, not just an overall boolean. `grounded` is true when ANY of the
     // seven queries returned something, so a restaurant search that came back
     // nearly empty — the one failure that shows up directly in the itinerary as
@@ -1984,9 +2196,10 @@ ${additionalNotes || "None provided"}
         { chars: results[i].content.trim().length, citations: results[i].citations?.length ?? 0 },
       ])),
     ));
-    console.log(`Perplexity research completed. grounded=${hasGroundedResearch}`);
-    if (!hasGroundedResearch) {
-      console.error("All Perplexity searches returned empty — generating without grounding.");
+    console.log(`Perplexity research completed. grounded=${hasGroundedResearch} (web=${hasWebResearch} places=${hasPlacesDining})`);
+    if (!hasWebResearch) {
+      console.error("All Perplexity searches returned empty" +
+        (hasPlacesDining ? " — grounding on Places dining data only." : " — generating without grounding."));
     }
 
     const activitiesResearch = research.activities;
@@ -2021,10 +2234,48 @@ ${additionalNotes || "None provided"}
           .slice(0, 8),
       }))
       .filter(s => s.citations.length > 0);
+    if (hasPlacesDining) {
+      // The top Maps listing per meal per city — the links a traveler would
+      // actually tap to check a place — under the same topic cap as the rest.
+      const mapsCitations = Array.from(new Set(
+        placesDining
+          .flatMap(d => MEAL_GROUPS.map(meal => d.meals[meal]?.[0]?.mapsUrl))
+          .filter((u): u is string => typeof u === "string" && /^https?:\/\//i.test(u)),
+      )).slice(0, 8);
+      if (mapsCitations.length > 0) {
+        researchSources.push({ topic: "Dining (Google Maps)", citations: mapsCitations });
+      }
+    }
     console.log(`Research sources: ${researchSources.reduce((n, s) => n + s.citations.length, 0)} across ${researchSources.length} topic(s)`);
 
     const citeList = (r: ResearchResult | undefined) =>
       r?.citations?.length ? r.citations.map((c, i) => `${i + 1}. ${c}`).join('\n') : 'No citations available';
+
+    // The dining backbone, rendered for the prompt. Grouped by city and meal
+    // period so the skeleton can fill a Morning slot by reading the Breakfast
+    // list for wherever that day is — the lookup it actually performs. The
+    // well-known/quieter-find labels are the levers for choosing on fit.
+    const formatDiningPlace = (p: DiningPlace) =>
+      `- ${p.name} — ${p.rating}★ (${p.ratingCount.toLocaleString("en-US")} reviews, ` +
+      `${p.wellKnown ? 'well-known' : 'quieter find'})` +
+      `${p.price ? `, ${p.price}` : ''}${p.address ? `, ${p.address}` : ''}${p.mapsUrl ? ` — ${p.mapsUrl}` : ''}`;
+    const placesDiningContext = hasPlacesDining ? `
+### 📍 DINING FROM GOOGLE MAPS (live Places data)
+
+Every establishment below is listed as currently operating on Google Maps, with its live rating and review count. These are grounded names: assigning one to a matching meal period is correct even when the web research above never mentions it. "Local favorites" holds places that surfaced for being loved rather than being famous — assign those to whichever meal they plausibly serve.
+
+**Choose for FIT, not fame.** A review count measures how trafficked a place is, not how good it is, and the traveler could find the most-reviewed name themselves in a two-second Maps search. Each list mixes well-known picks with equally-rated quieter finds — read the traveler's food & drink preferences and the trip's character, and take the entry that fits them; where a quieter find and a well-known one would both do, the quieter one is usually the better recommendation. The same goes for the web research above: where it surfaces a strong, current place that fits this trip, prefer it over the obvious Maps pick.
+
+Where the web research covers a place listed here, use it for texture — what to order, whether to book. Where it is silent, describe the place by its meal, price level and neighborhood rather than inventing specifics. Use each entry's Google Maps link as its url.
+
+${placesDining.map(d => `**${d.city}**
+${MEAL_GROUPS.map(meal => {
+  const rows = d.meals[meal] ?? [];
+  return rows.length ? `${meal}:\n${rows.map(formatDiningPlace).join('\n')}` : '';
+}).filter(Boolean).join('\n')}`).join('\n\n')}
+
+---
+` : '';
 
     const groundedResearchContext = `
 ## GROUNDED RESEARCH DATA (From Live Web Search)
@@ -2092,7 +2343,7 @@ ${restaurantsResearch?.content || 'No restaurant research available.'}
 ${citeList(restaurantsResearch)}
 
 ---
-
+${placesDiningContext}
 ### 🏨 ACCOMMODATION
 ${accommodationResearch?.content || 'No accommodation research available.'}
 
@@ -2259,6 +2510,8 @@ summary, budget, flights, accommodation, bookingChecklist and alternatives follo
 - **dining holds the ASSIGNED RESTAURANT NAMES for that day's three periods — names only.** No descriptions, no prices, no URLs; pass 2 writes those from the research.
 - **EVERY ENTRY MUST BE A REAL ESTABLISHMENT'S PROPER NAME, copied from the research.** "Ristorante Il Cavatappi", "Osteria del Beccaccino", "Bar Il Molo" are names. "Trattoria in Varenna village", "Dinner at a lakeside ristorante", "a family-run osteria", "Lakefront café" are CATEGORY DESCRIPTIONS, not names. A category description is never acceptable — not as a top pick, not as a second option, not to complete a day. It is the same failure as inventing a restaurant, and it is worse than leaving the slot empty, because the traveler is handed a search box instead of a table.
 - **RUNNING OUT OF NAMES IS AN ACCEPTABLE OUTCOME. PADDING IS NOT.** If the research does not contain enough named establishments to fill every period, leave the extra periods out — give an empty array, or omit the period key. A trip with nine real named restaurants and twelve empty slots is correct. A trip with twenty-one filled slots where half are categories is a failure. Note the shortfall in summary.assumptions.
+${hasPlacesDining ? `- **THE RESEARCH INCLUDES A "DINING FROM GOOGLE MAPS" SECTION** with confirmed-operating places grouped by city and meal period. Draw on it directly — its Breakfast lists exist precisely because web articles skip breakfast. For any day spent in a city that section covers, fill every period with a real name from it or from the web research; an empty period there is a shortfall, not caution. Leave a period empty only where the traveler is genuinely out of reach of restaurants — a hut, a boat, a remote trail — or the lists for that place are exhausted.
+- **CHOOSE DINING FOR FIT, NOT FAME.** Each Maps list labels its entries well-known or quieter find. Do not default to the most-reviewed name: match the traveler's food & drink preferences and the trip's character, and where a quieter find or a place from the web research fits as well as the obvious pick, take it — the traveler could have found the famous one in a two-second Maps search; the quieter one is the recommendation they came for. Use the well-known names where reliability is what the day needs: the first meal after landing, a night when everything else is closed, a group that wants safe.` : ''}
 - Give 1 or 2 names per period. The first is the top pick. Add a second ONLY when a real, separate alternative exists within reach of where the traveler actually is at that hour — one real option beats two where the second is filler.
 - **THIS IS WHERE RESTAURANT UNIQUENESS IS DECIDED, AND IT CANNOT BE FIXED LATER.** The day passes run independently and cannot see each other's choices. Before you finish, read back over the entire dayPlan: if the same establishment appears on two different days, or twice in one day, replace one of them with a different place from the research.
 - The ONLY name that may legitimately repeat is a stay's own dining room — a hut, refuge, lodge, ryokan, safari camp, boat, or hotel where meals are included or nothing else is within reach. Where that is genuinely where the traveler eats, repeat it and say which stay it is.
