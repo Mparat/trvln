@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { StructuredItinerary } from "./StructuredItinerary";
 import { mergeEditedItinerary } from "@/lib/itineraryEdit";
 import { makeItinerary } from "@/test/fixtures/itinerary";
@@ -23,6 +23,27 @@ describe("StructuredItinerary design", () => {
     expect(screen.getByText("Getting there")).toBeInTheDocument();
     // Appears in both the summary pill row and the budget section
     expect(screen.getAllByText("$1,400–$2,100").length).toBeGreaterThan(0);
+  });
+
+  it("explains each day with its overview in the day header", () => {
+    render(<StructuredItinerary data={makeItinerary()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Days (2)" }));
+    expect(screen.getByText(/A soft landing: check in first/)).toBeInTheDocument();
+
+    // Day 2 has its own explanation
+    fireEvent.click(screen.getByRole("button", { name: /^Day\s?2$/ }));
+    expect(screen.getByText(/The big mesa day/)).toBeInTheDocument();
+  });
+
+  it("still renders a day that has no overview (pre-field itineraries)", () => {
+    const data = makeItinerary();
+    delete data.days[0].overview;
+    render(<StructuredItinerary data={data} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Days (2)" }));
+    expect(screen.getByText("Arrival and Arches at golden hour")).toBeInTheDocument();
+    expect(screen.queryByText(/A soft landing/)).not.toBeInTheDocument();
   });
 
   it("renders identically from a model edit response run through the merge path", () => {

@@ -69,6 +69,7 @@ export const makeItinerary = (): ItineraryData => ({
       title: "Arrival and Arches at golden hour",
       location: "Moab",
       transitNote: "Pick up rental car",
+      overview: "A soft landing: check in first, then one scenic drive so the timed-entry slot isn't wasted, ending at the arch for golden hour.",
       periods: [
         {
           label: "Morning",
@@ -140,6 +141,7 @@ export const makeItinerary = (): ItineraryData => ({
       dayNumber: 2,
       title: "Canyonlands Island in the Sky",
       location: "Moab",
+      overview: "The big mesa day: sunrise at Mesa Arch demands the early start, and everything after follows the rim road so there is no backtracking.",
       periods: [
         {
           label: "Morning",

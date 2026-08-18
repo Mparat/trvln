@@ -64,8 +64,9 @@ describe("buildEditableItinerary", () => {
     expect(parsed.access).toBeUndefined();
     expect(parsed.summary.destination).toBe("Moab, Utah");
     expect(parsed.days).toHaveLength(2);
-    // bookingUrl must survive the round trip to the model
+    // bookingUrl and the day's explanation must survive the round trip to the model
     expect(parsed.days[0].periods[1].activities[0].bookingUrl).toContain("recreation.gov");
+    expect(parsed.days[0].overview).toContain("soft landing");
   });
 
   it("sends legacy markdown trips as their raw content", () => {

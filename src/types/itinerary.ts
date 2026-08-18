@@ -26,6 +26,10 @@ export interface ItineraryDay {
   title: string;
   location: string;
   transitNote?: string;
+  // One or two sentences of connective tissue: why the day is shaped this way
+  // and how its pieces fit together. Absent on days generated before the field
+  // existed, so every consumer must treat it as optional.
+  overview?: string;
   periods: DayPeriod[];
   // Days are generated in parallel, one model call per day. When one of those
   // calls fails the rest of the trip is still worth showing, so the day is kept

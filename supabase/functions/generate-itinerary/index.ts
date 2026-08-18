@@ -622,6 +622,7 @@ Use this exact schema. Every field shown is required unless marked optional. All
       "title": "Arrival and Ponta Delgada",
       "location": "Ponta Delgada",
       "transitNote": "Pick up rental car at PDL Airport",
+      "overview": "A gentle landing day: everything sits within a short walk of the hotel, so jet lag sets the pace and nothing needs booking ahead.",
       "periods": [
         {
           "label": "Morning",
@@ -761,6 +762,7 @@ STRICT RULES:
 - Keep ALL descriptions to 1 short sentence (25 words maximum) — be ruthlessly concise
 - Make those 25 words earn their place. Say the specific reason for this, here, at this hour — the light on the ridge before the first cable car, the one thing on the menu, why it follows what came before. Never a label that would fit any comparable place: "charming local spot", "iconic landmark", "hidden gem", "a must-see". If a description would survive being moved to a different city unchanged, it is not doing its job — rewrite it.
 - Keep activity names under 6 words
+- Always populate each day's overview: 1–2 plain sentences (35 words max) telling the traveler how the day fits together — why it runs in this order, how the pieces connect (a short walk apart, one drive, needs the morning light), and what kind of day it is (big push, slow recovery, travel day). Explain the reasoning; never restate the title.
 - Omit bookingUrl entirely if it would be an empty string
 - If noFlight is true, set flights.skip to true and flights.options to []
 - Always populate summary.bestTimeNote with 1 sentence about the best time to visit and why
@@ -1164,6 +1166,7 @@ Each element follows the days[] schema in the system prompt exactly.
 
 **Rules for this pass:**
 - dayNumber, title, location and transitNote come from the day_roster entry for your day. Keep them as written.
+- Write the day's "overview" yourself: 1–2 sentences the traveler reads first, explaining how the day fits together — the logic of the order, the distances, the pacing. Not a restatement of the title.
 - Exactly 3 periods — Morning, Afternoon, Evening — and exactly 2 activities in each.
 - **THE DINING IS ALREADY ASSIGNED.** Use exactly the names in your day's roster entry, in the order given: the first is "isPrimary": true, a second is "isPrimary": false. Do not substitute a name, do not add one, do not drop one. Your job is to write each one's description, priceRange and url from the research.
 - **IF A PERIOD HAS NO ASSIGNED NAME**, you may name one real establishment from the research for it — but ONLY a place that appears nowhere in <names_taken> below, and only if the research actually names one near where the traveler is at that hour. The place the traveler is staying that night also counts. Otherwise give that period an empty dining array. Never fill an empty period with a category description like "Trattoria in the village" or "a lakeside ristorante": a search box dressed up as a recommendation is worse than showing nothing.

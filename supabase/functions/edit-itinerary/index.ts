@@ -183,7 +183,8 @@ The schema, for reference (every field you receive must survive the edit unless 
 - "flights": { skip?, context?, options: [{ description, price, url, airlineCode?, route?, viaCity?, airline?, stops?, duration?, departureTime?, badge? }] }
 - "accommodation": [{ location, nights, options: [{ name, type?, pricePerNight, why?, url, isPrimary }] }]
 - "bookingChecklist": [{ item, leadTime, estimatedCost, url, priority: "high"|"medium"|"low" }]
-- "days": [{ dayNumber, title, location, transitNote?, locked?, generationFailed?, periods: [{ label: "Morning"|"Afternoon"|"Evening", activities: [{ name, description, duration?, cost?, tags?[], bookingUrl? }], dining?: [{ name, description, priceRange?, url?, isPrimary? }] }] }]
+- "days": [{ dayNumber, title, location, transitNote?, overview?, locked?, generationFailed?, periods: [{ label: "Morning"|"Afternoon"|"Evening", activities: [{ name, description, duration?, cost?, tags?[], bookingUrl? }], dining?: [{ name, description, priceRange?, url?, isPrimary? }] }] }]
+- "overview" is the 1–2 sentence explanation of how the day fits together, shown to the traveler above the day's plan. If your edit changes a day's shape, rewrite its overview to match; if a day you touch has none, add one.
 - "alternatives"?: [{ title, description, url? }]
 
 Rules for the JSON output:
