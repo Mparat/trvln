@@ -1,0 +1,121 @@
+{
+  "summary": { "destination": "Lisbon, Portugal", "duration": "4 days" },
+  "days": [
+    {
+      "dayNumber": 1,
+      "title": "Arrival and Alfama",
+      "location": "Alfama",
+      "periods": [
+        {
+          "label": "Morning",
+          "activities": [
+            { "name": "Arrive and drop bags", "description": "Land, train into Santa Apolónia, and hand bags to the guesthouse before rooms open.", "tags": ["transit"] }
+          ],
+          "dining": [{ "name": "Pastelaria Santo António", "description": "Two minutes from the guesthouse door — a bica and a warm pastel de nata is all a jet-lagged first morning needs before the hills." }]
+        },
+        {
+          "label": "Afternoon",
+          "activities": [
+            { "name": "Alfama backstreet wander", "description": "No map for two hours between the cathedral and the river: you asked for unplanned time, and Alfama's laundry-strung lanes reward it better than any list.", "tags": ["walking"] },
+            { "name": "Miradouro de Santa Luzia", "description": "Arrive near five when the tour groups thin and the azulejo terrace catches low light over the rooftops you just walked." }
+          ],
+          "dining": [{ "name": "Ti-Natércia", "description": "Eight tables halfway up your afternoon route; Natércia's chouriço assado and house wine suit the slow first day you planned." }]
+        },
+        {
+          "label": "Evening",
+          "activities": [
+            { "name": "Fado at Tasca do Chico", "description": "You ranked live music first, so it opens the trip: amateur fado a five-minute walk downhill, raw in the way the tourist dinner-shows are not." }
+          ],
+          "dining": [{ "name": "Taberna Sal Grosso", "description": "Around the corner from the fado house — split small plates late, the way the neighborhood actually eats after a show." }]
+        }
+      ]
+    },
+    {
+      "dayNumber": 2,
+      "title": "Castle hill and Graça",
+      "location": "Alfama and Graça",
+      "periods": [
+        {
+          "label": "Morning",
+          "activities": [
+            { "name": "Castelo de São Jorge early", "description": "Book the 9am slot: you share the ramparts with peacocks instead of cruise crowds, and the climb starts from yesterday's streets — no transit needed." },
+            { "name": "Graça viewpoint coffee", "description": "Fifteen minutes further uphill, the miradouro kiosk where castle visitors rarely continue; the view back covers everything you walked yesterday." }
+          ],
+          "dining": [{ "name": "O Vinhaça", "description": "On the walk between castle and Graça — grilled sardines at the counter, priced for the builders who eat here daily." }]
+        },
+        {
+          "label": "Afternoon",
+          "activities": [
+            { "name": "Feira da Ladra market", "description": "Tuesday is market day, which is why this sits on day 2: tiles, brass, and junk spread over the Graça hillside you are already on.", "tags": ["shopping"] }
+          ],
+          "dining": [{ "name": "Cantina Baldracca", "description": "Italian-Portuguese counter beside the market field; the daily pasta is what the stallholders themselves queue for at two." }]
+        },
+        {
+          "label": "Evening",
+          "activities": [
+            { "name": "Open evening in Graça", "description": "Yesterday ran late, so tonight stays loose: the kiosk terraces around Graça square fill with neighbors at dusk and need no plan." }
+          ],
+          "dining": [{ "name": "Damas", "description": "A Graça bakery by day and bar by night — dinner where the evening already is, no cab across town." }]
+        }
+      ]
+    },
+    {
+      "dayNumber": 3,
+      "title": "Belém by the river",
+      "location": "Belém",
+      "periods": [
+        {
+          "label": "Morning",
+          "activities": [
+            { "name": "Tram 15 to Jerónimos", "description": "The 8:40 tram beats both the traffic and the monastery queue; being inside by 9:30 buys you the cloisters nearly alone.", "tags": ["transit", "cultural"] },
+            { "name": "Jerónimos Monastery cloisters", "description": "The Manueline carving you flagged in your saved photos is here — an hour in the cloisters, skipping the church line entirely." }
+          ],
+          "dining": [{ "name": "Pastéis de Belém", "description": "The original bakery is 200 meters from the monastery exit; eat the custard tarts warm at the azulejo counter, not from the takeaway line." }]
+        },
+        {
+          "label": "Afternoon",
+          "activities": [
+            { "name": "MAAT and riverside walk", "description": "The riverfront path links the monastery to MAAT in twenty flat minutes, so the museum, the bridge views, and the walk are one continuous afternoon.", "tags": ["walking", "cultural"] }
+          ],
+          "dining": [{ "name": "Este Oeste", "description": "On the riverside path itself between MAAT and the tower — wood-fired pizza on the terrace saves you leaving the waterfront." }]
+        },
+        {
+          "label": "Evening",
+          "activities": [
+            { "name": "Sunset at Belém Tower", "description": "Stay riverside for the light: the tower faces west, and the lawns fill with locals with bottles of vinho verde around eight." }
+          ],
+          "dining": [{ "name": "A Margem", "description": "A glass cube on the water fifty meters from the tower — book the 8:30 table so dinner starts as the sky goes pink." }]
+        }
+      ]
+    },
+    {
+      "dayNumber": 4,
+      "title": "Baixa and departure",
+      "location": "Baixa",
+      "periods": [
+        {
+          "label": "Morning",
+          "activities": [
+            { "name": "Slow Baixa breakfast", "description": "A deliberately empty last morning: Rua Augusta before the shops open, when the mosaics are wet from washing and the arch frames an empty street." }
+          ],
+          "dining": [{ "name": "Confeitaria Nacional", "description": "Lisbon's oldest pastry house sits on your walk through Praça da Figueira — a last bica under the same mirrors since 1829." }]
+        },
+        {
+          "label": "Afternoon",
+          "activities": [
+            { "name": "Last souvenirs on Rua da Conceição", "description": "The haberdashery block of Baixa, where the tinned-fish and tile shops are actual old suppliers rather than airport-brand outlets.", "tags": ["shopping"] },
+            { "name": "Airport transfer", "description": "Metro from Baixa-Chiado runs direct to the airport in 25 minutes — leave three hours before the flight.", "tags": ["transit"] }
+          ],
+          "dining": [{ "name": "Nicolau Lisboa", "description": "Brunch plates two streets from the metro entrance; a proper sit-down lunch beats airport food and still makes the 2pm train." }]
+        },
+        {
+          "label": "Evening",
+          "activities": [
+            { "name": "Departure", "description": "Flight home; the evening belongs to the airline.", "tags": ["transit"] }
+          ],
+          "dining": []
+        }
+      ]
+    }
+  ]
+}
