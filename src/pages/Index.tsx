@@ -66,6 +66,9 @@ type IdentifiedDestination = {
 
 // Persist the in-progress session so a backgrounded/reloaded tab (common on
 // mobile browsers, which discard inactive tabs) restores instead of clearing.
+// Lives in sessionStorage, which is scoped to the tab: reloads, same-tab
+// navigation away and back, mobile tab discard/restore, and same-tab auth or
+// checkout redirects all restore — but a new tab or a fresh visit starts clean.
 const SESSION_STORAGE_KEY = 'trvln:session:v1';
 
 type PersistedSession = {
@@ -78,7 +81,10 @@ type PersistedSession = {
 const loadPersistedSession = (): PersistedSession | null => {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
+    // The snapshot used to live in localStorage, which made stale state leak
+    // into every new tab and visit. Drop any copy left there by old builds.
+    window.localStorage.removeItem(SESSION_STORAGE_KEY);
+    const raw = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PersistedSession;
     if (!parsed || typeof parsed !== 'object' || !parsed.preferences) return null;
@@ -109,11 +115,17 @@ const buildSessionSnapshot = (
 };
 
 // A generation run in flight. Persisted so a reloaded/backgrounded tab can
-// reconnect and fetch the itineraries the server finished on its own.
+// reconnect and fetch the itineraries the server finished on its own. Unlike
+// the session snapshot this stays in localStorage — the server keeps working
+// after the tab dies, and finished trips should be recoverable from a fresh
+// tab — but only within a recovery window, so an abandoned run doesn't greet
+// a visit days later.
 const PENDING_BATCH_KEY = 'trvln:pendingBatch:v1';
+const PENDING_BATCH_TTL_MS = 60 * 60 * 1000;
 
 type PendingJob = { jobId: string; themeId: string; name: string; emoji: string };
 type PendingBatch = { batchId: string; jobs: PendingJob[] };
+type PersistedPendingBatch = PendingBatch & { savedAt?: number };
 
 // Everything a single variant needs to generate itself, so a variant opened
 // later can run without re-deriving the batch it belongs to.
@@ -129,16 +141,23 @@ const loadPendingBatch = (): PendingBatch | null => {
   try {
     const raw = window.localStorage.getItem(PENDING_BATCH_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as PendingBatch;
+    const parsed = JSON.parse(raw) as PersistedPendingBatch;
     if (!parsed?.batchId || !Array.isArray(parsed.jobs) || parsed.jobs.length === 0) return null;
-    return parsed;
+    // Expired (or unstamped, from an old build) — the run is long over either
+    // way, and polling its jobs would just resurrect a stale trip.
+    if (!parsed.savedAt || Date.now() - parsed.savedAt > PENDING_BATCH_TTL_MS) {
+      clearPendingBatch();
+      return null;
+    }
+    return { batchId: parsed.batchId, jobs: parsed.jobs };
   } catch {
     return null;
   }
 };
 
 const savePendingBatch = (batch: PendingBatch) => {
-  try { window.localStorage.setItem(PENDING_BATCH_KEY, JSON.stringify(batch)); }
+  const stamped: PersistedPendingBatch = { ...batch, savedAt: Date.now() };
+  try { window.localStorage.setItem(PENDING_BATCH_KEY, JSON.stringify(stamped)); }
   catch { /* storage unavailable — reconnect just won't be possible */ }
 };
 
@@ -341,7 +360,7 @@ const Index = () => {
     const handle = window.setTimeout(() => {
       try {
         const snapshot = buildSessionSnapshot(preferences, itineraries, activeVariant, view);
-        window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(snapshot));
+        window.sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(snapshot));
       } catch (error) {
         console.warn('Failed to persist session:', error);
       }
