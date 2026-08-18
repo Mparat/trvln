@@ -169,6 +169,10 @@ ${tripPreferences.additionalNotes || 'None provided'}
     // the legacy markdown renderer and the redesigned layout is lost.
     const isStructured = currentItinerary.trimStart().startsWith('{');
 
+    // Mirrors ItineraryData in src/types/itinerary.ts and the generate-itinerary
+    // output schema — a field added there must be added here too, or edits will
+    // strip it. The "preserve unknown fields" rule below is the safety net for
+    // anything this prose copy is missing.
     const structuredFormatRules = `## Output Format (CRITICAL - JSON ONLY)
 
 The itinerary you receive is a single JSON object. Your output MUST be the complete updated itinerary as a single valid JSON object in EXACTLY the same schema — same field names, same nesting, same value formats. No markdown, no prose, no code fences: after your </edit_planning> section, output raw JSON starting with { and ending with }.
@@ -179,17 +183,18 @@ The schema, for reference (every field you receive must survive the edit unless 
 - "flights": { skip?, context?, options: [{ description, price, url, airlineCode?, route?, viaCity?, airline?, stops?, duration?, departureTime?, badge? }] }
 - "accommodation": [{ location, nights, options: [{ name, type?, pricePerNight, why?, url, isPrimary }] }]
 - "bookingChecklist": [{ item, leadTime, estimatedCost, url, priority: "high"|"medium"|"low" }]
-- "days": [{ dayNumber, title, location, transitNote?, periods: [{ label: "Morning"|"Afternoon"|"Evening", activities: [{ name, description, duration?, cost?, tags?[] }], dining?: [{ name, description, priceRange?, url?, isPrimary? }] }] }]
+- "days": [{ dayNumber, title, location, transitNote?, locked?, generationFailed?, periods: [{ label: "Morning"|"Afternoon"|"Evening", activities: [{ name, description, duration?, cost?, tags?[], bookingUrl? }], dining?: [{ name, description, priceRange?, url?, isPrimary? }] }] }]
 - "alternatives"?: [{ title, description, url? }]
 
 Rules for the JSON output:
-- Every day keeps exactly 3 periods: Morning, Afternoon, Evening
+- Every day that has content keeps exactly 3 periods: Morning, Afternoon, Evening
+- A day carrying "locked": true or "generationFailed": true intentionally has no periods (or empty periods) — copy such days through EXACTLY as received, flags included. NEVER invent content for them.
 - All string values are plain text — no markdown asterisks, no HTML
 - New places need real URLs: Google Maps search links for restaurants and attractions (https://www.google.com/maps/search/?api=1&query=NAME+CITY), booking.com search links for hotels, getyourguide.com search links for tours
 - Never invent a restaurant or hotel to fill a slot — only add places you are confident exist
 - If the edit changes costs, keep "budget" and "summary.totalBudget" consistent with the new plan
 - Preserve every field of every unaffected item byte-for-byte — do not rewrite, reorder, or reformat content the edit does not touch
-- Do not add fields that are not in the schema, and do not drop optional fields that were present in the input`;
+- Do not invent new field names. If the input contains a field this schema does not list, preserve it unchanged — never drop it.`;
 
     const markdownFormatRules = `## Formatting Rules (CRITICAL - FOLLOW EXACTLY)
 
@@ -321,6 +326,10 @@ Apply the edit request above to the itinerary. First plan your changes in <edit_
         ],
         max_tokens: 32000,
         temperature: 0.7,
+        // A full-itinerary rewrite can run for minutes; a non-streaming request
+        // that long risks the HTTP timeout. The stream is accumulated below —
+        // the client still receives a single JSON response.
+        stream: true,
       }),
     });
 
@@ -344,11 +353,46 @@ Apply the edit request above to the itinerary. First plan your changes in <edit_
       throw new Error(`AI gateway error: ${response.status}`);
     }
 
-    const data = await response.json();
-    let updatedItinerary = data.content?.[0]?.text?.trim();
+    let updatedItinerary = '';
+    let stopReason: string | null = null;
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const payload = line.slice(6).trim();
+        if (!payload) continue;
+        try {
+          const event = JSON.parse(payload);
+          if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+            updatedItinerary += event.delta.text ?? '';
+          } else if (event.type === 'message_delta' && event.delta?.stop_reason) {
+            stopReason = event.delta.stop_reason;
+          }
+        } catch { /* pings and non-JSON lines */ }
+      }
+    }
+    updatedItinerary = updatedItinerary.trim();
 
     if (!updatedItinerary) {
       throw new Error('No content returned from AI');
+    }
+
+    // A max_tokens stop means the JSON was cut off mid-document. Returning it
+    // would let the client's truncation repair "successfully" parse a partial
+    // trip and overwrite the full one — fail loudly instead.
+    if (stopReason === 'max_tokens') {
+      console.error('Edit output truncated at max_tokens, length:', updatedItinerary.length);
+      return new Response(
+        JSON.stringify({ error: 'This itinerary is too long to edit in one pass. Try a smaller, more specific change.' }),
+        { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     // Strip the <edit_planning> section from the output, plus any code fence the
