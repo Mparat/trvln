@@ -15,6 +15,7 @@ import { useEntitlements } from "@/components/EntitlementsProvider";
 import { sendReadyText } from "@/lib/readyText";
 import { toast } from "@/hooks/use-toast";
 import { ItineraryData } from "@/types/itinerary";
+import { parseStructuredItinerary, stripPlanningSection, buildEditableItinerary, mergeEditedItinerary } from "@/lib/itineraryEdit";
 import type { Json } from "@/integrations/supabase/types";
 import { format } from "date-fns";
 import type { User } from "@supabase/supabase-js";
@@ -216,49 +217,6 @@ const pollJobContent = async (
   return { status: isStale() ? 'stale' : 'timeout' };
 };
 
-// Parse a completed itinerary's JSON, repairing truncated output if needed.
-const parseStructuredItinerary = (content: string): ItineraryData | undefined => {
-  try {
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return undefined;
-    const raw = jsonMatch[0];
-    try {
-      return JSON.parse(raw) as ItineraryData;
-    } catch {
-      // Repair truncated JSON using a proper bracket stack
-      const repairJson = (s: string): string => {
-        let t = s.trimEnd().replace(/,\s*$/, '');
-        const stack: string[] = [];
-        let inStr = false;
-        let esc = false;
-        for (const ch of t) {
-          if (esc) { esc = false; continue; }
-          if (ch === '\\' && inStr) { esc = true; continue; }
-          if (ch === '"') { inStr = !inStr; continue; }
-          if (inStr) continue;
-          if (ch === '{') stack.push('}');
-          else if (ch === '[') stack.push(']');
-          else if (ch === '}' || ch === ']') stack.pop();
-        }
-        if (inStr) t += '"';
-        while (stack.length > 0) t += stack.pop()!;
-        return t;
-      };
-      return JSON.parse(repairJson(raw)) as ItineraryData;
-    }
-  } catch (e) {
-    console.error('Failed to parse structured itinerary:', e);
-    return undefined;
-  }
-};
-
-const stripPlanningSection = (content: string): string => {
-  const closingTag = '</itinerary_planning>';
-  const closingIndex = content.indexOf(closingTag);
-  if (closingIndex !== -1) return content.slice(closingIndex + closingTag.length).trimStart();
-  if (content.includes('<itinerary_planning>')) return '';
-  return content;
-};
 
 // A finished variant texts the user's phone. sendReadyText is a no-op unless
 // they opted in with a number, so this is safe to call from every completion
@@ -1169,13 +1127,27 @@ const Index = () => {
     try {
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/edit-itinerary`, {
         method: "POST", headers: await getHeaders(),
-        body: JSON.stringify({ editRequest, currentItinerary: current.content, themeTitle: `${current.emoji} ${current.name}`, tripPreferences: preferences }),
+        body: JSON.stringify({ editRequest, currentItinerary: buildEditableItinerary(current), themeTitle: `${current.emoji} ${current.name}`, tripPreferences: preferences }),
       });
       if (!response.ok) { const e = await response.json().catch(() => ({})); throw new Error(e.error || "Failed to edit itinerary"); }
       const data = await response.json();
-      setItineraries(prev => prev.map((it, idx) =>
-        idx === activeVariant ? { ...it, content: stripPlanningSection(data.updatedItinerary), structuredData: undefined } : it
-      ));
+      const displayContent = stripPlanningSection(data.updatedItinerary);
+      if (current.structuredData) {
+        // A structured trip must stay structured — dropping structuredData here
+        // would silently fall back to the legacy markdown renderer, and
+        // committing malformed structured data would crash the renderer.
+        const merged = mergeEditedItinerary(displayContent, current.structuredData);
+        if (!merged) {
+          throw new Error("The updated itinerary came back in an unexpected format. Please try again.");
+        }
+        setItineraries(prev => prev.map((it, idx) =>
+          idx === activeVariant ? { ...it, content: JSON.stringify(merged), structuredData: merged } : it
+        ));
+      } else {
+        setItineraries(prev => prev.map((it, idx) =>
+          idx === activeVariant ? { ...it, content: displayContent, structuredData: undefined } : it
+        ));
+      }
       setIsSaved(false); // Mark as unsaved after edit
       toast({ title: "Changes applied!", description: "Your itinerary has been updated" });
     } catch (error) {
