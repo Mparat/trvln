@@ -554,6 +554,11 @@ export function StructuredItinerary({ data, rawItinerary, tripPreferences, editB
                 <MapPin className="w-3.5 h-3.5 text-muted-foreground" />
                 <span className="text-sm text-muted-foreground">{activeDay.location}</span>
               </div>
+              {activeDay.overview && (
+                <p className="text-sm text-muted-foreground leading-relaxed mt-2">
+                  {activeDay.overview}
+                </p>
+              )}
               {activeDay.transitNote && (
                 <div className="mt-2 flex items-center gap-1.5 text-xs text-primary font-medium">
                   <ChevronRight className="w-3.5 h-3.5" />
