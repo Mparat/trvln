@@ -622,6 +622,7 @@ Use this exact schema. Every field shown is required unless marked optional. All
       "title": "Arrival and Ponta Delgada",
       "location": "Ponta Delgada",
       "transitNote": "Pick up rental car at PDL Airport",
+      "overview": "A gentle landing day: everything sits within a short walk of the hotel, so jet lag sets the pace and nothing needs booking ahead.",
       "periods": [
         {
           "label": "Morning",
@@ -754,6 +755,7 @@ STRICT RULES:
 - Keep ALL descriptions to 1-2 tight sentences (35 words maximum). The first sentence says plainly WHAT the traveler will be doing, the way a travel agent prescribing a trip would — in words someone who has never heard of the place, the operator, or the sport can follow. Never lean on an unexplained abbreviation, brand, or insider shorthand: "a guided mountain-bike ride on Mount Currie's trail network", not "guided singletrack MTB". Add a second sentence only when it earns its place, to say why this pick is right for THIS traveler at THIS hour — tie it to what they asked for, what came before it in the day, or why it beats the obvious alternative.
 - Make every word earn its place. Say the specific reason for this, here, at this hour — the light on the ridge before the first cable car, the one thing on the menu, why it follows what came before. Never a label that would fit any comparable place: "charming local spot", "iconic landmark", "hidden gem", "a must-see". If a description would survive being moved to a different city — or a different traveler's trip — unchanged, it is not doing its job: rewrite it.
 - Keep activity names under 6 words. A name may be a proper noun (the operator, the trail, the museum), but any sport or activity type it mentions must appear in plain words in the description — a reader should never have to decode the name
+- Always populate each day's overview: 1–2 plain sentences (35 words max) telling the traveler how the day fits together — why it runs in this order, how the pieces connect (a short walk apart, one drive, needs the morning light), and what kind of day it is (big push, slow recovery, travel day). Explain the reasoning; never restate the title.
 - Omit bookingUrl entirely if it would be an empty string
 - If noFlight is true, set flights.skip to true and flights.options to []
 - Always populate summary.bestTimeNote with 1 sentence about the best time to visit and why
@@ -1159,6 +1161,7 @@ Each element follows the days[] schema in the system prompt exactly.
 
 **Rules for this pass:**
 - dayNumber, title, location and transitNote come from the day_roster entry for your day. Keep them as written.
+- Write the day's "overview" yourself: 1–2 sentences the traveler reads first, explaining how the day fits together — the logic of the order, the distances, the pacing. Not a restatement of the title.
 - Exactly 3 periods — Morning, Afternoon, Evening — each with 1 to 3 activities: the number the day actually warrants, per the system rules. A period built around one real thing takes exactly one, and deliberate open time in a named place is a legitimate activity. Do not pad a period to two.
 - **YOUR DAY'S \`anchors\` ARE ITS ASSIGNED ACTIVITIES**, planned in one pass that saw the whole trip. Build the day from them: every anchor appears as an activity, placed in the period that suits it best, plus at most small connective things near them. Anchors listed on OTHER days belong to those days — never use one, even if it would fit yours better. (A roster entry without anchors leaves the choice to you, under the same rules.)
 - **STAY IN YOUR DAY'S \`area\` AND ROUTE IT LIKE A LOCAL.** Order the periods' stops so the traveler moves through the area without backtracking or crossing it twice; where two stops are a short walk apart, say so in one of their descriptions. Everything in this day — activities and meals — should sit within the area unless the transitNote says the day moves.

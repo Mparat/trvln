@@ -15,6 +15,7 @@ import { useEntitlements } from "@/components/EntitlementsProvider";
 import { sendReadyText } from "@/lib/readyText";
 import { toast } from "@/hooks/use-toast";
 import { ItineraryData } from "@/types/itinerary";
+import { parseStructuredItinerary, stripPlanningSection, buildEditableItinerary, mergeEditedItinerary } from "@/lib/itineraryEdit";
 import type { Json } from "@/integrations/supabase/types";
 import { format } from "date-fns";
 import type { User } from "@supabase/supabase-js";
@@ -66,6 +67,9 @@ type IdentifiedDestination = {
 
 // Persist the in-progress session so a backgrounded/reloaded tab (common on
 // mobile browsers, which discard inactive tabs) restores instead of clearing.
+// Lives in sessionStorage, which is scoped to the tab: reloads, same-tab
+// navigation away and back, mobile tab discard/restore, and same-tab auth or
+// checkout redirects all restore — but a new tab or a fresh visit starts clean.
 const SESSION_STORAGE_KEY = 'trvln:session:v1';
 
 type PersistedSession = {
@@ -78,7 +82,10 @@ type PersistedSession = {
 const loadPersistedSession = (): PersistedSession | null => {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
+    // The snapshot used to live in localStorage, which made stale state leak
+    // into every new tab and visit. Drop any copy left there by old builds.
+    window.localStorage.removeItem(SESSION_STORAGE_KEY);
+    const raw = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PersistedSession;
     if (!parsed || typeof parsed !== 'object' || !parsed.preferences) return null;
@@ -109,11 +116,17 @@ const buildSessionSnapshot = (
 };
 
 // A generation run in flight. Persisted so a reloaded/backgrounded tab can
-// reconnect and fetch the itineraries the server finished on its own.
+// reconnect and fetch the itineraries the server finished on its own. Unlike
+// the session snapshot this stays in localStorage — the server keeps working
+// after the tab dies, and finished trips should be recoverable from a fresh
+// tab — but only within a recovery window, so an abandoned run doesn't greet
+// a visit days later.
 const PENDING_BATCH_KEY = 'trvln:pendingBatch:v1';
+const PENDING_BATCH_TTL_MS = 60 * 60 * 1000;
 
 type PendingJob = { jobId: string; themeId: string; name: string; emoji: string };
 type PendingBatch = { batchId: string; jobs: PendingJob[] };
+type PersistedPendingBatch = PendingBatch & { savedAt?: number };
 
 // Everything a single variant needs to generate itself, so a variant opened
 // later can run without re-deriving the batch it belongs to.
@@ -129,16 +142,23 @@ const loadPendingBatch = (): PendingBatch | null => {
   try {
     const raw = window.localStorage.getItem(PENDING_BATCH_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as PendingBatch;
+    const parsed = JSON.parse(raw) as PersistedPendingBatch;
     if (!parsed?.batchId || !Array.isArray(parsed.jobs) || parsed.jobs.length === 0) return null;
-    return parsed;
+    // Expired (or unstamped, from an old build) — the run is long over either
+    // way, and polling its jobs would just resurrect a stale trip.
+    if (!parsed.savedAt || Date.now() - parsed.savedAt > PENDING_BATCH_TTL_MS) {
+      clearPendingBatch();
+      return null;
+    }
+    return { batchId: parsed.batchId, jobs: parsed.jobs };
   } catch {
     return null;
   }
 };
 
 const savePendingBatch = (batch: PendingBatch) => {
-  try { window.localStorage.setItem(PENDING_BATCH_KEY, JSON.stringify(batch)); }
+  const stamped: PersistedPendingBatch = { ...batch, savedAt: Date.now() };
+  try { window.localStorage.setItem(PENDING_BATCH_KEY, JSON.stringify(stamped)); }
   catch { /* storage unavailable — reconnect just won't be possible */ }
 };
 
@@ -197,49 +217,6 @@ const pollJobContent = async (
   return { status: isStale() ? 'stale' : 'timeout' };
 };
 
-// Parse a completed itinerary's JSON, repairing truncated output if needed.
-const parseStructuredItinerary = (content: string): ItineraryData | undefined => {
-  try {
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return undefined;
-    const raw = jsonMatch[0];
-    try {
-      return JSON.parse(raw) as ItineraryData;
-    } catch {
-      // Repair truncated JSON using a proper bracket stack
-      const repairJson = (s: string): string => {
-        let t = s.trimEnd().replace(/,\s*$/, '');
-        const stack: string[] = [];
-        let inStr = false;
-        let esc = false;
-        for (const ch of t) {
-          if (esc) { esc = false; continue; }
-          if (ch === '\\' && inStr) { esc = true; continue; }
-          if (ch === '"') { inStr = !inStr; continue; }
-          if (inStr) continue;
-          if (ch === '{') stack.push('}');
-          else if (ch === '[') stack.push(']');
-          else if (ch === '}' || ch === ']') stack.pop();
-        }
-        if (inStr) t += '"';
-        while (stack.length > 0) t += stack.pop()!;
-        return t;
-      };
-      return JSON.parse(repairJson(raw)) as ItineraryData;
-    }
-  } catch (e) {
-    console.error('Failed to parse structured itinerary:', e);
-    return undefined;
-  }
-};
-
-const stripPlanningSection = (content: string): string => {
-  const closingTag = '</itinerary_planning>';
-  const closingIndex = content.indexOf(closingTag);
-  if (closingIndex !== -1) return content.slice(closingIndex + closingTag.length).trimStart();
-  if (content.includes('<itinerary_planning>')) return '';
-  return content;
-};
 
 // A finished variant texts the user's phone. sendReadyText is a no-op unless
 // they opted in with a number, so this is safe to call from every completion
@@ -341,7 +318,7 @@ const Index = () => {
     const handle = window.setTimeout(() => {
       try {
         const snapshot = buildSessionSnapshot(preferences, itineraries, activeVariant, view);
-        window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(snapshot));
+        window.sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(snapshot));
       } catch (error) {
         console.warn('Failed to persist session:', error);
       }
@@ -1150,13 +1127,27 @@ const Index = () => {
     try {
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/edit-itinerary`, {
         method: "POST", headers: await getHeaders(),
-        body: JSON.stringify({ editRequest, currentItinerary: current.content, themeTitle: `${current.emoji} ${current.name}`, tripPreferences: preferences }),
+        body: JSON.stringify({ editRequest, currentItinerary: buildEditableItinerary(current), themeTitle: `${current.emoji} ${current.name}`, tripPreferences: preferences }),
       });
       if (!response.ok) { const e = await response.json().catch(() => ({})); throw new Error(e.error || "Failed to edit itinerary"); }
       const data = await response.json();
-      setItineraries(prev => prev.map((it, idx) =>
-        idx === activeVariant ? { ...it, content: stripPlanningSection(data.updatedItinerary), structuredData: undefined } : it
-      ));
+      const displayContent = stripPlanningSection(data.updatedItinerary);
+      if (current.structuredData) {
+        // A structured trip must stay structured — dropping structuredData here
+        // would silently fall back to the legacy markdown renderer, and
+        // committing malformed structured data would crash the renderer.
+        const merged = mergeEditedItinerary(displayContent, current.structuredData);
+        if (!merged) {
+          throw new Error("The updated itinerary came back in an unexpected format. Please try again.");
+        }
+        setItineraries(prev => prev.map((it, idx) =>
+          idx === activeVariant ? { ...it, content: JSON.stringify(merged), structuredData: merged } : it
+        ));
+      } else {
+        setItineraries(prev => prev.map((it, idx) =>
+          idx === activeVariant ? { ...it, content: displayContent, structuredData: undefined } : it
+        ));
+      }
       setIsSaved(false); // Mark as unsaved after edit
       toast({ title: "Changes applied!", description: "Your itinerary has been updated" });
     } catch (error) {
