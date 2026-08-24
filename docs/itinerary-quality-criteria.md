@@ -59,3 +59,17 @@ The itinerary JSON is the parsed generation output (the `ItineraryData` shape in
 `src/types/itinerary.ts`). Sources: a saved trip's content, an `itinerary_jobs.content`
 row (concatenate the streamed deltas), or a local capture. Exit code is non-zero when
 any check fails, so the script can gate CI or a manual smoke test.
+
+## The live loop
+
+`scripts/generate-live.mjs` runs a real generation against the deployed function
+(connection from the repo `.env` or `SUPABASE_URL`/`SUPABASE_ANON_KEY`) and writes the
+JSON the eval consumes:
+
+```sh
+node scripts/generate-live.mjs out.json && node scripts/eval-itinerary.mjs out.json --judge
+```
+
+`docs/workflows/itinerary-eval.yml` packages both as a manual-dispatch GitHub Actions
+workflow — copy it to `.github/workflows/` to install (see the note in the file for why
+it is parked here). Run it after any change to the generation prompts or pipeline.
