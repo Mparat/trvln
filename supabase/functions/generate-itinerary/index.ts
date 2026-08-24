@@ -699,17 +699,10 @@ Use this exact schema. Every field shown is required unless marked optional. All
           "activities": [
             {
               "name": "Sunset at PDL marina",
-              "description": "Watch the sun set over the Atlantic from the marina boardwalk — stunning on clear evenings.",
+              "description": "Watch the sun set over the Atlantic from the marina boardwalk, five minutes from dinner. A slow first evening — the volcano hikes you came for start tomorrow, rested.",
               "duration": "1 hour",
               "cost": "Free",
               "tags": ["nature", "photo-worthy"]
-            },
-            {
-              "name": "Evening stroll, Rua de Lisboa",
-              "description": "Explore the pedestrian shopping street lined with cafes and local boutiques.",
-              "duration": "45 minutes",
-              "cost": "Free",
-              "tags": ["walking", "shopping"]
             }
           ],
           "dining": [
@@ -752,16 +745,16 @@ STRICT RULES:
 - Include 1 or 2 dining options for every period: Morning (breakfast), Afternoon (lunch), Evening (dinner). The first must have "isPrimary": true (top pick); include a second with "isPrimary": false ONLY when a real, separate alternative exists within reach of where the traveler actually is at that hour. One real option beats two where the second is filler.
 - NEVER INVENT A RESTAURANT TO FILL A SLOT. Every name must come from the grounded research, or be the place the traveler is already staying that day, or — where no research was available — be a long-established place you are confident still exists. If nothing for a location meets that bar, give one option, the lodging's own kitchen, rather than a second name you cannot stand behind. A slot with one sourced option is correct; a slot with an invented second option is a failure.
 - WHERE MEALS ARE INCLUDED, SAY SO INSTEAD OF INVENTING CHOICE. When a stay includes meals or has no alternative nearby — a mountain hut or refuge on half board, a lodge, a ryokan, a safari camp, an all-inclusive, a boat, a remote village — the correct answer is that establishment. The same establishment MAY serve dinner and the next morning's breakfast; state that it is the hut/lodge's own dining room and what the meal plan covers.
-- OTHERWISE VARY THE RESTAURANTS: in towns and cities, where the traveler has real choice, do not repeat an establishment across periods or days — branch into nearby neighborhoods for fresh options. Repetition is only correct when it reflects where the traveler actually is, never when it is padding.
+- OTHERWISE VARY THE RESTAURANTS: in towns and cities, where the traveler has real choice, do not repeat an establishment across periods or days — but find the fresh option near where the day already is. PROXIMITY BEATS VARIETY: a meal belongs beside that hour's activities, and a distinct-but-distant pick is the wrong one. Repetition is only correct when it reflects where the traveler actually is, never when it is padding.
 - ONLY recommend restaurants confirmed to be currently open in the grounded research. If the research mentions any closure, "permanently closed", "temporarily closed", or uncertain status for an establishment, do NOT include it. When in doubt, prefer well-established restaurants with multiple recent reviews over newer or less-cited spots.
 - MATCH THE MEAL TO THE PERIOD: Morning dining must be breakfast spots (cafés, bakeries, brunch, or the included hut/hotel breakfast). Afternoon must be lunch spots. Evening must be dinner. Do not put a dinner restaurant in a morning slot.
-- VARY THE PRIMARY PICKS BY DAY where the destination offers a choice: the "isPrimary": true option should feel distinct day-to-day in cuisine, vibe, and neighborhood — showcase the destination's range, don't anchor every day to the same kind of place.
+- VARY THE PRIMARY PICKS BY DAY where the destination offers a choice: the "isPrimary": true option should feel distinct day-to-day in cuisine and vibe — showcase the destination's range, don't anchor every day to the same kind of place. Range comes from the food, never from sending the traveler across town: each day's picks stay near that day's ground.
 - Tags must only be from: transit, cultural, nature, hiking, beach, food, photo-worthy, walking, adventure, relaxation, shopping, nightlife
 - priority must be exactly "high", "medium", or "low"
 - Use real URLs from the grounded research — fall back to the search URL patterns given in the trip context below
-- Keep ALL descriptions to 1 short sentence (25 words maximum) — be ruthlessly concise
-- Make those 25 words earn their place. Say the specific reason for this, here, at this hour — the light on the ridge before the first cable car, the one thing on the menu, why it follows what came before. Never a label that would fit any comparable place: "charming local spot", "iconic landmark", "hidden gem", "a must-see". If a description would survive being moved to a different city unchanged, it is not doing its job — rewrite it.
-- Keep activity names under 6 words
+- Keep ALL descriptions to 1-2 tight sentences (35 words maximum). The first sentence says plainly WHAT the traveler will be doing, the way a travel agent prescribing a trip would — in words someone who has never heard of the place, the operator, or the sport can follow. Never lean on an unexplained abbreviation, brand, or insider shorthand: "a guided mountain-bike ride on Mount Currie's trail network", not "guided singletrack MTB". Add a second sentence only when it earns its place, to say why this pick is right for THIS traveler at THIS hour — tie it to what they asked for, what came before it in the day, or why it beats the obvious alternative.
+- Make every word earn its place. Say the specific reason for this, here, at this hour — the light on the ridge before the first cable car, the one thing on the menu, why it follows what came before. Never a label that would fit any comparable place: "charming local spot", "iconic landmark", "hidden gem", "a must-see". If a description would survive being moved to a different city — or a different traveler's trip — unchanged, it is not doing its job: rewrite it.
+- Keep activity names under 6 words. A name may be a proper noun (the operator, the trail, the museum), but any sport or activity type it mentions must appear in plain words in the description — a reader should never have to decode the name
 - Always populate each day's overview: 1–2 plain sentences (35 words max) telling the traveler how the day fits together — why it runs in this order, how the pieces connect (a short walk apart, one drive, needs the morning light), and what kind of day it is (big push, slow recovery, travel day). Explain the reasoning; never restate the title.
 - Omit bookingUrl entirely if it would be an empty string
 - If noFlight is true, set flights.skip to true and flights.options to []
@@ -775,7 +768,7 @@ STRICT RULES:
 
 **Composition — what separates a planned trip from a list of good things. These decide the day roster, so they apply when assigning what happens on which day:**
 - Give the trip a shape. The arrival day and the last day are lighter than the middle. No two consecutive days should have the same rhythm — a full day out is followed by one that stays close to home. Something the traveler explicitly said they came for should land early enough that one bad-weather day later does not cost them the trip.
-- Sequence geographically. A day should not cross the city twice. Where two activities are a short walk apart, say so; where a move is the point of the day, let it be the day.
+- Sequence geographically, at both scales. Across the trip: consecutive days cover adjacent ground, and once the trip leaves an area it does not double back (except to the gateway to depart). Within a day: cluster in one area and route it without backtracking — a day should not cross the city twice, and its meals sit along the route, not across town. Where two stops are a short walk apart, say so; where a move is the point of the day, let it be the day.
 - Anticipate. Where the research says something depends on weather, conditions, or a booking that may not come through, name the fallback in that day's transitNote instead of leaving the traveler to improvise.
 - Let the trip build. What the traveler will remember belongs where they are acclimatised enough to appreciate it, not on the morning they land jet-lagged.
 
@@ -832,7 +825,7 @@ const TRIP_PLAN_TOOL = {
       dayPlan: {
         type: "array",
         description:
-          "Write this FIRST. One entry per day of the trip: dayNumber, title, location, optional transitNote, and a dining object mapping Morning/Afternoon/Evening to the assigned restaurant names. Every restaurant name across the whole array must be different, except a stay's own dining room.",
+          "Write this FIRST. One entry per day of the trip: dayNumber, title, location, area (the one neighborhood/zone the day clusters in), anchors (2-4 short named activities from the research that define the day, each with a word on where it sits), optional transitNote, and a dining object mapping Morning/Afternoon/Evening to the assigned restaurant names. Every restaurant name and every anchor across the whole array must be different, except a stay's own dining room.",
       },
       summary: { type: "object", description: "The summary object from the schema." },
       budget: { type: "object", description: "The budget object from the schema." },
@@ -867,10 +860,12 @@ const ITINERARY_TOOLS = [TRIP_PLAN_TOOL, DAYS_TOOL];
 // slower itinerary — it is no itinerary at all, mid-stream.
 const WALL_CLOCK_BUDGET_MS = 150_000;
 // The plan review costs ~11s and only earns that back if the days it comments
-// on actually get written. Measured: research ~32s + plan ~77s puts a normal
-// request at ~110s here, so the cutoff has to sit above that to run at all,
-// while still refusing on a request that is already late.
-const REVIEW_BUDGET_CUTOFF_MS = 115_000;
+// on actually get written. Measured: research ~32s + plan ~77s put a normal
+// request at ~110s here, and the cutoff sat at 115s. The roster now also
+// carries per-day area + anchors (~45 output tokens/day, ≈ +5s on a typical
+// trip), so the cutoff moves down by the same margin: a request that arrives
+// late skips the review rather than gambling the days against the 150s kill.
+const REVIEW_BUDGET_CUTOFF_MS = 108_000;
 
 type AnthropicJsonResult = {
   data: Record<string, unknown>;
@@ -1167,7 +1162,9 @@ Each element follows the days[] schema in the system prompt exactly.
 **Rules for this pass:**
 - dayNumber, title, location and transitNote come from the day_roster entry for your day. Keep them as written.
 - Write the day's "overview" yourself: 1–2 sentences the traveler reads first, explaining how the day fits together — the logic of the order, the distances, the pacing. Not a restatement of the title.
-- Exactly 3 periods — Morning, Afternoon, Evening — and exactly 2 activities in each.
+- Exactly 3 periods — Morning, Afternoon, Evening — each with 1 to 3 activities: the number the day actually warrants, per the system rules. A period built around one real thing takes exactly one, and deliberate open time in a named place is a legitimate activity. Do not pad a period to two.
+- **YOUR DAY'S \`anchors\` ARE ITS ASSIGNED ACTIVITIES**, planned in one pass that saw the whole trip. Build the day from them: every anchor appears as an activity, placed in the period that suits it best, plus at most small connective things near them. Anchors listed on OTHER days belong to those days — never use one, even if it would fit yours better. (A roster entry without anchors leaves the choice to you, under the same rules.)
+- **STAY IN YOUR DAY'S \`area\` AND ROUTE IT LIKE A LOCAL.** Order the periods' stops so the traveler moves through the area without backtracking or crossing it twice; where two stops are a short walk apart, say so in one of their descriptions. Everything in this day — activities and meals — should sit within the area unless the transitNote says the day moves.
 - **THE DINING IS ALREADY ASSIGNED.** Use exactly the names in your day's roster entry, in the order given: the first is "isPrimary": true, a second is "isPrimary": false. Do not substitute a name, do not add one, do not drop one. Your job is to write each one's description, priceRange and url from the research.
 - **IF A PERIOD HAS NO ASSIGNED NAME**, you may name one real establishment from the research for it — but ONLY a place that appears nowhere in <names_taken> below, and only if the research actually names one near where the traveler is at that hour. The place the traveler is staying that night also counts. Otherwise give that period an empty dining array. Never fill an empty period with a category description like "Trattoria in the village" or "a lakeside ristorante": a search box dressed up as a recommendation is worse than showing nothing.
 
@@ -1175,14 +1172,14 @@ Each element follows the days[] schema in the system prompt exactly.
 ${takenList.join(", ") || "(none)"}
 </names_taken>
 - **EVERY OTHER DAY'S RESTAURANTS ARE LISTED IN THE ROSTER AND BELONG TO THOSE DAYS.** Never use one of them, even if it would fit yours better.
-- The other days' titles and locations tell you what the rest of the trip covers. Choose activities that do not duplicate them — the traveler should not do the same thing twice.
+- The other days' titles, areas and anchors tell you what the rest of the trip covers. Choose connective activities that do not duplicate any of it — the traveler should not do the same thing twice, or a lightly reworded version of it.
 ${findings.length
     ? `
 **A REVIEW OF THE PLAN FLAGGED THIS DAY.** The plan itself is fixed, but how full this day is and what goes in it are yours:
 
 ${findings.map(f => `- ${f}`).join("\n")}
 
-Write the day so this is no longer true. If it says the day is too packed, give a period one activity instead of three, or make one of them open time with a reason — a lighter day that answers the note beats a full one that ignores it.
+Write the day so this is no longer true. If it says the day is too packed, give a period one activity instead of three, or make one of them open time with a reason — a lighter day that answers the note beats a full one that ignores it. A finding outranks the roster's anchors: where it says to drop or replace one of them, the finding wins.
 `
     : ""}
 - Everything else follows the strict rules in the system prompt.
@@ -1230,7 +1227,9 @@ function formatDateForBooking(dateStr: string | undefined): string {
 // untouched.
 
 type ResumeState = {
-  roster?: { dayNumber: number; title?: string; location?: string; transitNote?: string; dining?: Record<string, string[]> }[];
+  // area/anchors are absent on rosters banked before they existed — every
+  // consumer treats them as optional.
+  roster?: { dayNumber: number; title?: string; location?: string; area?: string; anchors?: string[]; transitNote?: string; dining?: Record<string, string[]> }[];
   lockedDayNumbers?: number[];
   takenList?: string[];
   planFindings?: string[];
@@ -2489,6 +2488,8 @@ Call the \`emit_trip_plan\` tool. Its input takes these fields — and **there i
       "dayNumber": 1,
       "title": "Arrival and Ponta Delgada",
       "location": "Ponta Delgada",
+      "area": "city center and marina",
+      "anchors": ["Portas da Cidade square", "Mercado da Graça market", "Sunset at the marina"],
       "transitNote": "Pick up rental car at PDL Airport",
       "dining": {
         "Morning": ["Café do Mar", "Pastelaria Garrett"],
@@ -2510,6 +2511,8 @@ summary, budget, flights, accommodation, bookingChecklist and alternatives follo
 **dayPlan replaces the "days" array for this pass:**
 - One entry per day of the trip. The number of entries IS the trip length — decide it from the duration constraints above.
 - dayNumber, title, location and transitNote are the same fields as in the days[] schema. Omit transitNote on days with no travel.
+- **area is the one neighborhood, zone or valley the day clusters in** — a few words. A day lives in its area. Sequence the days so the trip flows through the destination: consecutive days sit in adjacent areas or along the route, and once the trip leaves an area it does not double back (returning to the gateway for departure is the exception). This ordering cannot be fixed later — the day passes write days independently and cannot move them.
+- **anchors are the 2-4 activities that define the day** — short names copied from the research, each with a word on where it sits (e.g. "Jerónimos cloisters, Belém"). THIS IS ALSO WHERE ACTIVITY UNIQUENESS IS DECIDED: the day passes cannot see each other's days, so an activity that anchors two days will be written twice. Before finishing, read back over the whole array exactly as with restaurants — no anchor may repeat across days, and every anchor must sit in or near its day's area.
 - **dining holds the ASSIGNED RESTAURANT NAMES for that day's three periods — names only.** No descriptions, no prices, no URLs; pass 2 writes those from the research.
 - **EVERY ENTRY MUST BE A REAL ESTABLISHMENT'S PROPER NAME, copied from the research.** "Ristorante Il Cavatappi", "Osteria del Beccaccino", "Bar Il Molo" are names. "Trattoria in Varenna village", "Dinner at a lakeside ristorante", "a family-run osteria", "Lakefront café" are CATEGORY DESCRIPTIONS, not names. A category description is never acceptable — not as a top pick, not as a second option, not to complete a day. It is the same failure as inventing a restaurant, and it is worse than leaving the slot empty, because the traveler is handed a search box instead of a table.
 - **RUNNING OUT OF NAMES IS AN ACCEPTABLE OUTCOME. PADDING IS NOT.** If the research does not contain enough named establishments to fill every period, leave the extra periods out — give an empty array, or omit the period key. A trip with nine real named restaurants and twelve empty slots is correct. A trip with twenty-one filled slots where half are categories is a failure. Note the shortfall in summary.assumptions.
@@ -2519,7 +2522,8 @@ ${hasPlacesDining ? `- **THE RESEARCH INCLUDES A "DINING FROM GOOGLE MAPS" SECTI
 - **THIS IS WHERE RESTAURANT UNIQUENESS IS DECIDED, AND IT CANNOT BE FIXED LATER.** The day passes run independently and cannot see each other's choices. Before you finish, read back over the entire dayPlan: if the same establishment appears on two different days, or twice in one day, replace one of them with a different place from the research.
 - The ONLY name that may legitimately repeat is a stay's own dining room — a hut, refuge, lodge, ryokan, safari camp, boat, or hotel where meals are included or nothing else is within reach. Where that is genuinely where the traveler eats, repeat it and say which stay it is.
 - Every name must come from the grounded research, or be the traveler's own lodging for that night. Never invent one to fill a slot.
-- Match the meal to the period (Morning = breakfast, Afternoon = lunch, Evening = dinner), and vary cuisine, vibe and neighborhood day to day.
+- **ASSIGN EACH MEAL WHERE THE TRAVELER WILL BE AT THAT HOUR.** The day's area and anchors say where that is, and the research and Places lists carry each restaurant's neighborhood or address — read them. A meal beside the day's anchors is the right assignment; a famous name across town is the wrong one, however good. This is how a local plans a day, and it cannot be fixed later either.
+- Match the meal to the period (Morning = breakfast, Afternoon = lunch, Evening = dinner), and vary cuisine and vibe day to day — within reach of each day's area, never at the cost of proximity.
 
 Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary out as text.`;
 
@@ -2527,6 +2531,8 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
       dayNumber?: number;
       title?: string;
       location?: string;
+      area?: string;
+      anchors?: string[];
       transitNote?: string;
       dining?: Record<string, string[]>;
     };
@@ -2663,7 +2669,9 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
             // length, and left to prose the model writes that instead and drops
             // the request onto the slow single-call path.
             toolName: TRIP_PLAN_TOOL.name,
-            maxTokens: 8000,
+            // Headroom for the per-day area + anchors the roster now carries;
+            // a cap a long trip can reach would truncate the plan mid-tool-call.
+            maxTokens: 9000,
             label: "skeleton",
           });
           timings.skeleton_generation = Date.now() - skeletonStart;
@@ -2841,10 +2849,15 @@ Put all of this in the \`emit_trip_plan\` tool call. Do not write the itinerary 
           }
 
           try {
+            // area and anchors give the repetition and geography checks real
+            // substance — on titles alone the review could only catch
+            // title-level repeats.
             const rosterForReview = plan.map((e, i) => ({
               day: i + 1,
               title: e.title,
               location: e.location,
+              area: e.area,
+              anchors: e.anchors,
               transitNote: e.transitNote,
             }));
 
@@ -2946,6 +2959,10 @@ or
           dayNumber: i + 1,
           title: typeof entry.title === "string" ? entry.title : `Day ${i + 1}`,
           location: typeof entry.location === "string" ? entry.location : "",
+          area: typeof entry.area === "string" ? entry.area : undefined,
+          anchors: Array.isArray(entry.anchors)
+            ? entry.anchors.filter((a): a is string => typeof a === "string" && a.trim().length > 0).slice(0, 6)
+            : undefined,
           transitNote: typeof entry.transitNote === "string" ? entry.transitNote : undefined,
           dining: entry.dining && typeof entry.dining === "object" ? entry.dining : {},
         }));

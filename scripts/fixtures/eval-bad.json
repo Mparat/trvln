@@ -1,0 +1,129 @@
+{
+  "summary": { "destination": "Lisbon, Portugal", "duration": "4 days" },
+  "days": [
+    {
+      "dayNumber": 1,
+      "title": "Arrival and Alfama",
+      "location": "Alfama",
+      "periods": [
+        {
+          "label": "Morning",
+          "activities": [
+            { "name": "Explore Alfama streets", "description": "Wander the charming local streets of this picturesque neighborhood." },
+            { "name": "Miradouro visit", "description": "A must-see viewpoint with breathtaking views." }
+          ],
+          "dining": [{ "name": "Café A", "description": "A hidden gem with something for everyone." }]
+        },
+        {
+          "label": "Afternoon",
+          "activities": [
+            { "name": "Lisbon Cathedral", "description": "Iconic landmark of the city." },
+            { "name": "Fado museum", "description": "Learn about fado music." }
+          ],
+          "dining": [{ "name": "Tasca B", "description": "Charming local spot." }]
+        },
+        {
+          "label": "Evening",
+          "activities": [
+            { "name": "Sunset viewpoint", "description": "Watch the sunset." },
+            { "name": "Evening stroll", "description": "A quaint walk." }
+          ],
+          "dining": [{ "name": "Restaurante C", "description": "A variety of dishes." }]
+        }
+      ]
+    },
+    {
+      "dayNumber": 2,
+      "title": "Belém monuments",
+      "location": "Belém",
+      "periods": [
+        {
+          "label": "Morning",
+          "activities": [
+            { "name": "Jerónimos Monastery", "description": "World-famous monastery." },
+            { "name": "Belém Tower", "description": "Iconic landmark by the river." }
+          ],
+          "dining": [{ "name": "Pastéis de Belém", "description": "Famous pastries." }]
+        },
+        {
+          "label": "Afternoon",
+          "activities": [
+            { "name": "Guided singletrack MTB", "description": "A 6-hour guide-led ride through the actual trail network — the kind of terrain locals use." },
+            { "name": "Riverside walk", "description": "Walk along the river." }
+          ],
+          "dining": [{ "name": "Lunch spot D", "description": "Casual lunch." }]
+        },
+        {
+          "label": "Evening",
+          "activities": [
+            { "name": "Monument lights", "description": "See monuments lit up." },
+            { "name": "Waterfront bar", "description": "Drinks by the water." }
+          ],
+          "dining": [{ "name": "Dinner E", "description": "Seafood dinner." }]
+        }
+      ]
+    },
+    {
+      "dayNumber": 3,
+      "title": "Back to Alfama",
+      "location": "Alfama",
+      "periods": [
+        {
+          "label": "Morning",
+          "activities": [
+            { "name": "Wander Alfama streets", "description": "Explore the charming streets of this picturesque neighborhood again." },
+            { "name": "Flea market", "description": "Browse the market stalls." }
+          ],
+          "dining": [{ "name": "Café F", "description": "Coffee and pastries." }]
+        },
+        {
+          "label": "Afternoon",
+          "activities": [
+            { "name": "Castle of São Jorge", "description": "Historic castle." },
+            { "name": "Tram 28 ride", "description": "Ride the famous tram." }
+          ],
+          "dining": [{ "name": "Tasca G", "description": "Petiscos and wine." }]
+        },
+        {
+          "label": "Evening",
+          "activities": [
+            { "name": "Fado show", "description": "Traditional music performance." },
+            { "name": "Night viewpoint", "description": "City lights at night." }
+          ],
+          "dining": [{ "name": "Restaurante H", "description": "Grilled fish." }]
+        }
+      ]
+    },
+    {
+      "dayNumber": 4,
+      "title": "Belém again",
+      "location": "Belém",
+      "periods": [
+        {
+          "label": "Morning",
+          "activities": [
+            { "name": "Coach museum", "description": "Historic coaches." },
+            { "name": "Garden walk", "description": "Stroll the gardens." }
+          ],
+          "dining": [{ "name": "Café I", "description": "Breakfast spot." }]
+        },
+        {
+          "label": "Afternoon",
+          "activities": [
+            { "name": "Discoveries monument", "description": "Monument to the explorers." },
+            { "name": "River cruise", "description": "Cruise on the Tagus." }
+          ],
+          "dining": [{ "name": "Lunch J", "description": "Lunch by the marina." }]
+        },
+        {
+          "label": "Evening",
+          "activities": [
+            { "name": "Farewell dinner walk", "description": "Last evening walk." },
+            { "name": "Pack and rest", "description": "Prepare for departure." }
+          ],
+          "dining": [{ "name": "Dinner K", "description": "Final dinner." }]
+        }
+      ]
+    }
+  ]
+}

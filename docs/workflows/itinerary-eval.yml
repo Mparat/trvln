@@ -1,0 +1,51 @@
+# NOTE: this file lives in docs/workflows/ because the automation tokens used
+# by Claude sessions cannot push to .github/workflows/ (no `workflow` scope).
+# To install it, copy it to .github/workflows/itinerary-eval.yml from a machine
+# or the GitHub web UI ("Add file"), optionally add an ANTHROPIC_API_KEY repo
+# secret for the judge pass, then run it from the Actions tab.
+#
+# Live quality eval: runs a real generation against the DEPLOYED
+# generate-itinerary function and checks it against the four quality criteria
+# in docs/itinerary-quality-criteria.md. Manual dispatch only — each run costs
+# a real generation (Anthropic + Perplexity + Places).
+#
+# The structural checks always run. The LLM judge pass (C3 proximity and
+# nuance) runs only when the ANTHROPIC_API_KEY repo secret is configured.
+name: Itinerary Quality Eval
+
+on:
+  workflow_dispatch:
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Generate a live itinerary
+        run: node scripts/generate-live.mjs itinerary-live.json
+
+      - name: Run quality eval
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            node scripts/eval-itinerary.mjs itinerary-live.json --judge
+          else
+            echo "ANTHROPIC_API_KEY secret not set — structural checks only"
+            node scripts/eval-itinerary.mjs itinerary-live.json
+          fi
+
+      - name: Upload itinerary artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: itinerary-live
+          path: |
+            itinerary-live.json
+            itinerary-live.json.raw.txt
+          if-no-files-found: ignore
