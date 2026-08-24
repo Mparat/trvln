@@ -751,9 +751,9 @@ STRICT RULES:
 - Tags must only be from: transit, cultural, nature, hiking, beach, food, photo-worthy, walking, adventure, relaxation, shopping, nightlife
 - priority must be exactly "high", "medium", or "low"
 - Use real URLs from the grounded research — fall back to the search URL patterns given in the trip context below
-- Keep ALL descriptions to 1-2 tight sentences (35 words maximum). The first says what this is; add a second only when it earns its place, to say why this pick is right for THIS traveler at THIS hour — tie it to what they asked for, what came before it in the day, or why it beats the obvious alternative.
+- Keep ALL descriptions to 1-2 tight sentences (35 words maximum). The first sentence says plainly WHAT the traveler will be doing, the way a travel agent prescribing a trip would — in words someone who has never heard of the place, the operator, or the sport can follow. Never lean on an unexplained abbreviation, brand, or insider shorthand: "a guided mountain-bike ride on Mount Currie's trail network", not "guided singletrack MTB". Add a second sentence only when it earns its place, to say why this pick is right for THIS traveler at THIS hour — tie it to what they asked for, what came before it in the day, or why it beats the obvious alternative.
 - Make every word earn its place. Say the specific reason for this, here, at this hour — the light on the ridge before the first cable car, the one thing on the menu, why it follows what came before. Never a label that would fit any comparable place: "charming local spot", "iconic landmark", "hidden gem", "a must-see". If a description would survive being moved to a different city — or a different traveler's trip — unchanged, it is not doing its job: rewrite it.
-- Keep activity names under 6 words
+- Keep activity names under 6 words. A name may be a proper noun (the operator, the trail, the museum), but any sport or activity type it mentions must appear in plain words in the description — a reader should never have to decode the name
 - Omit bookingUrl entirely if it would be an empty string
 - If noFlight is true, set flights.skip to true and flights.options to []
 - Always populate summary.bestTimeNote with 1 sentence about the best time to visit and why

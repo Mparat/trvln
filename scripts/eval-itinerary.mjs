@@ -135,7 +135,32 @@ const activitiesOf = day =>
   const mean = descs.reduce((n, d) => n + words(d), 0) / (descs.length || 1);
   const genericHits = descs.filter(d => GENERIC.some(g => d.toLowerCase().includes(g)));
   const thin = descs.filter(d => words(d) < 8).length;
+  // Activity-type shorthand that assumes the reader already knows the sport.
+  // Deliberately a short, precise list — a blanket all-caps check would flag
+  // legitimate proper nouns (MAAT, MoMA) and airport codes in transit rows.
+  const SHORTHAND = [
+    { abbr: /\bMTB\b/i, plain: /mountain.bik/i },
+    { abbr: /\bSUP\b/, plain: /paddle.?board/i },
+    { abbr: /\bATV\b/, plain: /all.terrain|quad/i },
+    { abbr: /\bUTV\b/, plain: /side.by.side|utility/i },
+    { abbr: /\b4WD\b|\b4x4\b/i, plain: /four.wheel|off.road/i },
+    { abbr: /\bXC\b/, plain: /cross.country/i },
+  ];
+  const jargonHits = [];
+  for (const day of days) {
+    for (const p of day.periods ?? []) {
+      for (const a of p.activities ?? []) {
+        const text = `${a.name ?? ""} ${a.description ?? ""}`;
+        for (const { abbr, plain } of SHORTHAND) {
+          if (abbr.test(text) && !plain.test(text)) {
+            jargonHits.push(`day ${day.dayNumber} "${a.name}" uses shorthand with no plain-words explanation`);
+          }
+        }
+      }
+    }
+  }
   const problems = [];
+  if (jargonHits.length > 0) problems.push(jargonHits.join("; "));
   if (genericHits.length > 0) {
     problems.push(`${genericHits.length} generic phrase(s): ${genericHits.slice(0, 3).map(d => `"${d.slice(0, 60)}"`).join("; ")}`);
   }
@@ -170,7 +195,7 @@ async function judge() {
 C1 Repetition: do any two days feel like variations of each other, in content or rhythm?
 C2 Continuity: do consecutive days relate geographically, or does the trip ping-pong between areas?
 C3 Proximity: within each day, are the activities and the assigned restaurants plausibly near each other and ordered without backtracking? Name any day whose stops are scattered.
-C4 Excitement: do descriptions say why each pick is right for this trip at that hour, or are they generic labels that would survive being moved to another city?
+C4 Excitement and clarity: do descriptions say plainly WHAT each activity is — could a reader who has never heard of the sport, operator, or abbreviation follow it, the way an old-school travel agent would prescribe it? — and why each pick is right for this trip at that hour, rather than generic labels that would survive being moved to another city?
 
 The itinerary:
 ${JSON.stringify(compact)}

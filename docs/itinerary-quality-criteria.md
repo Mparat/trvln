@@ -39,6 +39,12 @@ trip for this traveler at this hour — not a generic label ("charming local spo
 "must-see") and not a bare utility line. If a description would survive being moved to a
 different city or a different traveler's itinerary unchanged, it fails.
 
+"What it is" means plain words, the way an old-school travel agent prescribed a trip:
+a reader who has never heard of the sport, the operator, or the local shorthand must be
+able to follow it. "Guided singletrack MTB" fails; "a guided mountain-bike ride on Mount
+Currie's trail network" passes. Proper nouns are welcome in names, but the description
+must spell out what kind of activity it actually is.
+
 ## Running the checks
 
 ```sh

@@ -48,7 +48,7 @@
         {
           "label": "Afternoon",
           "activities": [
-            { "name": "MAAT museum", "description": "Modern art museum." },
+            { "name": "Guided singletrack MTB", "description": "A 6-hour guide-led ride through the actual trail network — the kind of terrain locals use." },
             { "name": "Riverside walk", "description": "Walk along the river." }
           ],
           "dining": [{ "name": "Lunch spot D", "description": "Casual lunch." }]
