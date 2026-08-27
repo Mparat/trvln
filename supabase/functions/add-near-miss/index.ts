@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+import { CostTracker, persistCost } from "../_shared/costs.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -168,6 +169,12 @@ Analyze where this Near Miss fits best and return the JSON placement info:`;
     }
 
     const data = await response.json();
+
+    const costs = new CostTracker();
+    costs.addAnthropic('near_miss_placement', 'claude-haiku-4-5-20251001', data.usage);
+    console.log("[cost] summary " + JSON.stringify(costs.summary()));
+    void persistCost(costs, { function_name: 'add-near-miss' });
+
     const content = data.content?.[0]?.text?.trim() || '';
 
     console.log('AI response:', content);

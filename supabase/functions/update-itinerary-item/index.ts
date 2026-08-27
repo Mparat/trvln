@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+import { CostTracker, persistCost } from "../_shared/costs.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -304,6 +305,12 @@ Provide the updated item (just the line, nothing else):`;
     }
 
     const data = await response.json();
+
+    const costs = new CostTracker();
+    costs.addAnthropic('item_update', 'claude-haiku-4-5', data.usage);
+    console.log("[cost] summary " + JSON.stringify(costs.summary()));
+    void persistCost(costs, { function_name: 'update-itinerary-item' });
+
     const rawText = data.content?.[0]?.text?.trim() || itemContent;
 
     console.log('Point update raw:', rawText);

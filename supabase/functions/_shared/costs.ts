@@ -131,6 +131,25 @@ export class CostTracker {
     });
   }
 
+  // Gemini through its OpenAI-compatible endpoint reports usage in OpenAI's
+  // shape. Thinking tokens bill as output but are not consistently included in
+  // completion_tokens, so derive the output side from total_tokens when the
+  // vendor gives one — total - prompt captures thoughts under either
+  // convention, and completion_tokens is the fallback when it doesn't.
+  addGeminiOpenAI(phase: string, model: string, usage: Record<string, number> | undefined | null) {
+    if (!usage) return;
+    const promptTokens = usage.prompt_tokens ?? 0;
+    const completionTokens = usage.completion_tokens ?? 0;
+    const totalTokens = usage.total_tokens ?? 0;
+    const outputTokens = totalTokens > promptTokens + completionTokens
+      ? totalTokens - promptTokens
+      : completionTokens;
+    this.addGemini(phase, model, {
+      promptTokenCount: promptTokens,
+      candidatesTokenCount: outputTokens,
+    });
+  }
+
   summary() {
     const byPhase: Record<string, number> = {};
     const byVendor: Record<string, number> = {};

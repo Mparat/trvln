@@ -224,13 +224,9 @@ Respond with ONLY a JSON array of 3 objects, each with "id" (snake_case), "name"
     }
 
     const data = await response.json();
-    // OpenAI-compat endpoint, so usage arrives in OpenAI shape; mapped to the
-    // Gemini field names the shared tracker prices.
+    // OpenAI-compat endpoint, so usage arrives in OpenAI shape.
     const costs = new CostTracker();
-    costs.addGemini("suggest_themes", "models/gemini-2.5-flash", data.usage ? {
-      promptTokenCount: data.usage.prompt_tokens ?? 0,
-      candidatesTokenCount: data.usage.completion_tokens ?? 0,
-    } : null);
+    costs.addGeminiOpenAI("suggest_themes", "models/gemini-2.5-flash", data.usage);
     console.log("[cost] summary " + JSON.stringify(costs.summary()));
     void persistCost(costs, { function_name: "suggest-themes" });
     const content = data.choices?.[0]?.message?.content || "";

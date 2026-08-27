@@ -112,7 +112,7 @@ Facts the design builds on, verified in the codebase:
 4. **A "title but no content" day already exists.** Failed day slices emit `{dayNumber, title, location, transitNote, periods: [], generationFailed: true}` (`placeholderDay`, `index.ts:2256-2267`) and the client renders a notice (`StructuredItinerary.tsx:565-577`). The locked-day shape is this pattern with a `locked` flag.
 5. **Content leaks everywhere by design.** The full emitted stream is persisted to `itinerary_jobs.content`, which has an "Anyone can read" RLS policy (recovery polling depends on it). Content is also snapshotted to `localStorage` and to `saved_trips.variants`. Hence: redact server-side, never client-side.
 6. **The display surface is a 3-tab structured view** (`StructuredItinerary.tsx`): Overview / Days / Bookings. Days render one at a time behind day-selector pills — locking attaches naturally to pills and the day body, not to scrolled content. The bookings tab renders three priority groups in order: Book first, Book soon, Book anytime. There's an existing blur-overlay idiom to copy (`ItineraryOutput.tsx:1273-1282`) and a bespoke dialog to mirror (`AuthModal.tsx`).
-7. **Cost tracking is live.** Every generation writes a row to `generation_costs` (deny-all RLS) with per-phase dollar totals — but no `user_id`, so per-customer margin needs a schema addition.
+7. **Cost tracking is live.** Every model call — generation, themes, link validation, inspiration image/video analysis, edits and item updates — writes a row to `generation_costs` (deny-all RLS) with per-phase dollar totals. Inspiration analysis rows carry `mode` = `image` | `video` | `mixed` so photo spend and imported-video spend can be told apart. Still no `user_id`, so per-customer margin needs a schema addition.
 8. **Deploys:** frontend via Lovable; migrations + edge functions via GitHub Actions (`.github/workflows/deploy-edge-functions.yml`) — note it deploys functions as hardcoded individual steps, so new functions need new steps.
 
 ---
@@ -310,7 +310,7 @@ No client-side paywall pre-check (revised during implementation: the client can'
 
 - **`itinerary_jobs` scoping**: done in the foundation migration (pulled forward from this phase during implementation review — paid content lands in this table, so world-readability was an active bypass vector, not deferred hardening). Reads are owner-scoped; anonymous rows (always redacted preview content) stay open so signed-out recovery polling works. Entitlement checks in `generate-itinerary` are additionally caller-scoped, and `entitle_batch` refuses cross-user idempotency.
 - **Abuse limits on free previews**: previews still cost real money (research + skeleton ≈ $0.15–0.35 per opened variant). Add a coarse per-IP/day cap on `generate-itinerary` preview-tier requests (mirroring `send-ready-text`'s in-memory limiter note) before any marketing push.
-- **`edit-itinerary` metering**: it gains auth + entitlement check in Phase 1 (gate), and cost tracking (it currently records nothing).
+- **`edit-itinerary` metering**: it gains auth + entitlement check in Phase 1 (gate). Cost tracking is done — `edit-itinerary`, `update-itinerary-item`, `add-near-miss` and `analyze-inspiration` all write `generation_costs` rows now, so every model call in the product is accounted for.
 - **Stripe Tax**: off for v1 (US-only, low volume). Revisit before real volume; enabling `automatic_tax` later is additive.
 - **Receipts/records**: Stripe emails receipts; no in-app purchase history page in v1 (the data model supports one).
 
@@ -348,6 +348,6 @@ Purchaser tier resolution + credit spend inside `generate-itinerary`, client pre
 *Accept:* purchaser's next trip consumes 1 credit and generates fully (all variants, no locks); at 0 credits Generate opens the paywall and nothing generates; buying either pack from the paywall proceeds straight into full generation.
 
 **Phase 4 — Hardening**
-§7 items: preview rate limiting, `edit-itinerary` cost tracking, `itinerary_jobs` RLS tightening, live-mode Stripe keys + webhook endpoint, launch checklist (test cards through real UI on production infra, cost dashboard query saved).
+§7 items: preview rate limiting, `itinerary_jobs` RLS tightening, live-mode Stripe keys + webhook endpoint, launch checklist (test cards through real UI on production infra, cost dashboard query saved).
 
 **Testing throughout:** Stripe test cards + `stripe listen --forward-to` against a local `supabase functions serve`; webhook idempotency (deliberate double-send); ledger invariants (balance never negative — enforced in `entitle_batch`); RLS checks (user A cannot read user B's ledger/purchases; anon cannot read `itinerary_jobs_private`); the four preview/full/resume/paywalled generation paths against a seeded user.

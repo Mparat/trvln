@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+import { CostTracker, persistCost } from "../_shared/costs.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -356,6 +357,11 @@ Apply the edit request above to the itinerary. First plan your changes in <edit_
 
     let updatedItinerary = '';
     let stopReason: string | null = null;
+    // Streaming splits usage across events: message_start carries the input
+    // side, the final message_delta the cumulative output. Accumulated here and
+    // recorded once the stream ends — a whole-itinerary rewrite on Sonnet is the
+    // most expensive call outside generation itself.
+    let usage: Record<string, number> = {};
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -376,10 +382,23 @@ Apply the edit request above to the itinerary. First plan your changes in <edit_
           } else if (event.type === 'message_delta' && event.delta?.stop_reason) {
             stopReason = event.delta.stop_reason;
           }
+          if (event.type === 'message_start' && event.message?.usage) {
+            usage = { ...usage, ...event.message.usage };
+          }
+          if (event.type === 'message_delta' && event.usage?.output_tokens) {
+            usage.output_tokens = event.usage.output_tokens;
+          }
         } catch { /* pings and non-JSON lines */ }
       }
     }
     updatedItinerary = updatedItinerary.trim();
+
+    // Before the truncation check below: a run that stopped at max_tokens still
+    // burned every one of those tokens, so it has to be paid for and recorded.
+    const costs = new CostTracker();
+    costs.addAnthropic('itinerary_edit', 'claude-sonnet-4-6', usage);
+    console.log("[cost] summary " + JSON.stringify(costs.summary()));
+    void persistCost(costs, { function_name: 'edit-itinerary' });
 
     if (!updatedItinerary) {
       throw new Error('No content returned from AI');

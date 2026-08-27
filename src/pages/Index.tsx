@@ -383,11 +383,17 @@ const Index = () => {
 
   const getHeaders = useCallback(() => functionHeaders(), []);
 
-  const analyzeInspiration = useCallback(async (mediaUrls: string[]): Promise<IdentifiedDestination[]> => {
+  // `source` only labels the cost row the edge function writes — image uploads
+  // and video frames cost the same per image, but the spend is worth telling
+  // apart because one imported video is five frames.
+  const analyzeInspiration = useCallback(async (
+    mediaUrls: string[],
+    source: 'image' | 'video' | 'mixed',
+  ): Promise<IdentifiedDestination[]> => {
     if (mediaUrls.length === 0) return [];
     const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-inspiration`, {
       // The edge function accepts at most 20 images per call
-      method: "POST", headers: await getHeaders(), body: JSON.stringify({ mediaUrls: mediaUrls.slice(0, 20) }),
+      method: "POST", headers: await getHeaders(), body: JSON.stringify({ mediaUrls: mediaUrls.slice(0, 20), source }),
     });
     if (!response.ok) return [];
     const data = await response.json();
@@ -1037,12 +1043,14 @@ const Index = () => {
       if (mediaWithUrls.length > 0) {
         setIsAnalyzingMedia(true);
         const allImageUrls: string[] = [];
+        let hasPhotos = false, hasVideoFrames = false;
         for (const item of mediaWithUrls) {
-          if (item.type === 'image' && item.url) allImageUrls.push(item.url);
-          else if (item.type === 'video' && item.frameUrls?.length) allImageUrls.push(...item.frameUrls);
+          if (item.type === 'image' && item.url) { allImageUrls.push(item.url); hasPhotos = true; }
+          else if (item.type === 'video' && item.frameUrls?.length) { allImageUrls.push(...item.frameUrls); hasVideoFrames = true; }
         }
         if (allImageUrls.length > 0) {
-          const identified = await analyzeInspiration(allImageUrls);
+          const source = hasPhotos && hasVideoFrames ? 'mixed' : hasVideoFrames ? 'video' : 'image';
+          const identified = await analyzeInspiration(allImageUrls, source);
           const newLocations = identified
             .filter(d => d.confidence === 'high' || d.confidence === 'medium')
             .map(d => d.location)
@@ -1361,7 +1369,7 @@ const Index = () => {
             onFramesReady={async (frameUrls) => {
               setIsIdentifyingLocations(true);
               try {
-                const identified = await analyzeInspiration(frameUrls);
+                const identified = await analyzeInspiration(frameUrls, 'video');
                 const newLocations = identified
                   .filter(d => d.confidence === 'high' || d.confidence === 'medium')
                   .map(d => d.location)
