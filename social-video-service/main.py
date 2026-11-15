@@ -86,6 +86,59 @@ def upload_frame(path: str) -> str | None:
     return f"{SUPABASE_URL}/storage/v1/object/public/inspiration-media/{file_name}"
 
 
+FRAME_COUNT = 5
+
+
+def probe_duration(video_path: str) -> float | None:
+    """Video duration in seconds via ffprobe, or None if it can't be read."""
+    try:
+        out = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                video_path,
+            ],
+            capture_output=True, text=True, timeout=30,
+        )
+        duration = float(out.stdout.strip())
+        return duration if duration > 0 else None
+    except (ValueError, subprocess.TimeoutExpired):
+        return None
+
+
+def frame_timestamps(duration: float | None, count: int = FRAME_COUNT) -> list[float]:
+    """Evenly spaced timestamps at the centre of `count` equal segments
+    (10%, 30%, 50%, 70%, 90% for 5), skipping the first and last instants,
+    which are often black frames, title cards or end screens."""
+    if not duration:
+        # Unknown length: sample the opening seconds, where something is
+        # almost certainly on screen.
+        return [0.5, 1.5, 2.5, 3.5, 4.5][:count]
+    return [duration * (i + 0.5) / count for i in range(count)]
+
+
+def extract_frame(video_path: str, ts: float, out: str) -> str | None:
+    # -ss before -i seeks by keyframe without decoding the whole video
+    subprocess.run(
+        [
+            "ffmpeg", "-ss", f"{ts:.3f}", "-i", video_path,
+            "-frames:v", "1", "-vf", "scale=720:-2", "-q:v", "3",
+            out, "-y",
+        ],
+        capture_output=True, timeout=30,
+    )
+    return out if os.path.exists(out) and os.path.getsize(out) > 0 else None
+
+
+def extract_frames(video_path: str, frames_dir: str) -> list[str]:
+    timestamps = frame_timestamps(probe_duration(video_path))
+    outs = [os.path.join(frames_dir, f"frame_{i + 1}.jpg") for i in range(len(timestamps))]
+    with ThreadPoolExecutor(max_workers=len(timestamps)) as pool:
+        results = list(pool.map(lambda a: extract_frame(video_path, *a), zip(timestamps, outs)))
+    return [p for p in results if p]
+
+
 @app.get("/health")
 def health():
     # Report the running yt-dlp version so a deploy can be verified from the
@@ -143,43 +196,9 @@ def extract_video(req: ExtractRequest):
             error_msg = _summarize_ytdlp_error(dl.stderr, req.url)
             raise HTTPException(status_code=400, detail=f"Could not download video: {error_msg}")
 
-        # Extract 5 frames with ffmpeg using select filter (fast, no full decode)
         frames_dir = os.path.join(tmpdir, "frames")
         os.makedirs(frames_dir)
-        frame_pattern = os.path.join(frames_dir, "frame_%d.jpg")
-
-        ffmpeg = subprocess.run(
-            [
-                "ffmpeg", "-i", video_path,
-                "-vf", "select='eq(n\\,0)+eq(n\\,round(n_frames/4))+eq(n\\,round(n_frames/2))+eq(n\\,round(3*n_frames/4))+eq(n\\,n_frames-1)',scale=720:-2",
-                "-vsync", "vfr",
-                "-q:v", "3",
-                frame_pattern,
-                "-y",
-            ],
-            capture_output=True,
-            timeout=60,
-        )
-
-        frame_paths = sorted([
-            os.path.join(frames_dir, f)
-            for f in os.listdir(frames_dir)
-            if f.endswith(".jpg")
-        ])
-
-        if not frame_paths:
-            # Fallback: grab frames at fixed timestamps
-            for i, ts in enumerate(["00:00:01", "00:00:03", "00:00:05"]):
-                out = os.path.join(frames_dir, f"frame_{i+1}.jpg")
-                subprocess.run(
-                    ["ffmpeg", "-ss", ts, "-i", video_path, "-vframes", "1", "-q:v", "3", out, "-y"],
-                    capture_output=True, timeout=30,
-                )
-            frame_paths = sorted([
-                os.path.join(frames_dir, f)
-                for f in os.listdir(frames_dir)
-                if f.endswith(".jpg")
-            ])
+        frame_paths = extract_frames(video_path, frames_dir)
 
         if not frame_paths:
             raise HTTPException(status_code=500, detail="Failed to extract frames from video")
